@@ -9,6 +9,15 @@ import (
 )
 
 func main() {
+	log.Println(`
+	░█████╗░██████╗░██╗░░░░░░░██████╗░██████╗░███████╗███████╗███╗░░██╗███████╗██╗░░██╗
+	██╔══██╗██╔══██╗██║░░░░░░██╔════╝░██╔══██╗██╔════╝██╔════╝████╗░██║██╔════╝╚██╗██╔╝
+	███████║██████╔╝██║█████╗██║░░██╗░██████╔╝█████╗░░█████╗░░██╔██╗██║█████╗░░░╚███╔╝░
+	██╔══██║██╔═══╝░██║╚════╝██║░░╚██╗██╔══██╗██╔══╝░░██╔══╝░░██║╚████║██╔══╝░░░██╔██╗░
+	██║░░██║██║░░░░░██║░░░░░░╚██████╔╝██║░░██║███████╗███████╗██║░╚███║███████╗██╔╝╚██╗
+	╚═╝░░╚═╝╚═╝░░░░░╚═╝░░░░░░░╚═════╝░╚═╝░░╚═╝╚══════╝╚══════╝╚═╝░░╚══╝╚══════╝╚═╝░░╚═╝
+	`)
+
 	log.Println("Iniciando API-Greenex...")
 
 	// Inicializar managers separados
@@ -22,6 +31,9 @@ func main() {
 	// Conectar los managers con el servicio OPC UA
 	opcuaService.SetSubscriptionManager(subscriptionManager)
 	opcuaService.SetMethodManager(methodManager)
+
+	// Inyectar el servicio OPC UA (como escritor) en el manager de suscripciones
+	subscriptionManager.SetOPCUAWriter(opcuaService)
 
 	// Iniciar managers en background
 	go subscriptionManager.Start()

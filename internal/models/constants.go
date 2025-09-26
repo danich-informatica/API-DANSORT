@@ -31,6 +31,19 @@ const (
     DEFAULT_SUBSCRIPTION      = "default_subscription"
 )
 
+// WagoTestNodes contiene los NodeIDs para las variables de prueba de WAGO
+const (
+	WAGO_BoleanoTest = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.BoleanoTest"
+	WAGO_ByteTest    = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.ByteTest"
+	WAGO_EnteroTest  = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.EnteroTest"
+	WAGO_RealTest    = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.RealTest"
+	WAGO_StringTest  = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.StringTest"
+	WAGO_VectorBool  = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.VectorBool"
+	WAGO_VectorInt   = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.VectorInt"
+	WAGO_VectorWord  = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.VectorWord"
+	WAGO_WordTest    = "ns=4;s=|var|WAGO TEST.Application.DB_OPC.WordTest"
+)
+
 // Función helper para construir NodeIDs con el namespace correcto
 func BuildNodeID(identifier int32) string {
     return fmt.Sprintf("ns=%d;i=%d", OPCUA_NAMESPACE, identifier)

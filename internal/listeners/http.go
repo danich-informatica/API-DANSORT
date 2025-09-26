@@ -18,7 +18,7 @@ func NewHTTPFrontend(port string) *HTTPFrontend {
 }
 
 func (h *HTTPFrontend) setupRoutes() {
-    // Ruta GET de prueba
+    // Ruta GET 
     h.router.GET("/ping", func(c *gin.Context) {
         c.JSON(http.StatusOK, gin.H{
             "message": "pong",
@@ -33,7 +33,7 @@ func (h *HTTPFrontend) setupRoutes() {
         })
     })
     
-    // Ruta POST de ejemplo
+    // Ruta POST 
     h.router.POST("/echo", func(c *gin.Context) {
         var json map[string]interface{}
         if err := c.ShouldBindJSON(&json); err != nil {
@@ -43,6 +43,35 @@ func (h *HTTPFrontend) setupRoutes() {
         c.JSON(http.StatusOK, json)
     })
 
+    h.router.POST("/Mesa", func(c *gin.Context) {
+        id := c.Query("id")
+        var json map[string]interface{}
+        if err := c.ShouldBindJSON(&json); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusOK, gin.H{
+            "message": "Mesa envio orden",
+            "id":      id,
+            "data":    json,
+        })
+    })
+
+    h.router.POST("/Mesa/Vaciar", func(c *gin.Context) {
+        id := c.Query("id")
+        modo := c.Query("modo")
+        var json map[string]interface{}
+        if err := c.ShouldBindJSON(&json); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusOK, gin.H{
+            "message": "Mesa vaciada",
+            "id":      id,
+            "modo":    modo,
+            "data":    json,
+        })
+    })
 }
 
 func (h *HTTPFrontend) Start() error {
