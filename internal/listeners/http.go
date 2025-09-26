@@ -1,4 +1,4 @@
-package communication
+package listeners
 
 import (
     "github.com/gin-gonic/gin"
@@ -25,6 +25,14 @@ func (h *HTTPFrontend) setupRoutes() {
         })
     })
 
+    h.router.GET("/Mesa/Estado", func(c *gin.Context) {
+        id := c.Query("id")
+        c.JSON(http.StatusOK, gin.H{
+            "message": "Estado de la mesa",
+            "id":      id,
+        })
+    })
+    
     // Ruta POST de ejemplo
     h.router.POST("/echo", func(c *gin.Context) {
         var json map[string]interface{}
@@ -34,6 +42,7 @@ func (h *HTTPFrontend) setupRoutes() {
         }
         c.JSON(http.StatusOK, json)
     })
+
 }
 
 func (h *HTTPFrontend) Start() error {

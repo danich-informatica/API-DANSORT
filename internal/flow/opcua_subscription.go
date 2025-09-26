@@ -1,24 +1,25 @@
-package manager
+package flow
 
 import (
-    "fmt"
-    "log"
-    "time"
-    "API-GREENEX/communication"
-    "API-GREENEX/shared"
+	"fmt"
+	"log"
+	"time"
+
+	"API-GREENEX/internal/listeners"
+	"API-GREENEX/internal/models"
 )
 
 type SubscriptionManager struct {
-    isRunning bool
-    dataChan  chan SubscriptionData
+	isRunning bool
+	dataChan  chan SubscriptionData
 }
 
 // Estructura para datos de suscripción
 type SubscriptionData struct {
-    SubscriptionName string
-    NodeID          string
-    Data            *communication.NodeData
-    ReceivedAt      time.Time
+	SubscriptionName string
+	NodeID           string
+	Data             *listeners.NodeData
+	ReceivedAt       time.Time
 }
 
 // NewSubscriptionManager crea una nueva instancia del manager de suscripciones
@@ -76,32 +77,32 @@ func (sm *SubscriptionManager) handleSubscriptionData(data SubscriptionData) {
 
 // processSubscriptionLogic procesa la lógica específica de suscripciones
 func (sm *SubscriptionManager) processSubscriptionLogic(data SubscriptionData) {
-    // Lógica específica para suscripciones usando constantes
-    switch data.SubscriptionName {
-    case shared.DEFAULT_SUBSCRIPTION:
-        sm.handleDefaultSubscription(data)
-    case shared.HEARTBEAT_SUBSCRIPTION:
-        sm.handleHeartbeatSubscription(data)
-    case shared.SEGREGATION_SUBSCRIPTION:
-        sm.handleSegregationSubscription(data)
-    default:
-        sm.handleGenericSubscription(data)
-    }
+	// Lógica específica para suscripciones usando constantes
+	switch data.SubscriptionName {
+	case models.DEFAULT_SUBSCRIPTION:
+		sm.handleDefaultSubscription(data)
+	case models.HEARTBEAT_SUBSCRIPTION:
+		sm.handleHeartbeatSubscription(data)
+	case models.SEGREGATION_SUBSCRIPTION:
+		sm.handleSegregationSubscription(data)
+	default:
+		sm.handleGenericSubscription(data)
+	}
 }
 
 // handleDefaultSubscription maneja suscripciones por defecto
 func (sm *SubscriptionManager) handleDefaultSubscription(data SubscriptionData) {
-    log.Printf("🔄 Procesando suscripción por defecto: %s = %v", data.NodeID, data.Data.Value)
-    
-    // Identificar el tipo de nodo basado en las constantes
-    switch data.NodeID {
-    case shared.DEFAULT_SEGREGATION_NODE:
-        sm.handleSegregationValue(data)
-    case shared.DEFAULT_HEARTBEAT_NODE:
-        sm.handleHeartbeatValue(data)
-    default:
-        log.Printf("📝 Nodo desconocido en suscripción por defecto: %s", data.NodeID)
-    }
+	log.Printf("🔄 Procesando suscripción por defecto: %s = %v", data.NodeID, data.Data.Value)
+
+	// Identificar el tipo de nodo basado en las constantes
+	switch data.NodeID {
+	case models.DEFAULT_SEGREGATION_NODE:
+		sm.handleSegregationValue(data)
+	case models.DEFAULT_HEARTBEAT_NODE:
+		sm.handleHeartbeatValue(data)
+	default:
+		log.Printf("📝 Nodo desconocido en suscripción por defecto: %s", data.NodeID)
+	}
 }
 
 // handleHeartbeatSubscription maneja suscripciones de heartbeat
@@ -139,29 +140,29 @@ func (sm *SubscriptionManager) handleSegregationSubscription(data SubscriptionDa
 
 // handleSegregationValue maneja valores específicos de segregation
 func (sm *SubscriptionManager) handleSegregationValue(data SubscriptionData) {
-    log.Printf("⚙️  Valor de segregación recibido: %v", data.Data.Value)
-    
-    // Validar que el nodo corresponde al método de segregación
-    expectedNodeID := shared.BuildNodeID(shared.OPCUA_SEGREGATION_METHOD)
-    if data.NodeID != expectedNodeID {
-        log.Printf("⚠️  Nodo ID no coincide. Esperado: %s, Recibido: %s", expectedNodeID, data.NodeID)
-    }
+	log.Printf("⚙️  Valor de segregación recibido: %v", data.Data.Value)
+
+	// Validar que el nodo corresponde al método de segregación
+	expectedNodeID := models.BuildNodeID(models.OPCUA_SEGREGATION_METHOD)
+	if data.NodeID != expectedNodeID {
+		log.Printf("⚠️  Nodo ID no coincide. Esperado: %s, Recibido: %s", expectedNodeID, data.NodeID)
+	}
 }
 
 // handleHeartbeatValue maneja valores específicos de heartbeat
 func (sm *SubscriptionManager) handleHeartbeatValue(data SubscriptionData) {
-    log.Printf("💓 Valor de heartbeat recibido: %v", data.Data.Value)
-    
-    // Validar timestamp del heartbeat
-    timeSinceLastHeartbeat := time.Since(data.Data.Timestamp)
-    timeoutDuration := time.Duration(shared.OPCUA_TIMEOUT) * time.Second
-    
-    if timeSinceLastHeartbeat > timeoutDuration {
-        log.Printf("🔴 TIMEOUT: Heartbeat expirado hace %v (timeout: %v)", 
-                   timeSinceLastHeartbeat, timeoutDuration)
-    } else {
-        log.Printf("✅ Heartbeat dentro del tiempo permitido")
-    }
+	log.Printf("💓 Valor de heartbeat recibido: %v", data.Data.Value)
+
+	// Validar timestamp del heartbeat
+	timeSinceLastHeartbeat := time.Since(data.Data.Timestamp)
+	timeoutDuration := time.Duration(models.OPCUA_TIMEOUT) * time.Second
+
+	if timeSinceLastHeartbeat > timeoutDuration {
+		log.Printf("🔴 TIMEOUT: Heartbeat expirado hace %v (timeout: %v)",
+			timeSinceLastHeartbeat, timeoutDuration)
+	} else {
+		log.Printf("✅ Heartbeat dentro del tiempo permitido")
+	}
 }
 
 // handleAlarmSubscription maneja suscripciones de alarmas
@@ -189,25 +190,25 @@ func (sm *SubscriptionManager) handleGenericSubscription(data SubscriptionData) 
 }
 
 // OnSubscriptionData envía datos de suscripción al manager
-func (sm *SubscriptionManager) OnSubscriptionData(subscriptionName, nodeID string, data *communication.NodeData) {
-    if !sm.isRunning {
-        return
-    }
-    
-    subscriptionData := SubscriptionData{
-        SubscriptionName: subscriptionName,
-        NodeID:          nodeID,
-        Data:            data,
-        ReceivedAt:      time.Now(),
-    }
-    
-    // Envío no bloqueante
-    select {
-    case sm.dataChan <- subscriptionData:
-        // Enviado exitosamente
-    default:
-        log.Printf("⚠️  Warning: Subscription Manager channel full, dropping data for %s", nodeID)
-    }
+func (sm *SubscriptionManager) OnSubscriptionData(subscriptionName, nodeID string, data *listeners.NodeData) {
+	if !sm.isRunning {
+		return
+	}
+
+	subscriptionData := SubscriptionData{
+		SubscriptionName: subscriptionName,
+		NodeID:           nodeID,
+		Data:             data,
+		ReceivedAt:       time.Now(),
+	}
+
+	// Envío no bloqueante
+	select {
+	case sm.dataChan <- subscriptionData:
+	// Enviado exitosamente
+	default:
+		log.Printf("⚠️  Warning: Subscription Manager channel full, dropping data for %s", nodeID)
+	}
 }
 
 // Stop detiene el manager de suscripciones

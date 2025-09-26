@@ -1,10 +1,11 @@
-package manager
+package flow
 
 import (
-    "log"
-    "time"
-    "API-GREENEX/communication"
-    "API-GREENEX/shared"
+	"log"
+	"time"
+
+	"API-GREENEX/internal/listeners"
+	"API-GREENEX/internal/models"
 )
 
 type MethodManager struct {
@@ -108,134 +109,134 @@ func (mm *MethodManager) processMethodLogic(data MethodData) {
 
 // identifyMethodByNodeID identifica el método basado en las constantes
 func (mm *MethodManager) identifyMethodByNodeID(data MethodData) {
-    // Verificar si es un nodo conocido usando constantes
-    switch data.NodeID {
-    case shared.DEFAULT_SEGREGATION_NODE:
-        log.Printf("🎯 Método identificado: Segregación (nodo por defecto)")
-    case shared.DEFAULT_HEARTBEAT_NODE:
-        log.Printf("🎯 Método identificado: Heartbeat (nodo por defecto)")
-    case shared.BuildNodeID(shared.OPCUA_SEGREGATION_METHOD):
-        log.Printf("🎯 Método identificado: Segregación (ns=%d;i=%d)", 
-                   shared.OPCUA_NAMESPACE, shared.OPCUA_SEGREGATION_METHOD)
-    default:
-        // Verificar si es un nodo construido con el namespace correcto
-        if mm.isFromCorrectNamespace(data.NodeID) {
-            log.Printf("🎯 Nodo del namespace correcto (%d): %s", shared.OPCUA_NAMESPACE, data.NodeID)
-        } else {
-            log.Printf("❓ Nodo desconocido o namespace incorrecto: %s", data.NodeID)
-        }
-    }
+	// Verificar si es un nodo conocido usando constantes
+	switch data.NodeID {
+	case models.DEFAULT_SEGREGATION_NODE:
+		log.Printf("🎯 Método identificado: Segregación (nodo por defecto)")
+	case models.DEFAULT_HEARTBEAT_NODE:
+		log.Printf("🎯 Método identificado: Heartbeat (nodo por defecto)")
+	case models.BuildNodeID(models.OPCUA_SEGREGATION_METHOD):
+		log.Printf("🎯 Método identificado: Segregación (ns=%d;i=%d)",
+			models.OPCUA_NAMESPACE, models.OPCUA_SEGREGATION_METHOD)
+	default:
+		// Verificar si es un nodo construido con el namespace correcto
+		if mm.isFromCorrectNamespace(data.NodeID) {
+			log.Printf("🎯 Nodo del namespace correcto (%d): %s", models.OPCUA_NAMESPACE, data.NodeID)
+		} else {
+			log.Printf("❓ Nodo desconocido o namespace incorrecto: %s", data.NodeID)
+		}
+	}
 }
 
 // isFromCorrectNamespace verifica si el nodeID pertenece al namespace correcto
 func (mm *MethodManager) isFromCorrectNamespace(nodeID string) bool {
-    // Verificar si el nodeID comienza con el namespace correcto
-    expectedPrefix := shared.BuildNodeID(0)[:6] // "ns=4;i" parte
-    return len(nodeID) > 6 && nodeID[:6] == expectedPrefix
+	// Verificar si el nodeID comienza con el namespace correcto
+	expectedPrefix := models.BuildNodeID(0)[:6] // "ns=4;i" parte
+	return len(nodeID) > 6 && nodeID[:6] == expectedPrefix
 }
 
 // handleReadOperation maneja operaciones de lectura usando constantes
 func (mm *MethodManager) handleReadOperation(data MethodData) {
-    if data.Error != nil {
-        log.Printf("❌ Error en lectura de %s: %v", data.NodeID, data.Error)
-        mm.handleReadError(data)
-    } else {
-        log.Printf("✅ Lectura exitosa de %s (Namespace: %d)", data.NodeID, shared.OPCUA_NAMESPACE)
-        mm.processReadData(data)
-    }
-    
-    // Verificar si la lectura tardó más del timeout configurado
-    timeoutDuration := time.Duration(shared.OPCUA_TIMEOUT) * time.Second
-    if data.Duration > timeoutDuration {
-        log.Printf("⚠️  ADVERTENCIA: Lectura lenta (%v > %v timeout)", data.Duration, timeoutDuration)
-    }
+	if data.Error != nil {
+		log.Printf("❌ Error en lectura de %s: %v", data.NodeID, data.Error)
+		mm.handleReadError(data)
+	} else {
+		log.Printf("✅ Lectura exitosa de %s (Namespace: %d)", data.NodeID, models.OPCUA_NAMESPACE)
+		mm.processReadData(data)
+	}
+
+	// Verificar si la lectura tardó más del timeout configurado
+	timeoutDuration := time.Duration(models.OPCUA_TIMEOUT) * time.Second
+	if data.Duration > timeoutDuration {
+		log.Printf("⚠️  ADVERTENCIA: Lectura lenta (%v > %v timeout)", data.Duration, timeoutDuration)
+	}
 }
 
 // handleWriteOperation maneja operaciones de escritura usando constantes
 func (mm *MethodManager) handleWriteOperation(data MethodData) {
-    if data.Error != nil {
-        log.Printf("❌ Error en escritura de %s: %v", data.NodeID, data.Error)
-        mm.handleWriteError(data)
-    } else {
-        log.Printf("✅ Escritura exitosa en %s: %v (Namespace: %d)", 
-                   data.NodeID, data.Value, shared.OPCUA_NAMESPACE)
-        mm.processWriteConfirmation(data)
-    }
-    
-    // Verificar timeout para escrituras
-    timeoutDuration := time.Duration(shared.OPCUA_TIMEOUT) * time.Second
-    if data.Duration > timeoutDuration {
-        log.Printf("⚠️  ADVERTENCIA: Escritura lenta (%v > %v timeout)", data.Duration, timeoutDuration)
-    }
-    
-    // Lógica específica para escrituras en métodos conocidos
-    mm.handleSpecificMethodWrite(data)
+	if data.Error != nil {
+		log.Printf("❌ Error en escritura de %s: %v", data.NodeID, data.Error)
+		mm.handleWriteError(data)
+	} else {
+		log.Printf("✅ Escritura exitosa en %s: %v (Namespace: %d)",
+			data.NodeID, data.Value, models.OPCUA_NAMESPACE)
+		mm.processWriteConfirmation(data)
+	}
+
+	// Verificar timeout para escrituras
+	timeoutDuration := time.Duration(models.OPCUA_TIMEOUT) * time.Second
+	if data.Duration > timeoutDuration {
+		log.Printf("⚠️  ADVERTENCIA: Escritura lenta (%v > %v timeout)", data.Duration, timeoutDuration)
+	}
+
+	// Lógica específica para escrituras en métodos conocidos
+	mm.handleSpecificMethodWrite(data)
 }
 
 // handleCallOperation maneja llamadas a métodos usando constantes
 func (mm *MethodManager) handleCallOperation(data MethodData) {
-    if data.Error != nil {
-        log.Printf("❌ Error en llamada a método %s: %v", data.NodeID, data.Error)
-        mm.handleCallError(data)
-    } else {
-        log.Printf("✅ Llamada exitosa a método %s (Namespace: %d)", 
-                   data.NodeID, shared.OPCUA_NAMESPACE)
-        mm.processCallResult(data)
-    }
-    
-    // Verificar timeout para llamadas
-    timeoutDuration := time.Duration(shared.OPCUA_TIMEOUT) * time.Second
-    if data.Duration > timeoutDuration {
-        log.Printf("⚠️  ADVERTENCIA: Llamada lenta (%v > %v timeout)", data.Duration, timeoutDuration)
-    }
+	if data.Error != nil {
+		log.Printf("❌ Error en llamada a método %s: %v", data.NodeID, data.Error)
+		mm.handleCallError(data)
+	} else {
+		log.Printf("✅ Llamada exitosa a método %s (Namespace: %d)",
+			data.NodeID, models.OPCUA_NAMESPACE)
+		mm.processCallResult(data)
+	}
+
+	// Verificar timeout para llamadas
+	timeoutDuration := time.Duration(models.OPCUA_TIMEOUT) * time.Second
+	if data.Duration > timeoutDuration {
+		log.Printf("⚠️  ADVERTENCIA: Llamada lenta (%v > %v timeout)", data.Duration, timeoutDuration)
+	}
 }
 
 // handleSpecificMethodWrite maneja escrituras en métodos específicos
 func (mm *MethodManager) handleSpecificMethodWrite(data MethodData) {
-    switch data.NodeID {
-    case shared.DEFAULT_SEGREGATION_NODE, shared.BuildNodeID(shared.OPCUA_SEGREGATION_METHOD):
-        log.Printf("⚙️  Escribiendo en método de segregación: %v", data.Value)
-        if value, ok := data.Value.(int32); ok {
-            if value == shared.OPCUA_SEGREGATION_METHOD {
-                log.Printf("✅ Activando método de segregación con valor: %d", value)
-            }
-        }
-    case shared.DEFAULT_HEARTBEAT_NODE:
-        log.Printf("💓 Escribiendo en heartbeat: %v", data.Value)
-    }
+	switch data.NodeID {
+	case models.DEFAULT_SEGREGATION_NODE, models.BuildNodeID(models.OPCUA_SEGREGATION_METHOD):
+		log.Printf("⚙️  Escribiendo en método de segregación: %v", data.Value)
+		if value, ok := data.Value.(int32); ok {
+			if value == models.OPCUA_SEGREGATION_METHOD {
+				log.Printf("✅ Activando método de segregación con valor: %d", value)
+			}
+		}
+	case models.DEFAULT_HEARTBEAT_NODE:
+		log.Printf("💓 Escribiendo en heartbeat: %v", data.Value)
+	}
 }
 
 // processReadData procesa datos leídos exitosamente usando constantes
 func (mm *MethodManager) processReadData(data MethodData) {
-    if result, ok := data.Result.(*communication.NodeData); ok {
-        log.Printf("📖 Datos leídos: Valor=%v, Calidad=%v, Timestamp=%v", 
-                   result.Value, result.Quality, result.Timestamp.Format("15:04:05.000"))
-        
-        // Verificar si los datos están dentro del timeout
-        dataAge := time.Since(result.Timestamp)
-        timeoutDuration := time.Duration(shared.OPCUA_TIMEOUT) * time.Second
-        
-        if dataAge > timeoutDuration {
-            log.Printf("⚠️  ADVERTENCIA: Datos antiguos (edad: %v, timeout: %v)", dataAge, timeoutDuration)
-        }
-        
-        // Procesar según el tipo de nodo
-        mm.processDataByNodeType(data.NodeID, result)
-    }
+	if result, ok := data.Result.(*listeners.NodeData); ok {
+		log.Printf("📖 Datos leídos: Valor=%v, Calidad=%v, Timestamp=%v",
+			result.Value, result.Quality, result.Timestamp.Format("15:04:05.000"))
+
+		// Verificar si los datos están dentro del timeout
+		dataAge := time.Since(result.Timestamp)
+		timeoutDuration := time.Duration(models.OPCUA_TIMEOUT) * time.Second
+
+		if dataAge > timeoutDuration {
+			log.Printf("⚠️  ADVERTENCIA: Datos antiguos (edad: %v, timeout: %v)", dataAge, timeoutDuration)
+		}
+
+		// Procesar según el tipo de nodo
+		mm.processDataByNodeType(data.NodeID, result)
+	}
 }
 
 // processDataByNodeType procesa datos según el tipo de nodo usando constantes
-func (mm *MethodManager) processDataByNodeType(nodeID string, data *communication.NodeData) {
-    switch nodeID {
-    case shared.DEFAULT_SEGREGATION_NODE, shared.BuildNodeID(shared.OPCUA_SEGREGATION_METHOD):
-        log.Printf("⚙️  Procesando datos de segregación: %v", data.Value)
-    case shared.DEFAULT_HEARTBEAT_NODE:
-        log.Printf("💓 Procesando datos de heartbeat: %v", data.Value)
-    default:
-        if mm.isFromCorrectNamespace(nodeID) {
-            log.Printf("📊 Procesando datos del namespace %d: %v", shared.OPCUA_NAMESPACE, data.Value)
-        }
-    }
+func (mm *MethodManager) processDataByNodeType(nodeID string, data *listeners.NodeData) {
+	switch nodeID {
+	case models.DEFAULT_SEGREGATION_NODE, models.BuildNodeID(models.OPCUA_SEGREGATION_METHOD):
+		log.Printf("⚙️  Procesando datos de segregación: %v", data.Value)
+	case models.DEFAULT_HEARTBEAT_NODE:
+		log.Printf("💓 Procesando datos de heartbeat: %v", data.Value)
+	default:
+		if mm.isFromCorrectNamespace(nodeID) {
+			log.Printf("📊 Procesando datos del namespace %d: %v", models.OPCUA_NAMESPACE, data.Value)
+		}
+	}
 }
 
 
@@ -275,26 +276,26 @@ func (mm *MethodManager) processCallResult(data MethodData) {
 // Métodos públicos para enviar datos al manager
 
 // OnMethodRead envía datos de lectura al manager
-func (mm *MethodManager) OnMethodRead(nodeID string, result *communication.NodeData, err error, duration time.Duration) {
-    if !mm.isRunning {
-        return
-    }
-    
-    methodData := MethodData{
-        Operation:  "read",
-        NodeID:     nodeID,
-        Result:     result,
-        Error:      err,
-        ReceivedAt: time.Now(),
-        Duration:   duration,
-    }
-    
-    select {
-    case mm.dataChan <- methodData:
-        // Enviado exitosamente
-    default:
-        log.Printf("⚠️  Warning: Method Manager channel full, dropping read data for %s", nodeID)
-    }
+func (mm *MethodManager) OnMethodRead(nodeID string, result *listeners.NodeData, err error, duration time.Duration) {
+	if !mm.isRunning {
+		return
+	}
+
+	methodData := MethodData{
+		Operation:  "read",
+		NodeID:     nodeID,
+		Result:     result,
+		Error:      err,
+		ReceivedAt: time.Now(),
+		Duration:   duration,
+	}
+
+	select {
+	case mm.dataChan <- methodData:
+	// Enviado exitosamente
+	default:
+		log.Printf("⚠️  Warning: Method Manager channel full, dropping read data for %s", nodeID)
+	}
 }
 
 // OnMethodWrite envía datos de escritura al manager

@@ -1,27 +1,28 @@
-package communication
+package listeners
 
 import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-    "strconv"
-    "time"
-    "API-GREENEX/shared"
-    "github.com/gopcua/opcua"
-    "github.com/gopcua/opcua/ua"
-    "github.com/joho/godotenv"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"strconv"
+	"time"
+
+	"API-GREENEX/internal/models"
+	"github.com/gopcua/opcua"
+	"github.com/gopcua/opcua/ua"
+	"github.com/joho/godotenv"
 )
 
 // Interfaces para los managers (para evitar dependencias circulares)
 type SubscriptionManagerInterface interface {
-    OnSubscriptionData(subscriptionName, nodeID string, data *NodeData)
+	OnSubscriptionData(subscriptionName, nodeID string, data *NodeData)
 }
 
 type MethodManagerInterface interface {
-    OnMethodRead(nodeID string, result *NodeData, err error, duration time.Duration)
-    OnMethodWrite(nodeID string, value interface{}, err error, duration time.Duration)
-    OnMethodCall(nodeID string, inputArgs interface{}, result interface{}, err error, duration time.Duration)
+	OnMethodRead(nodeID string, result *NodeData, err error, duration time.Duration)
+	OnMethodWrite(nodeID string, value interface{}, err error, duration time.Duration)
+	OnMethodCall(nodeID string, inputArgs interface{}, result interface{}, err error, duration time.Duration)
 }
 
 // Usar directamente tus estructuras existentes
@@ -114,7 +115,7 @@ func loadOPCUAConfig() (*OPCUAConfig, error) {
 
     // Usar constantes para valores por defecto
     var err error
-    defaultTimeout := fmt.Sprintf("%ds", shared.OPCUA_TIMEOUT)
+    defaultTimeout := fmt.Sprintf("%ds", models.OPCUA_TIMEOUT)
     config.ConnectionTimeout, err = time.ParseDuration(getEnv("OPCUA_CONNECTION_TIMEOUT", defaultTimeout))
     if err != nil {
         return nil, fmt.Errorf("error parseando connection_timeout: %v", err)
@@ -125,7 +126,7 @@ func loadOPCUAConfig() (*OPCUAConfig, error) {
         return nil, fmt.Errorf("error parseando session_timeout: %v", err)
     }
 
-    config.SubscriptionInterval, err = time.ParseDuration(getEnv("OPCUA_SUBSCRIPTION_INTERVAL", shared.DEFAULT_SUBSCRIPTION_INTERVAL))
+    config.SubscriptionInterval, err = time.ParseDuration(getEnv("OPCUA_SUBSCRIPTION_INTERVAL", models.DEFAULT_SUBSCRIPTION_INTERVAL))
     if err != nil {
         return nil, fmt.Errorf("error parseando subscription_interval: %v", err)
     }
@@ -517,18 +518,18 @@ func (s *OPCUAService) setupDefaultSubscriptions() {
     
     // Usar las constantes definidas en lugar de valores hardcoded
     nodeIDs := []string{
-        shared.BuildNodeID(shared.OPCUA_SEGREGATION_METHOD), // ns=4;i=2
-        // shared.BuildNodeID(shared.OPCUA_HEARTBEAT_METHOD),   // ns=4;i=3 (descomentado si se activa)
+        models.BuildNodeID(models.OPCUA_SEGREGATION_METHOD), // ns=4;i=2
+        // models.BuildNodeID(models.OPCUA_HEARTBEAT_METHOD),   // ns=4;i=3 (descomentado si se activa)
     }
     
     // Crear suscripción usando las constantes
-    err := s.SubscribeToNodes(shared.DEFAULT_SUBSCRIPTION, nodeIDs, nil)
+    err := s.SubscribeToNodes(models.DEFAULT_SUBSCRIPTION, nodeIDs, nil)
     
     if err != nil {
         log.Printf("Error en suscripción por defecto: %v", err)
     } else {
         log.Printf("Suscripción por defecto configurada para %d nodos (namespace %d)", 
-                   len(nodeIDs), shared.OPCUA_NAMESPACE)
+                   len(nodeIDs), models.OPCUA_NAMESPACE)
     }
 }
 

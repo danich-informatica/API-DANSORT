@@ -1,26 +1,27 @@
 package main
 
 import (
-    "log"
-    "os"
-    "API-GREENEX/communication"
-    "API-GREENEX/manager"
+	"log"
+	"os"
+
+	"API-GREENEX/internal/flow"
+	"API-GREENEX/internal/listeners"
 )
 
 func main() {
-    log.Println("Iniciando API-Greenex...")
-    
-    // Inicializar managers separados
-    subscriptionManager := manager.NewSubscriptionManager()
-    methodManager := manager.NewMethodManager()
-    
-    // Inicializar servicios
-    opcuaService := communication.NewOPCUAService()
-    httpService := communication.NewHTTPFrontend(getEnv("HTTP_PORT", "8080"))
-    
-    // Conectar los managers con el servicio OPC UA
-    opcuaService.SetSubscriptionManager(subscriptionManager)
-    opcuaService.SetMethodManager(methodManager)
+	log.Println("Iniciando API-Greenex...")
+
+	// Inicializar managers separados
+	subscriptionManager := flow.NewSubscriptionManager()
+	methodManager := flow.NewMethodManager()
+
+	// Inicializar servicios
+	opcuaService := listeners.NewOPCUAService()
+	httpService := listeners.NewHTTPFrontend(getEnv("HTTP_PORT", "8080"))
+
+	// Conectar los managers con el servicio OPC UA
+	opcuaService.SetSubscriptionManager(subscriptionManager)
+	opcuaService.SetMethodManager(methodManager)
     
     // Iniciar managers en background
     go subscriptionManager.Start()
