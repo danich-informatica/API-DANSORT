@@ -7,32 +7,34 @@ import (
 	"os"
 	"strconv"
 	"time"
-
+    
 	"API-GREENEX/internal/models"
 	"github.com/gopcua/opcua"
 	"github.com/gopcua/opcua/ua"
 	"github.com/joho/godotenv"
 )
 
+// OPCUAWriter define una interfaz para encolar escrituras, permitiendo el desacoplamiento.
+type OPCUAWriter interface {
+    QueueWriteRequest(nodeID string, value interface{})
+}
+
 // Interfaces para los managers (para evitar dependencias circulares)
 type SubscriptionManagerInterface interface {
 	OnSubscriptionData(subscriptionName, nodeID string, data *NodeData)
-}
-
-// OPCUAWriter define una interfaz para encolar escrituras, permitiendo el desacoplamiento.
-type OPCUAWriter interface {
-	QueueWriteRequest(nodeID string, value interface{})
+	SetOPCUAWriter(writer OPCUAWriter)
+	Start()
 }
 
 type MethodManagerInterface interface {
-	OnMethodRead(nodeID string, result *NodeData, err error, duration time.Duration)
+    OnMethodRead(nodeID string, result *NodeData, err error, duration time.Duration)
 	OnMethodWrite(nodeID string, value interface{}, err error, duration time.Duration)
 	OnMethodCall(nodeID string, inputArgs interface{}, result interface{}, err error, duration time.Duration)
+	Start()
 }
-
 // Usar directamente tus estructuras existentes
 type OPCUAService struct {
-	client              *opcua.Client
+    client              *opcua.Client
 	config              *OPCUAConfig
 	subscriptions       map[string]*opcua.Subscription
 	isConnected         bool
@@ -49,12 +51,12 @@ type OPCUAService struct {
 
 // Estructura para una solicitud de escritura
 type WriteRequest struct {
-	NodeID string
+    NodeID string
 	Value  interface{}
 }
 
 type OPCUAConfig struct {
-	Endpoint            string
+    Endpoint            string
 	Username            string
 	Password            string
 	SecurityPolicy      string
@@ -70,25 +72,51 @@ type OPCUAConfig struct {
 }
 
 type NodeData struct {
-	NodeID    string
+    NodeID    string
 	Value     interface{}
 	Timestamp time.Time
 	Quality   ua.StatusCode
 }
 
+// ReadNodeDataType lee el tipo de dato (DataType) de un nodo OPC UA
+func (s *OPCUAService) ReadNodeDataType(nodeID string) (interface{}, error) {
+    if !s.isConnected {
+        return nil, fmt.Errorf("cliente no está conectado")
+    }
+    id, err := ua.ParseNodeID(nodeID)
+    if err != nil {
+        return nil, fmt.Errorf("error parseando NodeID %s: %v", nodeID, err)
+    }
+    req := &ua.ReadRequest{
+        NodesToRead: []*ua.ReadValueID{
+            {
+                NodeID:      id,
+                AttributeID: ua.AttributeIDDataType, // 25: DataType
+            },
+        },
+    }
+    resp, err := s.client.Read(s.ctx, req)
+    if err != nil {
+        return nil, fmt.Errorf("error leyendo DataType de %s: %v", nodeID, err)
+    }
+    if len(resp.Results) == 0 {
+        return nil, fmt.Errorf("respuesta vacía al leer DataType de %s", nodeID)
+    }
+    return resp.Results[0].Value, nil
+}
 // NewOPCUAService crea una nueva instancia del servicio
 func NewOPCUAService() *OPCUAService {
-	// Cargar variables de entorno
+    // Cargar variables de entorno
 	if err := godotenv.Load(); err != nil {
-		log.Println("Advertencia: No se pudo cargar el archivo .env:", err)
+        log.Println("Advertencia: No se pudo cargar el archivo .env:", err)
 	}
-
+    
 	config, err := loadOPCUAConfig()
 	if err != nil {
-		log.Printf("Error al cargar configuración OPC UA: %v", err)
+        log.Printf("Error al cargar configuración OPC UA: %v", err)
 		return nil
 	}
-
+    
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &OPCUAService{
@@ -117,16 +145,14 @@ func (s *OPCUAService) SetMethodManager(manager MethodManagerInterface) {
 // loadOPCUAConfig carga la configuración desde variables de entorno
 func loadOPCUAConfig() (*OPCUAConfig, error) {
 	config := &OPCUAConfig{
-		Endpoint:         getEnv("OPCUA_ENDPOINT", "opc.tcp://localhost:4840"),
-		Username:         getEnv("OPCUA_USERNAME", ""),
-		Password:         getEnv("OPCUA_PASSWORD", ""),
-		SecurityPolicy:   getEnv("OPCUA_SECURITY_POLICY", "None"),
-		SecurityMode:     getEnv("OPCUA_SECURITY_MODE", "None"),
-		CertificatePath:  getEnv("OPCUA_CERTIFICATE_PATH", ""),
-		PrivateKeyPath:   getEnv("OPCUA_PRIVATE_KEY_PATH", ""),
-	}
-
-	// Usar constantes para valores por defecto
+		Endpoint:        getEnv("OPCUA_ENDPOINT", "opc.tcp://localhost:4840"),
+		Username:        getEnv("OPCUA_USERNAME", ""),
+		Password:        getEnv("OPCUA_PASSWORD", ""),
+		SecurityPolicy:  getEnv("OPCUA_SECURITY_POLICY", "Basic256Sha256"), // Cambiado de "None"
+		SecurityMode:    getEnv("OPCUA_SECURITY_MODE", "SignAndEncrypt"), // Cambiado de "None"
+		CertificatePath: getEnv("OPCUA_CERTIFICATE_PATH", ""),
+		PrivateKeyPath:  getEnv("OPCUA_PRIVATE_KEY_PATH", ""),
+	}	// Usar constantes para valores por defecto
 	var err error
 	defaultTimeout := fmt.Sprintf("%ds", models.OPCUA_TIMEOUT)
 	config.ConnectionTimeout, err = time.ParseDuration(getEnv("OPCUA_CONNECTION_TIMEOUT", defaultTimeout))
@@ -166,35 +192,121 @@ func loadOPCUAConfig() (*OPCUAConfig, error) {
 	return config, nil
 }
 
+// getSecurityModeFromString convierte un string a su constante ua.MessageSecurityMode
+func getSecurityModeFromString(mode string) ua.MessageSecurityMode {
+	switch mode {
+	case "None":
+		return ua.MessageSecurityModeNone
+	case "Sign":
+		return ua.MessageSecurityModeSign
+	case "SignAndEncrypt":
+		return ua.MessageSecurityModeSignAndEncrypt
+	default:
+		return ua.MessageSecurityModeInvalid
+	}
+}
+
 // Start inicia el servicio OPC UA como listener
 func (s *OPCUAService) Start() {
 	log.Println("Iniciando servicio OPC UA...")
 	s.isRunning = true
 	
 	// Intentar conectar
+	var suscripcionOk bool = false
 	if err := s.Connect(); err != nil {
 		log.Printf("No se pudo conectar a OPC UA: %v", err)
 		log.Println("Servicio OPC UA funcionará en modo desconectado")
 	} else {
 		log.Printf("OPC UA conectado exitosamente: %s", s.config.Endpoint)
-		s.setupDefaultSubscriptions()
-		s.setupWagoTestSubscriptions() // Añadir suscripciones de WAGO
+		errSub := s.setupWagoTestSubscriptions() // VECTORES por suscripción
+		if errSub != nil {
+			log.Printf("Error al suscribirse a los vectores de WAGO: %v", errSub)
+			suscripcionOk = false
+		} else {
+			suscripcionOk = true
+		}
+		log.Println("WAGO: Vectores configurados por SUSCRIPCIÓN - Solo modo LECTURA por ahora")
 	}
 
 	// Iniciar el procesador de escrituras en background
 	go s.processWriteRequests()
 
+	// Si la suscripción falla, activar bucle de lectura manual cada segundo
+	go func() {
+		if !suscripcionOk {
+			log.Println("Modo simple: solo lee vectores y escribe en escalares cada segundo")
+			vectorNodes := []string{
+				models.WAGO_VectorBool,
+				models.WAGO_VectorInt,
+				models.WAGO_VectorWord,
+			}
+			for s.isRunning {
+				// Leer vectores
+				for _, nodeID := range vectorNodes {
+					nodeData, err := s.ReadNode(nodeID)
+					if err != nil {
+						log.Printf("❌ Error leyendo %s: %v", nodeID, err)
+					} else {
+						log.Printf("🔎 LECTURA | Nodo: %s | Valor: %v", nodeID, nodeData.Value)
+					}
+				}
+				// Escribir en escalares con valores aleatorios compatibles
+				// BoleanoTest: bool
+				boleano := time.Now().UnixNano()%2 == 0
+				if err := s.WriteNode(models.WAGO_BoleanoTest, boleano); err != nil {
+					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_BoleanoTest, err)
+				} else {
+					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_BoleanoTest, boleano)
+				}
+				// ByteTest: Byte (uint8)
+				byteVal := uint8(time.Now().UnixNano() % 256)
+				if err := s.WriteNode(models.WAGO_ByteTest, byteVal); err != nil {
+					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_ByteTest, err)
+				} else {
+					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_ByteTest, byteVal)
+				}
+				// EnteroTest: int16
+				entero := int16(time.Now().UnixNano() % 32768)
+				if err := s.WriteNode(models.WAGO_EnteroTest, entero); err != nil {
+					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_EnteroTest, err)
+				} else {
+					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_EnteroTest, entero)
+				}
+				// RealTest: float32
+				realVal := float32(time.Now().UnixNano()%10000) / 100.0
+				if err := s.WriteNode(models.WAGO_RealTest, realVal); err != nil {
+					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_RealTest, err)
+				} else {
+					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_RealTest, realVal)
+				}
+				// StringTest: string
+				strVal := fmt.Sprintf("Greenex-%d", time.Now().UnixNano()%1000)
+				if err := s.WriteNode(models.WAGO_StringTest, strVal); err != nil {
+					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_StringTest, err)
+				} else {
+					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_StringTest, strVal)
+				}
+				// WordTest: uint16
+				wordVal := uint16(time.Now().UnixNano() % 65536)
+				if err := s.WriteNode(models.WAGO_WordTest, wordVal); err != nil {
+					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_WordTest, err)
+				} else {
+					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_WordTest, wordVal)
+				}
+				time.Sleep(1 * time.Second)
+			}
+		}
+	}()
+
 	// Listener infinito - mantiene el servicio corriendo
 	for s.isRunning {
 		time.Sleep(5 * time.Second)
-		
 		// Auto-reconexión si se pierde la conexión
 		if !s.isConnected {
 			log.Println("Intentando reconectar OPC UA...")
 			if err := s.Connect(); err == nil {
 				log.Println("OPC UA reconectado exitosamente")
-				s.setupDefaultSubscriptions()
-				s.setupWagoTestSubscriptions() // Volver a suscribir en reconexión
+				s.setupWagoTestSubscriptions() // VECTORES por suscripción
 			}
 		}
 	}
@@ -233,48 +345,61 @@ func (s *OPCUAService) QueueWriteRequest(nodeID string, value interface{}) {
 // Connect establece la conexión con el servidor OPC UA
 func (s *OPCUAService) Connect() error {
 	if s.isConnected {
-		return fmt.Errorf("cliente ya está conectado")
+		return nil // Ya está conectado, no es un error.
 	}
 
-	// Configurar opciones del cliente
-	opts := []opcua.Option{
-		opcua.SecurityPolicy(s.config.SecurityPolicy),
-		opcua.SecurityModeString(s.config.SecurityMode),
-	}
-
-	// Configurar el tipo de autenticación
-	if s.config.Username != "" && s.config.Password != "" {
-		opts = append(opts, opcua.AuthUsername(s.config.Username, s.config.Password))
-		log.Println("Configurando autenticación con usuario y contraseña.")
-	} else {
-		opts = append(opts, opcua.AuthAnonymous())
-		log.Println("Configurando autenticación anónima.")
-	}
-
-	// Configurar certificados si están disponibles
-	if s.config.CertificatePath != "" && s.config.PrivateKeyPath != "" {
-		opts = append(opts, opcua.CertificateFile(s.config.CertificatePath))
-		opts = append(opts, opcua.PrivateKeyFile(s.config.PrivateKeyPath))
-	}
-
-	// Crear cliente
-	client, err := opcua.NewClient(s.config.Endpoint, opts...)
+	// 1. Obtener los endpoints disponibles del servidor.
+	endpoints, err := opcua.GetEndpoints(s.ctx, s.config.Endpoint)
 	if err != nil {
-		return fmt.Errorf("error creando cliente OPC UA: %v", err)
+		return fmt.Errorf("error obteniendo endpoints: %w", err)
 	}
 
-	// Establecer conexión con timeout
-	ctx, cancel := context.WithTimeout(s.ctx, s.config.ConnectionTimeout)
-	defer cancel()
-
-	if err := client.Connect(ctx); err != nil {
-		return fmt.Errorf("error conectando al servidor OPC UA: %v", err)
+	log.Println("Endpoints disponibles en el servidor:")
+	for _, ep := range endpoints {
+		log.Printf("  - URL: %s, Policy: %s, Mode: %s", ep.EndpointURL, ep.SecurityPolicyURI, ep.SecurityMode)
 	}
 
-	s.client = client
+	// 2. Seleccionar el mejor endpoint disponible.
+	// Intentar con la política configurada primero.
+	ep, err := opcua.SelectEndpoint(endpoints, s.config.SecurityPolicy, getSecurityModeFromString(s.config.SecurityMode))
+	if err != nil {
+		log.Printf("No se pudo seleccionar el endpoint configurado (%s, %s): %v. Intentando con política 'None'...", s.config.SecurityPolicy, s.config.SecurityMode, err)
+		// Si falla, intentar con None para diagnóstico.
+		ep, err = opcua.SelectEndpoint(endpoints, "None", ua.MessageSecurityModeNone)
+		if err != nil {
+			return fmt.Errorf("no se pudo encontrar un endpoint compatible con las políticas intentadas (configurada o 'None'): %w", err)
+		}
+	}
+
+	log.Printf("Endpoint seleccionado para la conexión: %s (Policy: %s, Mode: %s)", ep.EndpointURL, ep.SecurityPolicyURI, ep.SecurityMode)
+
+	// 3. Configurar las opciones del cliente usando SOLO las mínimas (como Python)
+	opts := []opcua.Option{}
+
+	// Solo añadir el certificado si la política de seguridad no es 'None'
+	if ep.SecurityPolicyURI != "http://opcfoundation.org/UA/SecurityPolicy#None" {
+		opts = append(opts, opcua.Certificate(ep.ServerCertificate))
+		log.Println("Certificado del servidor añadido para política de seguridad con encriptación.")
+	} else {
+		log.Println("Sin certificado del servidor (política de seguridad None).")
+	}
+
+	log.Println("Usando configuración mínima (sin opciones adicionales, como Python).")
+
+	// 4. Crear el cliente con las opciones.
+	c, err := opcua.NewClient(s.config.Endpoint, opts...)
+	if err != nil {
+		return fmt.Errorf("error creando el cliente OPC UA: %w", err)
+	}
+	s.client = c
+
+	// 5. Conectar al servidor.
+	if err := s.client.Connect(s.ctx); err != nil {
+		s.isConnected = false
+		return fmt.Errorf("error conectando al servidor OPC UA: %w", err)
+	}
+
 	s.isConnected = true
-
-	log.Printf("Conectado exitosamente al servidor OPC UA: %s", s.config.Endpoint)
 	return nil
 }
 
@@ -380,9 +505,10 @@ func (s *OPCUAService) ReadNode(nodeID string) (*NodeData, error) {
 // WriteNode escribe un valor a un nodo específico - INTEGRADO CON METHOD MANAGER
 func (s *OPCUAService) WriteNode(nodeID string, value interface{}) error {
 	startTime := time.Now()
-	
+
 	if !s.isConnected {
 		err := fmt.Errorf("cliente no está conectado")
+		log.Printf("[WRITE ERROR] Nodo: %s | Valor: %v | Tipo Go: %T | ERROR: %v | Duración: %v", nodeID, value, value, err, time.Since(startTime))
 		if s.methodManager != nil {
 			s.methodManager.OnMethodWrite(nodeID, value, err, time.Since(startTime))
 		}
@@ -392,6 +518,7 @@ func (s *OPCUAService) WriteNode(nodeID string, value interface{}) error {
 	id, err := ua.ParseNodeID(nodeID)
 	if err != nil {
 		err = fmt.Errorf("error parseando NodeID %s: %v", nodeID, err)
+		log.Printf("[WRITE ERROR] Nodo: %s | Valor: %v | Tipo Go: %T | ERROR: %v | Duración: %v", nodeID, value, value, err, time.Since(startTime))
 		if s.methodManager != nil {
 			s.methodManager.OnMethodWrite(nodeID, value, err, time.Since(startTime))
 		}
@@ -401,6 +528,7 @@ func (s *OPCUAService) WriteNode(nodeID string, value interface{}) error {
 	variant, err := ua.NewVariant(value)
 	if err != nil {
 		err = fmt.Errorf("error creando variant para valor %v: %v", value, err)
+		log.Printf("[WRITE ERROR] Nodo: %s | Valor: %v | Tipo Go: %T | ERROR: %v | Duración: %v", nodeID, value, value, err, time.Since(startTime))
 		if s.methodManager != nil {
 			s.methodManager.OnMethodWrite(nodeID, value, err, time.Since(startTime))
 		}
@@ -454,10 +582,8 @@ func (s *OPCUAService) SubscribeToNodes(subscriptionName string, nodeIDs []strin
 	// Crear channel para notificaciones
 	notifChan := make(chan *opcua.PublishNotificationData, 100)
 
-	// Crear suscripción con el channel
-	sub, err := s.client.Subscribe(s.ctx, &opcua.SubscriptionParameters{
-		Interval: s.config.SubscriptionInterval,
-	}, notifChan)
+	// Crear suscripción con parámetros MÍNIMOS (máxima compatibilidad WAGO)
+	sub, err := s.client.Subscribe(s.ctx, nil, notifChan)
 
 	if err != nil {
 		return fmt.Errorf("error creando suscripción %s: %v", subscriptionName, err)
@@ -465,7 +591,7 @@ func (s *OPCUAService) SubscribeToNodes(subscriptionName string, nodeIDs []strin
 
 	// Crear elementos monitoreados
 	var items []*ua.MonitoredItemCreateRequest
-	for i, nodeID := range nodeIDs {
+	for _, nodeID := range nodeIDs {
 		id, err := ua.ParseNodeID(nodeID)
 		if err != nil {
 			log.Printf("Error parseando NodeID %s: %v", nodeID, err)
@@ -478,12 +604,7 @@ func (s *OPCUAService) SubscribeToNodes(subscriptionName string, nodeIDs []strin
 				AttributeID: ua.AttributeIDValue,
 			},
 			MonitoringMode: ua.MonitoringModeReporting,
-			RequestedParameters: &ua.MonitoringParameters{
-				ClientHandle:     uint32(i),
-				SamplingInterval: float64(s.config.SubscriptionInterval.Milliseconds()),
-				QueueSize:        1,
-				DiscardOldest:    true,
-			},
+			RequestedParameters: nil, // Usar parámetros por defecto del servidor
 		})
 	}
 
@@ -563,9 +684,9 @@ func (s *OPCUAService) UnsubscribeFromNodes(subscriptionName string) error {
 }
 
 // setupWagoTestSubscriptions se suscribe a los nodos de prueba de WAGO
-func (s *OPCUAService) setupWagoTestSubscriptions() {
+func (s *OPCUAService) setupWagoTestSubscriptions() error {
 	if !s.isConnected {
-		return
+		return fmt.Errorf("cliente no está conectado")
 	}
 
 	wagoVectorNodes := []string{
@@ -577,8 +698,10 @@ func (s *OPCUAService) setupWagoTestSubscriptions() {
 	err := s.SubscribeToNodes("wago_vector_subscription", wagoVectorNodes, nil)
 	if err != nil {
 		log.Printf("Error al suscribirse a los vectores de WAGO: %v", err)
+		return err
 	} else {
 		log.Printf("Suscripción a vectores WAGO configurada para %d nodos.", len(wagoVectorNodes))
+		return nil
 	}
 }
 
@@ -638,4 +761,47 @@ func findNodeIDByClientHandle(nodeIDs []string, handle uint32) string {
 		return nodeIDs[handle]
 	}
 	return ""
+}
+
+// startWagoSimulator escribe valores constantemente a las variables WAGO con gran frecuencia
+func (s *OPCUAService) startWagoSimulator() {
+	log.Println("🚀 Iniciando simulador WAGO - Escritura constante con gran frecuencia...")
+	
+	contador := 0
+	boleano := false
+	
+	for s.isRunning && s.isConnected {
+		contador++
+		
+		// Alternar booleano cada ciclo
+		boleano = !boleano
+		
+		// Escribir a todas las variables WAGO constantemente
+		variables := map[string]interface{}{
+			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.BoleanoTest": boleano,
+			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.ByteTest":    uint8(contador % 256),
+			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.EnteroTest":  int16(contador % 32767),
+			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.RealTest":    float32(contador) * 3.14159,
+			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.StringTest":  fmt.Sprintf("Ciclo_%d", contador),
+			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.WordTest":    uint16(contador % 65536),
+		}
+		
+		for nodeID, valor := range variables {
+			if err := s.WriteNode(nodeID, valor); err != nil {
+				log.Printf("🔥 Error simulador en %s: %v", nodeID, err)
+			} else {
+				log.Printf("✍️  Simulador: %s = %v", nodeID, valor)
+			}
+		}
+		
+		// Frecuencia alta: cada 100ms
+		time.Sleep(100 * time.Millisecond)
+		
+		// Log cada 50 ciclos para no spam
+		if contador%50 == 0 {
+			log.Printf("🔄 Simulador WAGO - Ciclo %d completado", contador)
+		}
+	}
+	
+	log.Println("🛑 Simulador WAGO detenido")
 }

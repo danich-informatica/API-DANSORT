@@ -61,30 +61,19 @@ func (mm *MethodManager) processMethodData() {
 // handleMethodData maneja los datos de métodos
 func (mm *MethodManager) handleMethodData(data MethodData) {
     // Log detallado de la comunicación de métodos
-    log.Printf("╔═══ MÉTODO OPC UA ═══╗")
-    log.Printf("║ Operación: %-10s ║", data.Operation)
-    log.Printf("║ NodeID: %-13s ║", data.NodeID)
-    
-    if data.Value != nil {
-        log.Printf("║ Valor: %-14v ║", data.Value)
-    }
-    
-    if data.Result != nil {
-        log.Printf("║ Resultado: %-11v ║", data.Result)
-    }
-    
-    if data.Error != nil {
-        log.Printf("║ Error: %-14s ║", data.Error.Error())
-    } else {
-        log.Printf("║ Estado: %-13s ║", "OK")
-    }
-    
-    if data.Duration > 0 {
-        log.Printf("║ Duración: %-11s ║", data.Duration.String())
-    }
-    
-    log.Printf("║ Ejecutado: %-10s ║", data.ReceivedAt.Format("15:04:05"))
-    log.Printf("╚═══════════════════════╝")
+	log.Printf("╔═══ MÉTODO OPC UA ═══╗")
+	log.Printf("║ Operación: %-10s ║", data.Operation)
+	if data.Value != nil {
+		log.Printf("║ Valor: %-12v ║", data.Value)
+	}
+	if data.Result != nil {
+		log.Printf("║ Resultado: %-11v ║", data.Result)
+	}
+	if data.Duration > 0 {
+		log.Printf("║ Duración: %-11s ║", data.Duration.String())
+	}
+	log.Printf("║ Ejecutado: %-10s ║", data.ReceivedAt.Format("15:04:05"))
+	log.Printf("╚═══════════════════════╝")
     
     // Procesar lógica específica del método
     mm.processMethodLogic(data)

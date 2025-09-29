@@ -7,6 +7,7 @@ import (
 
 	"API-GREENEX/internal/listeners"
 	"API-GREENEX/internal/models"
+    "API-GREENEX/internal/shared"   
 )
 
 type SubscriptionManager struct {
@@ -67,18 +68,11 @@ func (sm *SubscriptionManager) processSubscriptionData() {
 func (sm *SubscriptionManager) handleSubscriptionData(data SubscriptionData) {
 	// Convertir StatusCode a string legible
 	qualityStr := sm.statusCodeToString(data.Data.Quality)
+	nodeShort := sm.getShortNodeName(data.NodeID)
+	log.Printf("� LECTURA [%s] Nodo: %s | Valor: %v | Calidad: %s | Timestamp: %s", 
+		data.SubscriptionName, nodeShort, data.Data.Value, qualityStr, data.Data.Timestamp.Format("15:04:05"))
 
-	// Log detallado de la comunicación de suscripción
-	log.Printf("╔═══ SUSCRIPCIÓN OPC UA ═══╗")
-	log.Printf("║ Suscripción: %-12s ║", data.SubscriptionName)
-	log.Printf("║ NodeID: %-17s ║", data.NodeID)
-	log.Printf("║ Valor: %-18v ║", data.Data.Value)
-	log.Printf("║ Timestamp: %-14s ║", data.Data.Timestamp.Format("15:04:05.000"))
-	log.Printf("║ Calidad: %-16s ║", qualityStr)
-	log.Printf("║ Recibido: %-15s ║", data.ReceivedAt.Format("15:04:05.000"))
-	log.Printf("╚═══════════════════════════╝")
-
-	// Aquí puedes agregar más lógica específica para suscripciones:
+	// Procesar lógica específica de suscripción
 	sm.processSubscriptionLogic(data)
 }
 
@@ -106,38 +100,42 @@ func (sm *SubscriptionManager) handleWagoVectorSubscription(data SubscriptionDat
 		return
 	}
 
-	log.Printf("Procesando suscripción de vector WAGO: %s", data.NodeID)
+	log.Printf("🔄 Procesando suscripción de vector WAGO: %s", data.NodeID)
 
 	switch data.NodeID {
 	case models.WAGO_VectorBool:
-		// Cuando VectorBool cambia, escribe en BoleanoTest
+		// VectorBool es un array de Boolean
+		log.Printf("🔵 WAGO VectorBool recibido: %v (tipo: %T)", data.Data.Value, data.Data.Value)
 		if val, ok := data.Data.Value.([]bool); ok && len(val) > 0 {
-			// Escribimos el primer valor del array, o cualquier otra lógica que necesites
-			log.Printf("Escribiendo en WAGO_BoleanoTest: %v", !val[0]) // Escribe el valor contrario
-			sm.opcuaWriter.QueueWriteRequest(models.WAGO_BoleanoTest, !val[0])
+			log.Printf("✉️ ENVÍO [BoleanoTest] Valor: %v -> %v", val[0], !val[0])
+			sm.opcuaWriter.QueueWriteRequest(models.WAGO_BoleanoTest, shared.CastWagoValue(models.WAGO_BoleanoTest, !val[0]))
+		} else {
+			log.Printf("❌ Error: VectorBool no es []bool o está vacío")
 		}
 
 	case models.WAGO_VectorInt:
-		// Cuando VectorInt cambia, escribe en EnteroTest
+		// VectorInt es un array de Int16
+		log.Printf("🔢 WAGO VectorInt recibido: %v (tipo: %T)", data.Data.Value, data.Data.Value)
 		if val, ok := data.Data.Value.([]int16); ok && len(val) > 0 {
-			// Sumamos 1 al primer valor del array
 			newValue := val[0] + 1
-			log.Printf("Escribiendo en WAGO_EnteroTest: %d", newValue)
-			sm.opcuaWriter.QueueWriteRequest(models.WAGO_EnteroTest, newValue)
+			log.Printf("✉️ ENVÍO [EnteroTest] Valor: %d -> %d", val[0], newValue)
+			sm.opcuaWriter.QueueWriteRequest(models.WAGO_EnteroTest, shared.CastWagoValue(models.WAGO_EnteroTest, newValue))
+		} else {
+			log.Printf("❌ Error: VectorInt no es []int16 o está vacío")
 		}
 
 	case models.WAGO_VectorWord:
-		// Cuando VectorWord cambia, escribe en WordTest y StringTest
+		// VectorWord es un array de UInt16
+		log.Printf("🔤 WAGO VectorWord recibido: %v (tipo: %T)", data.Data.Value, data.Data.Value)
 		if val, ok := data.Data.Value.([]uint16); ok && len(val) > 0 {
-			// Escribimos el valor + 10 en WordTest
 			newWordValue := val[0] + 10
-			log.Printf("Escribiendo en WAGO_WordTest: %d", newWordValue)
-			sm.opcuaWriter.QueueWriteRequest(models.WAGO_WordTest, newWordValue)
-
-			// Escribimos un string formateado en StringTest
-			newStringValue := fmt.Sprintf("Desde VectorWord: %d", val[0])
-			log.Printf("Escribiendo en WAGO_StringTest: %s", newStringValue)
-			sm.opcuaWriter.QueueWriteRequest(models.WAGO_StringTest, newStringValue)
+			log.Printf("✉️ ENVÍO [WordTest] Valor: %d -> %d", val[0], newWordValue)
+			sm.opcuaWriter.QueueWriteRequest(models.WAGO_WordTest, shared.CastWagoValue(models.WAGO_WordTest, newWordValue))
+			newStringValue := fmt.Sprintf("Word_%d", val[0])
+			log.Printf("✉️ ENVÍO [StringTest] Valor: %d -> %s", val[0], newStringValue)
+			sm.opcuaWriter.QueueWriteRequest(models.WAGO_StringTest, shared.CastWagoValue(models.WAGO_StringTest, newStringValue))
+		} else {
+			log.Printf("❌ Error: VectorWord no es []uint16 o está vacío")
 		}
 	}
 }
@@ -280,6 +278,32 @@ func (sm *SubscriptionManager) GetStats() map[string]interface{} {
 		"running":    sm.isRunning,
 		"queue_size": len(sm.dataChan),
 		"queue_cap":  cap(sm.dataChan),
+	}
+}
+
+// getShortNodeName extrae un nombre corto del NodeID para logs limpios
+func (sm *SubscriptionManager) getShortNodeName(nodeID string) string {
+	switch nodeID {
+	case models.WAGO_VectorBool:
+		return "VectorBool"
+	case models.WAGO_VectorInt:
+		return "VectorInt"
+	case models.WAGO_VectorWord:
+		return "VectorWord"
+	case models.WAGO_BoleanoTest:
+		return "BoleanoTest"
+	case models.WAGO_EnteroTest:
+		return "EnteroTest"
+	case models.WAGO_StringTest:
+		return "StringTest"
+	case models.WAGO_WordTest:
+		return "WordTest"
+	default:
+		// Extraer solo la parte final del nodeID
+		if len(nodeID) > 50 {
+			return "..." + nodeID[len(nodeID)-20:]
+		}
+		return nodeID
 	}
 }
 
