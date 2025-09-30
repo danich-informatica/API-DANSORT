@@ -3,22 +3,22 @@ package main
 import (
 	"log"
 	"os"
-	"net/http"
 
 	"API-GREENEX/internal/flow"
 	"API-GREENEX/internal/listeners"
-	"API-GREENEX/internal/web"
+
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	log.Println(`
-	░█████╗░██████╗░██╗░░░░░░░██████╗░██████╗░███████╗███████╗███╗░░██╗███████╗██╗░░██╗
-	██╔══██╗██╔══██╗██║░░░░░░██╔════╝░██╔══██╗██╔════╝██╔════╝████╗░██║██╔════╝╚██╗██╔╝
-	███████║██████╔╝██║█████╗██║░░██╗░██████╔╝█████╗░░█████╗░░██╔██╗██║█████╗░░░╚███╔╝░
-	██╔══██║██╔═══╝░██║╚════╝██║░░╚██╗██╔══██╗██╔══╝░░██╔══╝░░██║╚████║██╔══╝░░░██╔██╗░
-	██║░░██║██║░░░░░██║░░░░░░╚██████╔╝██║░░██║███████╗███████╗██║░╚███║███████╗██╔╝╚██╗
-	╚═╝░░╚═╝╚═╝░░░░░╚═╝░░░░░░░╚═════╝░╚═╝░░╚═╝╚══════╝╚══════╝╚═╝░░╚══╝╚══════╝╚═╝░░╚═╝
-	`)
+    ░█████╗░██████╗░██╗░░░░░░░██████╗░██████╗░███████╗███████╗███╗░░██╗███████╗██╗░░██╗
+    ██╔══██╗██╔══██╗██║░░░░░░██╔════╝░██╔══██╗██╔════╝██╔════╝████╗░██║██╔════╝╚██╗██╔╝
+    ███████║██████╔╝██║█████╗██║░░██╗░██████╔╝█████╗░░█████╗░░██╔██╗██║█████╗░░░╚███╔╝░
+    ██╔══██║██╔═══╝░██║╚════╝██║░░╚██╗██╔══██╗██╔══╝░░██╔══╝░░██║╚████║██╔══╝░░░██╔██╗░
+    ██║░░██║██║░░░░░██║░░░░░░╚██████╔╝██║░░██║███████╗███████╗██║░╚███║███████╗██╔╝╚██╗
+    ╚═╝░░╚═╝╚═╝░░░░░╚═╝░░░░░░░╚═════╝░╚═╝░░╚═╝╚══════╝╚══════╝╚═╝░░╚══╝╚══════╝╚═╝░░╚═╝
+    `)
 
 	log.Println("Iniciando API-Greenex...")
 
@@ -36,7 +36,7 @@ func main() {
 
 	// Inyectar el servicio OPC UA (como escritor) en el manager de suscripciones
 	subscriptionManager.SetOPCUAWriter(opcuaService)
-	
+
 	// Vincular el servicio OPC UA al HTTP para métodos de lectura/escritura
 	httpService.SetOPCUAService(opcuaService)
 
@@ -50,18 +50,20 @@ func main() {
 	// Iniciar loop de escritura/lectura WAGO en background
 	go flow.WagoLoop(opcuaService)
 
+	// Agregar la ruta /status al router de Gin
+	router := httpService.GetRouter()
+	router.GET("/status", func(c *gin.Context) {
+		// Aquí puedes adaptar tu StatusPageHandler para Gin
+		c.HTML(200, "status.html", gin.H{
+			"title": "Estado del Sistema",
+		})
+	})
 
-	// Integrar página de estado web
+	// Iniciar servidor HTTP usando Gin (NO http.ListenAndServe)
 	log.Println("Servidor HTTP iniciando en puerto " + getEnv("HTTP_PORT", "8080"))
-	httpPort := getEnv("HTTP_PORT", "8080")
-	httpAddr := ":" + httpPort
 
-	// Registrar handler /status usando el paquete web
-	// (asegúrate de importar "API-GREENEX/internal/web" al inicio)
-	http.HandleFunc("/status", web.StatusPageHandler(opcuaService))
-
-	// Iniciar servidor HTTP
-	if err := http.ListenAndServe(httpAddr, nil); err != nil {
+	// Usar el método Start() de tu HTTPFrontend que ya usa Gin
+	if err := httpService.Start(); err != nil {
 		log.Fatal("Error al iniciar el servidor HTTP:", err)
 	}
 }
