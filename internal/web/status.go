@@ -1,10 +1,10 @@
 package web
 
 import (
-	"fmt"
-	"net/http"
 	"API-GREENEX/internal/listeners"
 	"API-GREENEX/internal/models"
+	"fmt"
+	"net/http"
 )
 
 // StatusPageHandler sirve una página web con el estado de todos los nodos WAGO
@@ -32,7 +32,7 @@ func StatusPageHandler(service *listeners.OPCUAService) http.HandlerFunc {
 	<style>
 		body {
 			font-family: 'Segoe UI', Arial, sans-serif;
-			background: linear-gradient(120deg, #e0eafc 0%, #cfdef3 100%);
+			background: linear-gradient(120deg, #e0eafc 0%%, #cfdef3 100%%);
 			margin: 0;
 			padding: 0;
 		}
@@ -107,7 +107,7 @@ func StatusPageHandler(service *listeners.OPCUAService) http.HandlerFunc {
 		<h1>Estado de Nodos WAGO</h1>
 		<table>
 			<tr><th>Tipo</th><th>NodeID</th><th>Valor</th><th>Calidad</th><th>Timestamp</th></tr>
-`) 
+`)
 		for _, nodeID := range nodes {
 			data, err := service.ReadNode(nodeID)
 			var iconSVG string
