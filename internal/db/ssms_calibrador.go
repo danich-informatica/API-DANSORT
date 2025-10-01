@@ -6,8 +6,8 @@ import (
 	"fmt"
 )
 
-// QueryExecutor expone el subconjunto de métodos necesario para ejecutar consultas.
-// Está pensado para ser satisfecho por *Manager o por un mock en pruebas.
+// QueryExecutor expone el subconjunto mínimo necesario para ejecutar la consulta
+// de segregación; lo satisface el manager de SQL Server y facilita el mockeo en pruebas.
 type QueryExecutor interface {
 	Query(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }

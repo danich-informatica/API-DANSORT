@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/sku"
+	"API-GREENEX/internal/models"
 )
 
 func main() {
@@ -36,7 +36,7 @@ func main() {
 	}
 
 	for idx, row := range rows {
-		skuObj, err := sku.RequestSKU(nullToString(row.Variedad), nullToString(row.Calibre), nullToString(row.Embalaje))
+		skuObj, err := models.RequestSKU(nullToString(row.Variedad), nullToString(row.Calibre), nullToString(row.Embalaje))
 		if err != nil {
 			log.Printf("fila %d: sku inválido: %v", idx, err)
 			continue
