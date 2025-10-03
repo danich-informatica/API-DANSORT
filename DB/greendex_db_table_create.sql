@@ -153,9 +153,7 @@ CREATE INDEX idx_orden_vaciado_mesa ON orden_vaciado (idmesa);
 CREATE INDEX idx_orden_vaciado_fabricacion ON orden_vaciado (id_fabricacion_activa);
 CREATE INDEX idx_orden_vaciado_fecha ON orden_vaciado (fecha_envio);
 
--- =======================
--- Comentarios
--- =======================
+
 COMMENT ON TABLE sku IS 'Catálogo de productos SKU con calibre, variedad y embalaje';
 COMMENT ON TABLE pallet IS 'Registro de pallets con su correlativo y fecha de creación';
 COMMENT ON TABLE caja IS 'Registro de cajas con información detallada del producto';
@@ -166,3 +164,46 @@ COMMENT ON TABLE orden_fabricacion IS 'Órdenes de fabricación con detalles de 
 COMMENT ON TABLE salida_caja IS 'Registro de cajas procesadas por cada salida';
 COMMENT ON TABLE codigoenvase IS 'Catálogo de códigos de envases disponibles';
 COMMENT ON TABLE orden_vaciado IS 'Órdenes de vaciado de mesas';
+
+-- Crear una secuencia para el correlativo
+CREATE SEQUENCE IF NOT EXISTS caja_correlativo_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MAXVALUE
+    NO MINVALUE
+    CACHE 1;
+
+-- Función que usa la secuencia
+CREATE OR REPLACE FUNCTION generar_correlativo_caja_seq()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Si el correlativo es NULL, usar el siguiente valor de la secuencia
+    IF NEW.correlativo IS NULL THEN
+        NEW.correlativo := nextval('caja_correlativo_seq');
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Crear el trigger
+CREATE TRIGGER trigger_generar_correlativo_seq
+BEFORE INSERT ON caja
+FOR EACH ROW
+EXECUTE FUNCTION generar_correlativo_caja_seq();
+
+-- Sincronizar la secuencia con los datos existentes (si hay registros previos)
+DO $$
+DECLARE
+    max_correlativo INTEGER;
+BEGIN
+    SELECT MAX(correlativo::INTEGER) 
+    INTO max_correlativo
+    FROM caja 
+    WHERE correlativo ~ '^[0-9]+$';
+    
+    -- Solo ajustar si hay datos existentes
+    IF max_correlativo IS NOT NULL AND max_correlativo > 0 THEN
+        PERFORM setval('caja_correlativo_seq', max_correlativo);
+    END IF;
+END $$;
