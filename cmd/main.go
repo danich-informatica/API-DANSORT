@@ -6,11 +6,16 @@ import (
 
 	"API-GREENEX/internal/flow"
 	"API-GREENEX/internal/listeners"
+	"API-GREENEX/internal/web"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
+	// Configurar logger sin buffering para logs instantáneos
+	log.SetOutput(os.Stdout)
+	log.SetFlags(log.Ldate | log.Ltime)
+
 	log.Println(`
     ░█████╗░██████╗░██╗░░░░░░░██████╗░██████╗░███████╗███████╗███╗░░██╗███████╗██╗░░██╗
     ██╔══██╗██╔══██╗██║░░░░░░██╔════╝░██╔══██╗██╔════╝██╔════╝████╗░██║██╔════╝╚██╗██╔╝
@@ -50,14 +55,9 @@ func main() {
 	// Iniciar loop de escritura/lectura WAGO en background
 	go flow.WagoLoop(opcuaService)
 
-	// Agregar la ruta /status al router de Gin
+	// Agregar la ruta /status al router de Gin usando el HTML handler
 	router := httpService.GetRouter()
-	router.GET("/status", func(c *gin.Context) {
-		// Aquí puedes adaptar tu StatusPageHandler para Gin
-		c.HTML(200, "status.html", gin.H{
-			"title": "Estado del Sistema",
-		})
-	})
+	router.GET("/status", gin.WrapF(web.StatusPageHandler(opcuaService)))
 
 	// Iniciar servidor HTTP usando Gin (NO http.ListenAndServe)
 	log.Println("Servidor HTTP iniciando en puerto " + getEnv("HTTP_PORT", "8080"))

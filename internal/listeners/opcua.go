@@ -7,8 +7,9 @@ import (
 	"os"
 	"strconv"
 	"time"
-    
+
 	"API-GREENEX/internal/models"
+
 	"github.com/gopcua/opcua"
 	"github.com/gopcua/opcua/ua"
 	"github.com/joho/godotenv"
@@ -16,7 +17,7 @@ import (
 
 // OPCUAWriter define una interfaz para encolar escrituras, permitiendo el desacoplamiento.
 type OPCUAWriter interface {
-    QueueWriteRequest(nodeID string, value interface{})
+	QueueWriteRequest(nodeID string, value interface{})
 }
 
 // Interfaces para los managers (para evitar dependencias circulares)
@@ -27,52 +28,53 @@ type SubscriptionManagerInterface interface {
 }
 
 type MethodManagerInterface interface {
-    OnMethodRead(nodeID string, result *NodeData, err error, duration time.Duration)
+	OnMethodRead(nodeID string, result *NodeData, err error, duration time.Duration)
 	OnMethodWrite(nodeID string, value interface{}, err error, duration time.Duration)
 	OnMethodCall(nodeID string, inputArgs interface{}, result interface{}, err error, duration time.Duration)
 	Start()
 }
+
 // Usar directamente tus estructuras existentes
 type OPCUAService struct {
-    client              *opcua.Client
-	config              *OPCUAConfig
-	subscriptions       map[string]*opcua.Subscription
-	isConnected         bool
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	dataCallbacks       map[string]func(interface{})
-	isRunning           bool
-	writeRequestChan    chan WriteRequest // Canal para solicitudes de escritura
-    
-    // Managers para manejar los datos
-    subscriptionManager SubscriptionManagerInterface
-    methodManager       MethodManagerInterface
+	client           *opcua.Client
+	config           *OPCUAConfig
+	subscriptions    map[string]*opcua.Subscription
+	isConnected      bool
+	ctx              context.Context
+	cancel           context.CancelFunc
+	dataCallbacks    map[string]func(interface{})
+	isRunning        bool
+	writeRequestChan chan WriteRequest // Canal para solicitudes de escritura
+
+	// Managers para manejar los datos
+	subscriptionManager SubscriptionManagerInterface
+	methodManager       MethodManagerInterface
 }
 
 // Estructura para una solicitud de escritura
 type WriteRequest struct {
-    NodeID string
+	NodeID string
 	Value  interface{}
 }
 
 type OPCUAConfig struct {
-    Endpoint            string
-	Username            string
-	Password            string
-	SecurityPolicy      string
-	SecurityMode        string
-	CertificatePath     string
-	PrivateKeyPath      string
-	ConnectionTimeout   time.Duration
-	SessionTimeout      time.Duration
+	Endpoint             string
+	Username             string
+	Password             string
+	SecurityPolicy       string
+	SecurityMode         string
+	CertificatePath      string
+	PrivateKeyPath       string
+	ConnectionTimeout    time.Duration
+	SessionTimeout       time.Duration
 	SubscriptionInterval time.Duration
-	KeepAliveCount      uint32
-	LifetimeCount       uint32
-	MaxNotifications    uint32
+	KeepAliveCount       uint32
+	LifetimeCount        uint32
+	MaxNotifications     uint32
 }
 
 type NodeData struct {
-    NodeID    string
+	NodeID    string
 	Value     interface{}
 	Timestamp time.Time
 	Quality   ua.StatusCode
@@ -80,43 +82,44 @@ type NodeData struct {
 
 // ReadNodeDataType lee el tipo de dato (DataType) de un nodo OPC UA
 func (s *OPCUAService) ReadNodeDataType(nodeID string) (interface{}, error) {
-    if !s.isConnected {
-        return nil, fmt.Errorf("cliente no está conectado")
-    }
-    id, err := ua.ParseNodeID(nodeID)
-    if err != nil {
-        return nil, fmt.Errorf("error parseando NodeID %s: %v", nodeID, err)
-    }
-    req := &ua.ReadRequest{
-        NodesToRead: []*ua.ReadValueID{
-            {
-                NodeID:      id,
-                AttributeID: ua.AttributeIDDataType, // 25: DataType
-            },
-        },
-    }
-    resp, err := s.client.Read(s.ctx, req)
-    if err != nil {
-        return nil, fmt.Errorf("error leyendo DataType de %s: %v", nodeID, err)
-    }
-    if len(resp.Results) == 0 {
-        return nil, fmt.Errorf("respuesta vacía al leer DataType de %s", nodeID)
-    }
-    return resp.Results[0].Value, nil
+	if !s.isConnected {
+		return nil, fmt.Errorf("cliente no está conectado")
+	}
+	id, err := ua.ParseNodeID(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("error parseando NodeID %s: %v", nodeID, err)
+	}
+	req := &ua.ReadRequest{
+		NodesToRead: []*ua.ReadValueID{
+			{
+				NodeID:      id,
+				AttributeID: ua.AttributeIDDataType, // 25: DataType
+			},
+		},
+	}
+	resp, err := s.client.Read(s.ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("error leyendo DataType de %s: %v", nodeID, err)
+	}
+	if len(resp.Results) == 0 {
+		return nil, fmt.Errorf("respuesta vacía al leer DataType de %s", nodeID)
+	}
+	return resp.Results[0].Value, nil
 }
+
 // NewOPCUAService crea una nueva instancia del servicio
 func NewOPCUAService() *OPCUAService {
-    // Cargar variables de entorno
+	// Cargar variables de entorno
 	if err := godotenv.Load(); err != nil {
-        log.Println("Advertencia: No se pudo cargar el archivo .env:", err)
+		log.Println("Advertencia: No se pudo cargar el archivo .env:", err)
 	}
-    
+
 	config, err := loadOPCUAConfig()
 	if err != nil {
-        log.Printf("Error al cargar configuración OPC UA: %v", err)
+		log.Printf("Error al cargar configuración OPC UA: %v", err)
 		return nil
 	}
-    
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &OPCUAService{
@@ -149,10 +152,10 @@ func loadOPCUAConfig() (*OPCUAConfig, error) {
 		Username:        getEnv("OPCUA_USERNAME", ""),
 		Password:        getEnv("OPCUA_PASSWORD", ""),
 		SecurityPolicy:  getEnv("OPCUA_SECURITY_POLICY", "Basic256Sha256"), // Cambiado de "None"
-		SecurityMode:    getEnv("OPCUA_SECURITY_MODE", "SignAndEncrypt"), // Cambiado de "None"
+		SecurityMode:    getEnv("OPCUA_SECURITY_MODE", "SignAndEncrypt"),   // Cambiado de "None"
 		CertificatePath: getEnv("OPCUA_CERTIFICATE_PATH", ""),
 		PrivateKeyPath:  getEnv("OPCUA_PRIVATE_KEY_PATH", ""),
-	}	// Usar constantes para valores por defecto
+	} // Usar constantes para valores por defecto
 	var err error
 	defaultTimeout := fmt.Sprintf("%ds", models.OPCUA_TIMEOUT)
 	config.ConnectionTimeout, err = time.ParseDuration(getEnv("OPCUA_CONNECTION_TIMEOUT", defaultTimeout))
@@ -210,7 +213,7 @@ func getSecurityModeFromString(mode string) ua.MessageSecurityMode {
 func (s *OPCUAService) Start() {
 	log.Println("Iniciando servicio OPC UA...")
 	s.isRunning = true
-	
+
 	// Intentar conectar
 	var suscripcionOk bool = false
 	if err := s.Connect(); err != nil {
@@ -234,67 +237,7 @@ func (s *OPCUAService) Start() {
 	// Si la suscripción falla, activar bucle de lectura manual cada segundo
 	go func() {
 		if !suscripcionOk {
-			log.Println("Modo simple: solo lee vectores y escribe en escalares cada segundo")
-			vectorNodes := []string{
-				models.WAGO_VectorBool,
-				models.WAGO_VectorInt,
-				models.WAGO_VectorWord,
-			}
-			for s.isRunning {
-				// Leer vectores
-				for _, nodeID := range vectorNodes {
-					nodeData, err := s.ReadNode(nodeID)
-					if err != nil {
-						log.Printf("❌ Error leyendo %s: %v", nodeID, err)
-					} else {
-						log.Printf("🔎 LECTURA | Nodo: %s | Valor: %v", nodeID, nodeData.Value)
-					}
-				}
-				// Escribir en escalares con valores aleatorios compatibles
-				// BoleanoTest: bool
-				boleano := time.Now().UnixNano()%2 == 0
-				if err := s.WriteNode(models.WAGO_BoleanoTest, boleano); err != nil {
-					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_BoleanoTest, err)
-				} else {
-					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_BoleanoTest, boleano)
-				}
-				// ByteTest: Byte (uint8)
-				byteVal := uint8(time.Now().UnixNano() % 256)
-				if err := s.WriteNode(models.WAGO_ByteTest, byteVal); err != nil {
-					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_ByteTest, err)
-				} else {
-					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_ByteTest, byteVal)
-				}
-				// EnteroTest: int16
-				entero := int16(time.Now().UnixNano() % 32768)
-				if err := s.WriteNode(models.WAGO_EnteroTest, entero); err != nil {
-					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_EnteroTest, err)
-				} else {
-					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_EnteroTest, entero)
-				}
-				// RealTest: float32
-				realVal := float32(time.Now().UnixNano()%10000) / 100.0
-				if err := s.WriteNode(models.WAGO_RealTest, realVal); err != nil {
-					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_RealTest, err)
-				} else {
-					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_RealTest, realVal)
-				}
-				// StringTest: string
-				strVal := fmt.Sprintf("Greenex-%d", time.Now().UnixNano()%1000)
-				if err := s.WriteNode(models.WAGO_StringTest, strVal); err != nil {
-					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_StringTest, err)
-				} else {
-					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_StringTest, strVal)
-				}
-				// WordTest: uint16
-				wordVal := uint16(time.Now().UnixNano() % 65536)
-				if err := s.WriteNode(models.WAGO_WordTest, wordVal); err != nil {
-					log.Printf("❌ Error escribiendo en %s: %v", models.WAGO_WordTest, err)
-				} else {
-					log.Printf("✉️ ESCRITURA | Nodo: %s | Valor: %v", models.WAGO_WordTest, wordVal)
-				}
-				time.Sleep(1 * time.Second)
-			}
+			// Modo simple desactivado - WagoLoop maneja escrituras
 		}
 	}()
 
@@ -435,7 +378,7 @@ func (s *OPCUAService) Disconnect() error {
 // ReadNode lee el valor de un nodo específico - INTEGRADO CON METHOD MANAGER
 func (s *OPCUAService) ReadNode(nodeID string) (*NodeData, error) {
 	startTime := time.Now()
-	
+
 	if !s.isConnected {
 		err := fmt.Errorf("cliente no está conectado")
 		// Notificar al method manager sobre el error
@@ -508,7 +451,7 @@ func (s *OPCUAService) WriteNode(nodeID string, value interface{}) error {
 
 	if !s.isConnected {
 		err := fmt.Errorf("cliente no está conectado")
-		log.Printf("[WRITE ERROR] Nodo: %s | Valor: %v | Tipo Go: %T | ERROR: %v | Duración: %v", nodeID, value, value, err, time.Since(startTime))
+		log.Printf("❌ WRITE ERROR | Nodo: %s | Valor: %v (%T) | ERROR: %v", nodeID, value, value, err)
 		if s.methodManager != nil {
 			s.methodManager.OnMethodWrite(nodeID, value, err, time.Since(startTime))
 		}
@@ -518,17 +461,31 @@ func (s *OPCUAService) WriteNode(nodeID string, value interface{}) error {
 	id, err := ua.ParseNodeID(nodeID)
 	if err != nil {
 		err = fmt.Errorf("error parseando NodeID %s: %v", nodeID, err)
-		log.Printf("[WRITE ERROR] Nodo: %s | Valor: %v | Tipo Go: %T | ERROR: %v | Duración: %v", nodeID, value, value, err, time.Since(startTime))
+		log.Printf("❌ WRITE ERROR | Nodo: %s | Valor: %v (%T) | ERROR: %v", nodeID, value, value, err)
 		if s.methodManager != nil {
 			s.methodManager.OnMethodWrite(nodeID, value, err, time.Since(startTime))
 		}
 		return err
 	}
 
+	// Leer el DataType esperado del nodo para diagnóstico
+	dataType, errDataType := s.ReadNodeDataType(nodeID)
+	var dataTypeInfo string
+	if errDataType == nil {
+		if dtNodeID, ok := dataType.(*ua.NodeID); ok {
+			dataTypeInfo = fmt.Sprintf("ns=%d;i=%d", dtNodeID.Namespace(), dtNodeID.IntID())
+		} else {
+			dataTypeInfo = fmt.Sprintf("%v", dataType)
+		}
+	} else {
+		dataTypeInfo = "Desconocido"
+	}
+
 	variant, err := ua.NewVariant(value)
 	if err != nil {
 		err = fmt.Errorf("error creando variant para valor %v: %v", value, err)
-		log.Printf("[WRITE ERROR] Nodo: %s | Valor: %v | Tipo Go: %T | ERROR: %v | Duración: %v", nodeID, value, value, err, time.Since(startTime))
+		log.Printf("❌ WRITE ERROR | Nodo: %s | Valor: %v (%T) | DataType esperado: %s | ERROR: %v",
+			nodeID, value, value, dataTypeInfo, err)
 		if s.methodManager != nil {
 			s.methodManager.OnMethodWrite(nodeID, value, err, time.Since(startTime))
 		}
@@ -548,28 +505,44 @@ func (s *OPCUAService) WriteNode(nodeID string, value interface{}) error {
 	}
 
 	resp, err := s.client.Write(s.ctx, req)
+	duration := time.Since(startTime)
+
 	if err != nil {
 		err = fmt.Errorf("error escribiendo nodo %s: %v", nodeID, err)
+		log.Printf("❌ WRITE FAILED | Nodo: %s | Valor: %v (%T) | DataType: %s | Duración: %v | ERROR: %v",
+			nodeID, value, value, dataTypeInfo, duration, err)
 		if s.methodManager != nil {
-			s.methodManager.OnMethodWrite(nodeID, value, err, time.Since(startTime))
+			s.methodManager.OnMethodWrite(nodeID, value, err, duration)
 		}
 		return err
 	}
 
 	if len(resp.Results) > 0 && resp.Results[0] != ua.StatusOK {
-		err = fmt.Errorf("error en escritura del nodo %s: %v", nodeID, resp.Results[0])
+		statusCode := resp.Results[0]
+		err = fmt.Errorf("error en escritura del nodo %s: %v", nodeID, statusCode)
+
+		log.Printf("┌─────────────────────────────────────────────────────────")
+		log.Printf("│ ❌ WRITE STATUS ERROR")
+		log.Printf("│ Nodo: %s", nodeID)
+		log.Printf("│ Valor enviado: %v", value)
+		log.Printf("│ Tipo Go: %T", value)
+		log.Printf("│ DataType esperado: %s", dataTypeInfo)
+		log.Printf("│ Variant Type: %v", variant.Type())
+		log.Printf("│ Status Code: %v", statusCode)
+		log.Printf("│ Duración: %v", duration)
+		log.Printf("└─────────────────────────────────────────────────────────")
+
 		if s.methodManager != nil {
-			s.methodManager.OnMethodWrite(nodeID, value, err, time.Since(startTime))
+			s.methodManager.OnMethodWrite(nodeID, value, err, duration)
 		}
 		return err
 	}
 
 	// Notificar al method manager sobre el éxito
 	if s.methodManager != nil {
-		s.methodManager.OnMethodWrite(nodeID, value, nil, time.Since(startTime))
+		s.methodManager.OnMethodWrite(nodeID, value, nil, duration)
 	}
 
-	log.Printf("Valor %v escrito exitosamente en nodo %s", value, nodeID)
 	return nil
 }
 
@@ -603,7 +576,7 @@ func (s *OPCUAService) SubscribeToNodes(subscriptionName string, nodeIDs []strin
 				NodeID:      id,
 				AttributeID: ua.AttributeIDValue,
 			},
-			MonitoringMode: ua.MonitoringModeReporting,
+			MonitoringMode:      ua.MonitoringModeReporting,
 			RequestedParameters: nil, // Usar parámetros por defecto del servidor
 		})
 	}
@@ -647,7 +620,7 @@ func (s *OPCUAService) SubscribeToNodes(subscriptionName string, nodeIDs []strin
 						if s.subscriptionManager != nil {
 							s.subscriptionManager.OnSubscriptionData(subscriptionName, nodeID, nodeData)
 						}
-						
+
 						// SEGUNDO: Ejecutar callback personalizado si existe
 						if callback != nil {
 							callback(nodeID, nodeData)
@@ -710,21 +683,21 @@ func (s *OPCUAService) setupDefaultSubscriptions() {
 	if !s.isConnected {
 		return
 	}
-	
+
 	// Usar las constantes definidas en lugar de valores hardcoded
 	nodeIDs := []string{
 		models.BuildNodeID(models.OPCUA_SEGREGATION_METHOD), // ns=4;i=2
 		// models.BuildNodeID(models.OPCUA_HEARTBEAT_METHOD),   // ns=4;i=3 (descomentado si se activa)
 	}
-	
+
 	// Crear suscripción usando las constantes
 	err := s.SubscribeToNodes(models.DEFAULT_SUBSCRIPTION, nodeIDs, nil)
-	
+
 	if err != nil {
 		log.Printf("Error en suscripción por defecto: %v", err)
 	} else {
-		log.Printf("Suscripción por defecto configurada para %d nodos (namespace %d)", 
-				   len(nodeIDs), models.OPCUA_NAMESPACE)
+		log.Printf("Suscripción por defecto configurada para %d nodos (namespace %d)",
+			len(nodeIDs), models.OPCUA_NAMESPACE)
 	}
 }
 
@@ -766,16 +739,16 @@ func findNodeIDByClientHandle(nodeIDs []string, handle uint32) string {
 // startWagoSimulator escribe valores constantemente a las variables WAGO con gran frecuencia
 func (s *OPCUAService) startWagoSimulator() {
 	log.Println("🚀 Iniciando simulador WAGO - Escritura constante con gran frecuencia...")
-	
+
 	contador := 0
 	boleano := false
-	
+
 	for s.isRunning && s.isConnected {
 		contador++
-		
+
 		// Alternar booleano cada ciclo
 		boleano = !boleano
-		
+
 		// Escribir a todas las variables WAGO constantemente
 		variables := map[string]interface{}{
 			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.BoleanoTest": boleano,
@@ -785,7 +758,7 @@ func (s *OPCUAService) startWagoSimulator() {
 			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.StringTest":  fmt.Sprintf("Ciclo_%d", contador),
 			"ns=4;s=|var|WAGO TEST.Application.DB_OPC.WordTest":    uint16(contador % 65536),
 		}
-		
+
 		for nodeID, valor := range variables {
 			if err := s.WriteNode(nodeID, valor); err != nil {
 				log.Printf("🔥 Error simulador en %s: %v", nodeID, err)
@@ -793,15 +766,15 @@ func (s *OPCUAService) startWagoSimulator() {
 				log.Printf("✍️  Simulador: %s = %v", nodeID, valor)
 			}
 		}
-		
+
 		// Frecuencia alta: cada 100ms
 		time.Sleep(100 * time.Millisecond)
-		
+
 		// Log cada 50 ciclos para no spam
 		if contador%50 == 0 {
 			log.Printf("🔄 Simulador WAGO - Ciclo %d completado", contador)
 		}
 	}
-	
+
 	log.Println("🛑 Simulador WAGO detenido")
 }

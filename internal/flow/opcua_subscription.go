@@ -7,7 +7,7 @@ import (
 
 	"API-GREENEX/internal/listeners"
 	"API-GREENEX/internal/models"
-    "API-GREENEX/internal/shared"   
+	"API-GREENEX/internal/shared"
 )
 
 type SubscriptionManager struct {
@@ -69,7 +69,7 @@ func (sm *SubscriptionManager) handleSubscriptionData(data SubscriptionData) {
 	// Convertir StatusCode a string legible
 	qualityStr := sm.statusCodeToString(data.Data.Quality)
 	nodeShort := sm.getShortNodeName(data.NodeID)
-	log.Printf("� LECTURA [%s] Nodo: %s | Valor: %v | Calidad: %s | Timestamp: %s", 
+	log.Printf("� LECTURA [%s] Nodo: %s | Valor: %v | Calidad: %s | Timestamp: %s",
 		data.SubscriptionName, nodeShort, data.Data.Value, qualityStr, data.Data.Timestamp.Format("15:04:05"))
 
 	// Procesar lógica específica de suscripción
@@ -96,46 +96,28 @@ func (sm *SubscriptionManager) processSubscriptionLogic(data SubscriptionData) {
 // handleWagoVectorSubscription se activa cuando llega un dato de los vectores de WAGO.
 func (sm *SubscriptionManager) handleWagoVectorSubscription(data SubscriptionData) {
 	if sm.opcuaWriter == nil {
-		log.Println("Advertencia: opcuaWriter no está configurado en SubscriptionManager. No se puede escribir.")
 		return
 	}
 
-	log.Printf("🔄 Procesando suscripción de vector WAGO: %s", data.NodeID)
-
+	// Procesar sin logs de lectura
 	switch data.NodeID {
 	case models.WAGO_VectorBool:
-		// VectorBool es un array de Boolean
-		log.Printf("🔵 WAGO VectorBool recibido: %v (tipo: %T)", data.Data.Value, data.Data.Value)
 		if val, ok := data.Data.Value.([]bool); ok && len(val) > 0 {
-			log.Printf("✉️ ENVÍO [BoleanoTest] Valor: %v -> %v", val[0], !val[0])
 			sm.opcuaWriter.QueueWriteRequest(models.WAGO_BoleanoTest, shared.CastWagoValue(models.WAGO_BoleanoTest, !val[0]))
-		} else {
-			log.Printf("❌ Error: VectorBool no es []bool o está vacío")
 		}
 
 	case models.WAGO_VectorInt:
-		// VectorInt es un array de Int16
-		log.Printf("🔢 WAGO VectorInt recibido: %v (tipo: %T)", data.Data.Value, data.Data.Value)
 		if val, ok := data.Data.Value.([]int16); ok && len(val) > 0 {
 			newValue := val[0] + 1
-			log.Printf("✉️ ENVÍO [EnteroTest] Valor: %d -> %d", val[0], newValue)
 			sm.opcuaWriter.QueueWriteRequest(models.WAGO_EnteroTest, shared.CastWagoValue(models.WAGO_EnteroTest, newValue))
-		} else {
-			log.Printf("❌ Error: VectorInt no es []int16 o está vacío")
 		}
 
 	case models.WAGO_VectorWord:
-		// VectorWord es un array de UInt16
-		log.Printf("🔤 WAGO VectorWord recibido: %v (tipo: %T)", data.Data.Value, data.Data.Value)
 		if val, ok := data.Data.Value.([]uint16); ok && len(val) > 0 {
 			newWordValue := val[0] + 10
-			log.Printf("✉️ ENVÍO [WordTest] Valor: %d -> %d", val[0], newWordValue)
 			sm.opcuaWriter.QueueWriteRequest(models.WAGO_WordTest, shared.CastWagoValue(models.WAGO_WordTest, newWordValue))
 			newStringValue := fmt.Sprintf("Word_%d", val[0])
-			log.Printf("✉️ ENVÍO [StringTest] Valor: %d -> %s", val[0], newStringValue)
 			sm.opcuaWriter.QueueWriteRequest(models.WAGO_StringTest, shared.CastWagoValue(models.WAGO_StringTest, newStringValue))
-		} else {
-			log.Printf("❌ Error: VectorWord no es []uint16 o está vacío")
 		}
 	}
 }

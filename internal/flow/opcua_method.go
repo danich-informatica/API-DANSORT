@@ -9,91 +9,96 @@ import (
 )
 
 type MethodManager struct {
-    isRunning bool
-    dataChan  chan MethodData
+	isRunning bool
+	dataChan  chan MethodData
 }
 
 // Estructura para datos de métodos
 type MethodData struct {
-    Operation   string // "read", "write", "call"
-    NodeID      string
-    Value       interface{}
-    Result      interface{}
-    Error       error
-    ReceivedAt  time.Time
-    Duration    time.Duration
+	Operation  string // "read", "write", "call"
+	NodeID     string
+	Value      interface{}
+	Result     interface{}
+	Error      error
+	ReceivedAt time.Time
+	Duration   time.Duration
 }
 
 // NewMethodManager crea una nueva instancia del manager de métodos
 func NewMethodManager() *MethodManager {
-    return &MethodManager{
-        isRunning: false,
-        dataChan:  make(chan MethodData, 100),
-    }
+	return &MethodManager{
+		isRunning: false,
+		dataChan:  make(chan MethodData, 100),
+	}
 }
 
 // Start inicia el manager de métodos
 func (mm *MethodManager) Start() {
-    log.Println("Iniciando Method Manager...")
-    mm.isRunning = true
-    
-    // Procesar datos de métodos
-    go mm.processMethodData()
-    
-    // Mantener el manager corriendo
-    for mm.isRunning {
-        time.Sleep(1 * time.Second)
-    }
+	log.Println("Iniciando Method Manager...")
+	mm.isRunning = true
+
+	// Procesar datos de métodos
+	go mm.processMethodData()
+
+	// Mantener el manager corriendo
+	for mm.isRunning {
+		time.Sleep(1 * time.Second)
+	}
 }
 
 // processMethodData procesa los datos de métodos
 func (mm *MethodManager) processMethodData() {
-    for mm.isRunning {
-        select {
-        case data := <-mm.dataChan:
-            mm.handleMethodData(data)
-        case <-time.After(100 * time.Millisecond):
-            // Timeout para permitir verificar isRunning
-        }
-    }
+	for mm.isRunning {
+		select {
+		case data := <-mm.dataChan:
+			mm.handleMethodData(data)
+		case <-time.After(100 * time.Millisecond):
+			// Timeout para permitir verificar isRunning
+		}
+	}
 }
 
 // handleMethodData maneja los datos de métodos
 func (mm *MethodManager) handleMethodData(data MethodData) {
-    // Log detallado de la comunicación de métodos
-	log.Printf("╔═══ MÉTODO OPC UA ═══╗")
-	log.Printf("║ Operación: %-10s ║", data.Operation)
-	if data.Value != nil {
-		log.Printf("║ Valor: %-12v ║", data.Value)
+	// Solo loggear si hay error o si es una operación 'call'
+	if data.Error != nil || data.Operation == "call" {
+		log.Printf("╔═══ MÉTODO OPC UA ═══╗")
+		log.Printf("║ Operación: %-10s ║", data.Operation)
+		if data.Value != nil {
+			log.Printf("║ Valor: %-12v ║", data.Value)
+		}
+		if data.Result != nil {
+			log.Printf("║ Resultado: %-11v ║", data.Result)
+		}
+		if data.Duration > 0 {
+			log.Printf("║ Duración: %-11s ║", data.Duration.String())
+		}
+		if data.Error != nil {
+			log.Printf("║ Error: %-13v ║", data.Error)
+		}
+		log.Printf("║ Ejecutado: %-10s ║", data.ReceivedAt.Format("15:04:05"))
+		log.Printf("╚═══════════════════════╝")
 	}
-	if data.Result != nil {
-		log.Printf("║ Resultado: %-11v ║", data.Result)
-	}
-	if data.Duration > 0 {
-		log.Printf("║ Duración: %-11s ║", data.Duration.String())
-	}
-	log.Printf("║ Ejecutado: %-10s ║", data.ReceivedAt.Format("15:04:05"))
-	log.Printf("╚═══════════════════════╝")
-    
-    // Procesar lógica específica del método
-    mm.processMethodLogic(data)
+
+	// Procesar lógica específica del método
+	mm.processMethodLogic(data)
 }
 
 // processMethodLogic procesa la lógica específica de métodos usando constantes
 func (mm *MethodManager) processMethodLogic(data MethodData) {
-    // Identificar si es un método conocido usando constantes
-    mm.identifyMethodByNodeID(data)
-    
-    switch data.Operation {
-    case "read":
-        mm.handleReadOperation(data)
-    case "write":
-        mm.handleWriteOperation(data)
-    case "call":
-        mm.handleCallOperation(data)
-    default:
-        mm.handleGenericOperation(data)
-    }
+	// Identificar si es un método conocido usando constantes
+	mm.identifyMethodByNodeID(data)
+
+	switch data.Operation {
+	case "read":
+		mm.handleReadOperation(data)
+	case "write":
+		mm.handleWriteOperation(data)
+	case "call":
+		mm.handleCallOperation(data)
+	default:
+		mm.handleGenericOperation(data)
+	}
 }
 
 // identifyMethodByNodeID identifica el método basado en las constantes
@@ -228,38 +233,36 @@ func (mm *MethodManager) processDataByNodeType(nodeID string, data *listeners.No
 	}
 }
 
-
-
 // handleGenericOperation maneja operaciones genéricas
 func (mm *MethodManager) handleGenericOperation(data MethodData) {
-    log.Printf("🔧 Operación genérica: %s en %s", data.Operation, data.NodeID)
+	log.Printf("🔧 Operación genérica: %s en %s", data.Operation, data.NodeID)
 }
 
 // Métodos específicos para manejo de errores y resultados
 
 func (mm *MethodManager) handleReadError(data MethodData) {
-    // Lógica específica para errores de lectura
-    log.Printf("🔍 Analizando error de lectura en %s", data.NodeID)
+	// Lógica específica para errores de lectura
+	log.Printf("🔍 Analizando error de lectura en %s", data.NodeID)
 }
 
 func (mm *MethodManager) handleWriteError(data MethodData) {
-    // Lógica específica para errores de escritura
-    log.Printf("✏️  Analizando error de escritura en %s", data.NodeID)
+	// Lógica específica para errores de escritura
+	log.Printf("✏️  Analizando error de escritura en %s", data.NodeID)
 }
 
 func (mm *MethodManager) processWriteConfirmation(data MethodData) {
-    // Lógica específica para confirmación de escritura
-    log.Printf("✏️  Escritura confirmada en %s", data.NodeID)
+	// Lógica específica para confirmación de escritura
+	log.Printf("✏️  Escritura confirmada en %s", data.NodeID)
 }
 
 func (mm *MethodManager) handleCallError(data MethodData) {
-    // Lógica específica para errores de llamada
-    log.Printf("📞 Analizando error de llamada en %s", data.NodeID)
+	// Lógica específica para errores de llamada
+	log.Printf("📞 Analizando error de llamada en %s", data.NodeID)
 }
 
 func (mm *MethodManager) processCallResult(data MethodData) {
-    // Lógica específica para resultados de llamada
-    log.Printf("📞 Resultado de llamada procesado para %s", data.NodeID)
+	// Lógica específica para resultados de llamada
+	log.Printf("📞 Resultado de llamada procesado para %s", data.NodeID)
 }
 
 // Métodos públicos para enviar datos al manager
@@ -289,78 +292,78 @@ func (mm *MethodManager) OnMethodRead(nodeID string, result *listeners.NodeData,
 
 // OnMethodWrite envía datos de escritura al manager
 func (mm *MethodManager) OnMethodWrite(nodeID string, value interface{}, err error, duration time.Duration) {
-    if !mm.isRunning {
-        return
-    }
-    
-    methodData := MethodData{
-        Operation:  "write",
-        NodeID:     nodeID,
-        Value:      value,
-        Error:      err,
-        ReceivedAt: time.Now(),
-        Duration:   duration,
-    }
-    
-    select {
-    case mm.dataChan <- methodData:
-        // Enviado exitosamente
-    default:
-        log.Printf("⚠️  Warning: Method Manager channel full, dropping write data for %s", nodeID)
-    }
+	if !mm.isRunning {
+		return
+	}
+
+	methodData := MethodData{
+		Operation:  "write",
+		NodeID:     nodeID,
+		Value:      value,
+		Error:      err,
+		ReceivedAt: time.Now(),
+		Duration:   duration,
+	}
+
+	select {
+	case mm.dataChan <- methodData:
+		// Enviado exitosamente
+	default:
+		log.Printf("⚠️  Warning: Method Manager channel full, dropping write data for %s", nodeID)
+	}
 }
 
 // OnMethodCall envía datos de llamada a método al manager
 func (mm *MethodManager) OnMethodCall(nodeID string, inputArgs interface{}, result interface{}, err error, duration time.Duration) {
-    if !mm.isRunning {
-        return
-    }
-    
-    methodData := MethodData{
-        Operation:  "call",
-        NodeID:     nodeID,
-        Value:      inputArgs,
-        Result:     result,
-        Error:      err,
-        ReceivedAt: time.Now(),
-        Duration:   duration,
-    }
-    
-    select {
-    case mm.dataChan <- methodData:
-        // Enviado exitosamente
-    default:
-        log.Printf("⚠️  Warning: Method Manager channel full, dropping call data for %s", nodeID)
-    }
+	if !mm.isRunning {
+		return
+	}
+
+	methodData := MethodData{
+		Operation:  "call",
+		NodeID:     nodeID,
+		Value:      inputArgs,
+		Result:     result,
+		Error:      err,
+		ReceivedAt: time.Now(),
+		Duration:   duration,
+	}
+
+	select {
+	case mm.dataChan <- methodData:
+		// Enviado exitosamente
+	default:
+		log.Printf("⚠️  Warning: Method Manager channel full, dropping call data for %s", nodeID)
+	}
 }
 
 // Stop detiene el manager de métodos
 func (mm *MethodManager) Stop() {
-    log.Println("Deteniendo Method Manager...")
-    mm.isRunning = false
-    
-    // Cerrar channel
-    close(mm.dataChan)
-    
-    log.Println("Method Manager detenido")
+	log.Println("Deteniendo Method Manager...")
+	mm.isRunning = false
+
+	// Cerrar channel
+	close(mm.dataChan)
+
+	log.Println("Method Manager detenido")
 }
 
 // GetStats retorna estadísticas del manager de métodos
 func (mm *MethodManager) GetStats() map[string]interface{} {
-    return map[string]interface{}{
-        "running":    mm.isRunning,
-        "queue_size": len(mm.dataChan),
-        "queue_cap":  cap(mm.dataChan),
-    }
+	return map[string]interface{}{
+		"running":    mm.isRunning,
+		"queue_size": len(mm.dataChan),
+		"queue_cap":  cap(mm.dataChan),
+	}
 }
 
 // GetOperationStats retorna estadísticas por operación
 func (mm *MethodManager) GetOperationStats() map[string]int {
-    // Implementar contadores de operaciones si es necesario
-    return map[string]int{
-        "reads":  0,
-        "writes": 0,
-        "calls":  0,
-        "errors": 0,
-    }
+	// Implementar contadores de operaciones si es necesario
+	return map[string]int{
+		"reads":  0,
+		"writes": 0,
+		"calls":  0,
+		"errors": 0,
+	}
 }
