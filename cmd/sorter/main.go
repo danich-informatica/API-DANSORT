@@ -44,7 +44,7 @@ func main() {
 	cognexListener := listeners.NewCognexListener(cognexHost, cognexPort, scanMethod, dbManager)
 
 	// 5. Crear el sorter
-	s := sorter.GetNewSorter(sorterID, sorterUbicacion, salidas, *cognexListener)
+	s := sorter.GetNewSorter(sorterID, sorterUbicacion, salidas, cognexListener)
 
 	// 6. Iniciar el sorter
 	err = s.Start()

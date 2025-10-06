@@ -20,10 +20,13 @@ type CognexListener struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	dbManager   *db.PostgresManager
+	EventChan   chan models.LecturaEvent
+	dispositivo string
 }
 
 func NewCognexListener(host string, port int, scan_method string, dbManager *db.PostgresManager) *CognexListener {
 	ctx, cancel := context.WithCancel(context.Background())
+	dispositivo := fmt.Sprintf("Cognex-%s:%d", host, port)
 	return &CognexListener{
 		host:        host,
 		port:        port,
@@ -31,6 +34,8 @@ func NewCognexListener(host string, port int, scan_method string, dbManager *db.
 		scan_method: scan_method,
 		cancel:      cancel,
 		dbManager:   dbManager,
+		EventChan:   make(chan models.LecturaEvent, 100), // buffer para 100 eventos
+		dispositivo: dispositivo,
 	}
 }
 
@@ -121,11 +126,16 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 func (c *CognexListener) processMessage(message string, conn net.Conn) {
 	log.Printf("📦 Mensaje recibido de %s: %s", conn.RemoteAddr().String(), message)
 
-	message_splitted := strings.Split(message, ";")
-	if c.scan_method == "QR" {
-		if message == "" || strings.TrimSpace(message) == "" {
+	message = strings.TrimSpace(message)
+	switch c.scan_method {
+	case "QR":
+		message_splitted := strings.Split(message, ";")
+		if message == "" {
 			log.Printf("❌ Mensaje vacío recibido")
 			response := "NACK\r\n"
+
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("mensaje vacío"), message, c.dispositivo)
+
 			conn.Write([]byte(response))
 			return
 		}
@@ -133,6 +143,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if strings.TrimSpace(message) == models.NO_READ_CODE {
 			log.Printf("❌ Código NO_READ recibido")
 			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("NO_READ"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
 		}
@@ -140,6 +151,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if len(message_splitted) < 6 {
 			log.Printf("❌ Mensaje inválido (partes insuficientes): %s (tiene %d partes, necesita 6)", message, len(message_splitted))
 			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("formato inválido"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
 		}
@@ -154,6 +166,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if especie == "" || calibre == "" || embalaje == "" || variedad == "" {
 			log.Printf("❌ Componentes vacíos en mensaje: %s", message)
 			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("componentes vacíos"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
 		}
@@ -163,6 +176,15 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if err != nil {
 			log.Printf("❌ SKU inválido generado desde mensaje: %s | Error: %v", message, err)
 			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallidaConDatos(
+				err,
+				especie,
+				calibre,
+				variedad,
+				embalaje,
+				message,
+				c.dispositivo,
+			)
 			conn.Write([]byte(response))
 			return
 		}
@@ -179,14 +201,33 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if err != nil {
 			log.Printf("❌ Error al insertar caja en DB desde mensaje: %s | Error: %v", message, err)
 			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallidaConDatos(
+				fmt.Errorf("error al insertar: %w", err),
+				especie,
+				calibre,
+				variedad,
+				embalaje,
+				message,
+				c.dispositivo,
+			)
 			conn.Write([]byte(response))
 			return
 		}
 
 		log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", correlativo, sku.SKU, especie)
-	} else if c.scan_method == "DATAMATRIX" {
+		c.EventChan <- models.NewLecturaExitosa(
+			sku.SKU,
+			especie,
+			calibre,
+			variedad,
+			embalaje,
+			correlativo,
+			message,
+			c.dispositivo,
+		)
+	case "DATAMATRIX":
 		log.Printf("✅ Escaneo DataMatrix válido: %s ", strings.TrimSpace(message))
-	} else {
+	default:
 		log.Printf("❌ Método de escaneo desconocido: %s", c.scan_method)
 		response := "NACK\r\n"
 		conn.Write([]byte(response))
@@ -209,6 +250,8 @@ func (c *CognexListener) Stop() error {
 	if c.listener != nil {
 		return c.listener.Close()
 	}
+
+	close(c.EventChan)
 
 	return nil
 }
