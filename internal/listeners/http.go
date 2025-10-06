@@ -114,10 +114,6 @@ func (h *HTTPFrontend) setupRoutes() {
 
 		c.JSON(http.StatusOK, jsonResponse)
 	})
-
-	// === RUTAS WAGO ESPECÍFICAS ===
-	h.router.GET("/wago/:variable", h.readWagoVariable)
-	h.router.POST("/wago/:variable", h.writeWagoVariable)
 }
 
 func (h *HTTPFrontend) Start() error {

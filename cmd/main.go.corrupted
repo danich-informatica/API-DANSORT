@@ -5,9 +5,20 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"time"
+		// 3. Crear e iniciar el servidor HTTP con endpoints
+	httpPort := getEnv("HTTP_PORT", "8080")
+	httpService := listeners.NewHTTPFrontend(httpPort)
 
-	"API-GREENEX/internal/db"
+	log.Printf("🌐 Servidor HTTP iniciando en puerto %s...", httpPort)
+	log.Println("📊 Endpoints disponibles:")
+	log.Println("   GET  /Mesa/Estado")
+	log.Println("   POST /Mesa")
+	log.Println("   POST /Mesa/Vaciar")
+
+	// Iniciar servidor HTTP con las rutas configuradas
+	if err := httpService.Start(); err != nil {
+		log.Fatalf("❌ Error al iniciar servidor HTTP: %v", err)
+	}GREENEX/internal/db"
 	"API-GREENEX/internal/listeners"
 )
 
@@ -16,7 +27,7 @@ func main() {
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.Ldate | log.Ltime)
 
-	println(`
+	log.Println(`
     ░█████╗░██████╗░██╗░░░░░░░██████╗░██████╗░███████╗███████╗███╗░░██╗███████╗██╗░░██╗
     ██╔══██╗██╔══██╗██║░░░░░░██╔════╝░██╔══██╗██╔════╝██╔════╝████╗░██║██╔════╝╚██╗██╔╝
     ███████║██████╔╝██║█████╗██║░░██╗░██████╔╝█████╗░░█████╗░░██╔██╗██║█████╗░░░╚███╔╝░
@@ -25,7 +36,7 @@ func main() {
     ╚═╝░░╚═╝╚═╝░░░░░╚═╝░░░░░░░╚═════╝░╚═╝░░╚═╝╚══════╝╚══════╝╚═╝░░╚══╝╚══════╝╚═╝░░╚═╝
     `)
 
-	println("Iniciando API-Greenex...")
+	log.Println("Iniciando API-Greenex...")
 
 	// 1. Inicializar la conexión a PostgreSQL
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

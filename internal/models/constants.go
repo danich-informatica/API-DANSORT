@@ -77,6 +77,10 @@ const (
     }`
 )
 
+const (
+	NO_READ_CODE = "NO_READ"
+)
+
 // Función helper para construir NodeIDs con el namespace correcto
 func BuildNodeID(identifier int32) string {
 	return fmt.Sprintf("ns=%d;i=%d", OPCUA_NAMESPACE, identifier)

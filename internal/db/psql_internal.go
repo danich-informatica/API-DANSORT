@@ -94,6 +94,95 @@ func (m *PostgresManager) InsertSKUsBatch(ctx context.Context, skus []struct {
 	return inserted, skipped, errors
 }
 
+// CajaInfo representa información de una caja para el dashboard
+type CajaInfo struct {
+	Correlativo string
+	Especie     string
+	Variedad    string
+	Calibre     string
+	Embalaje    string
+	Fecha       string
+}
+
+// GetRecentBoxes obtiene las últimas N cajas procesadas
+func (m *PostgresManager) GetRecentBoxes(ctx context.Context, limit int) ([]CajaInfo, error) {
+	if m == nil || m.pool == nil {
+		return nil, fmt.Errorf("manager no inicializado")
+	}
+
+	rows, err := m.pool.Query(ctx, SELECT_RECENT_BOXES_INTERNAL_DB, limit)
+	if err != nil {
+		return nil, fmt.Errorf("error al consultar cajas recientes: %w", err)
+	}
+	defer rows.Close()
+
+	var cajas []CajaInfo
+	for rows.Next() {
+		var caja CajaInfo
+		err := rows.Scan(
+			&caja.Correlativo,
+			&caja.Especie,
+			&caja.Variedad,
+			&caja.Calibre,
+			&caja.Embalaje,
+			&caja.Fecha,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error al escanear fila: %w", err)
+		}
+		cajas = append(cajas, caja)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error al iterar filas: %w", err)
+	}
+
+	return cajas, nil
+}
+
+// GetTotalBoxesCount obtiene el total de cajas procesadas
+func (m *PostgresManager) GetTotalBoxesCount(ctx context.Context) (int, error) {
+	if m == nil || m.pool == nil {
+		return 0, fmt.Errorf("manager no inicializado")
+	}
+
+	var count int
+	err := m.pool.QueryRow(ctx, COUNT_BOXES_INTERNAL_DB).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("error al contar cajas: %w", err)
+	}
+
+	return count, nil
+}
+
+// PostgresDBAdapter adapta PostgresManager a la interfaz requerida por HTTPFrontend
+type PostgresDBAdapter struct {
+	manager *PostgresManager
+}
+
+// NewPostgresDBAdapter crea un nuevo adaptador
+func NewPostgresDBAdapter(manager *PostgresManager) *PostgresDBAdapter {
+	return &PostgresDBAdapter{manager: manager}
+}
+
+// GetRecentBoxes implementa la interfaz con tipos interface{}
+func (a *PostgresDBAdapter) GetRecentBoxes(ctx interface{}, limit int) (interface{}, error) {
+	ctxTyped, ok := ctx.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("contexto inválido")
+	}
+	return a.manager.GetRecentBoxes(ctxTyped, limit)
+}
+
+// GetTotalBoxesCount implementa la interfaz con tipos interface{}
+func (a *PostgresDBAdapter) GetTotalBoxesCount(ctx interface{}) (int, error) {
+	ctxTyped, ok := ctx.(context.Context)
+	if !ok {
+		return 0, fmt.Errorf("contexto inválido")
+	}
+	return a.manager.GetTotalBoxesCount(ctxTyped)
+}
+
 // InsertSKU inserta una única SKU en la base de datos
 // Excluye SKUs nulas, inválidas y duplicadas
 func (m *PostgresManager) InsertSKU(ctx context.Context, calibre, variedad, embalaje string) error {
@@ -106,13 +195,7 @@ func (m *PostgresManager) InsertSKU(ctx context.Context, calibre, variedad, emba
 		return fmt.Errorf("SKU inválida: componentes nulos o vacíos")
 	}
 
-	query := `
-		INSERT INTO sku (calibre, variedad, embalaje, estado)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (calibre, variedad, embalaje) DO NOTHING
-	`
-
-	result, err := m.pool.Exec(ctx, query,
+	result, err := m.pool.Exec(ctx, INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB,
 		strings.TrimSpace(calibre),
 		strings.TrimSpace(variedad),
 		strings.TrimSpace(embalaje),
@@ -140,9 +223,7 @@ func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]struct {
 		return nil, fmt.Errorf("manager no inicializado")
 	}
 
-	query := `SELECT calibre, variedad, embalaje, estado FROM sku ORDER BY variedad, calibre, embalaje`
-
-	rows, err := m.pool.Query(ctx, query)
+	rows, err := m.pool.Query(ctx, SELECT_ALL_SKUS_INTERNAL_DB)
 	if err != nil {
 		return nil, fmt.Errorf("error al consultar SKUs: %w", err)
 	}
@@ -183,10 +264,8 @@ func (m *PostgresManager) CheckSKUExists(ctx context.Context, calibre, variedad,
 		return false, fmt.Errorf("manager no inicializado")
 	}
 
-	query := `SELECT EXISTS(SELECT 1 FROM sku WHERE calibre = $1 AND variedad = $2 AND embalaje = $3)`
-
 	var exists bool
-	err := m.pool.QueryRow(ctx, query,
+	err := m.pool.QueryRow(ctx, SELECT_IF_EXISTS_SKU_INTERNAL_DB,
 		strings.TrimSpace(calibre),
 		strings.TrimSpace(variedad),
 		strings.TrimSpace(embalaje)).Scan(&exists)
