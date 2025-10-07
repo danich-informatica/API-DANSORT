@@ -1,10 +1,10 @@
 package web
 
 import (
-	"fmt"
-	"net/http"
 	"API-GREENEX/internal/listeners"
 	"API-GREENEX/internal/models"
+	"fmt"
+	"net/http"
 )
 
 // StatusPageHandler sirve una página web con el estado de todos los nodos WAGO
@@ -107,9 +107,26 @@ func StatusPageHandler(service *listeners.OPCUAService) http.HandlerFunc {
 		<h1>Estado de Nodos WAGO</h1>
 		<table>
 			<tr><th>Tipo</th><th>NodeID</th><th>Valor</th><th>Calidad</th><th>Timestamp</th></tr>
-`) 
+`)
 		for _, nodeID := range nodes {
 			data, err := service.ReadNode(nodeID)
+
+			// Si hay error o data es nil, mostrar fila de error
+			if err != nil || data == nil {
+				errorMsg := "No conectado"
+				if err != nil {
+					errorMsg = err.Error()
+				}
+				fmt.Fprintf(w, `<tr>
+					<td><svg class='icon' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='#f44336'/><text x='12' y='16' text-anchor='middle' font-size='18' fill='#fff'>✗</text></svg></td>
+					<td><code>%s</code></td>
+					<td>—</td>
+					<td style='color: #f44336;'>Error: %s</td>
+					<td>—</td>
+				</tr>`, nodeID, errorMsg)
+				continue
+			}
+
 			var iconSVG string
 			var barHTML string
 			// Iconos por tipo de nodo
@@ -162,10 +179,7 @@ func StatusPageHandler(service *listeners.OPCUAService) http.HandlerFunc {
 				val := v
 				barHTML = fmt.Sprintf(`<div class='bar' style='width:%.0fpx'></div>`, val)
 			}
-			if err != nil {
-				fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td><td colspan='3' class='error'>Error: %v</td></tr>", iconSVG, nodeID, err)
-				continue
-			}
+
 			calidadClass := "ok"
 			if data.Quality != 0 {
 				calidadClass = "error"

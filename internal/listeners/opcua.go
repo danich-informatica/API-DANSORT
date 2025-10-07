@@ -498,7 +498,8 @@ func (s *OPCUAService) WriteNode(nodeID string, value interface{}) error {
 				NodeID:      id,
 				AttributeID: ua.AttributeIDValue,
 				Value: &ua.DataValue{
-					Value: variant,
+					EncodingMask: ua.DataValueValue, // ← CRÍTICO para WAGO/Codesys
+					Value:        variant,
 				},
 			},
 		},
