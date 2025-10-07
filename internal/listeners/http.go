@@ -234,10 +234,14 @@ func (h *HTTPFrontend) setupRoutes() {
 		// Buscar en qué sorter está la salida (sealer_id es único globalmente)
 		var targetSorter SorterInterface
 		var assignError error
+		var calibre, variedad, embalaje string
 		for _, sorter := range h.sorters {
-			err := sorter.AssignSKUToSalida(skuID, request.SealerID)
+			cal, var_, emb, err := sorter.AssignSKUToSalida(skuID, request.SealerID)
 			if err == nil {
 				targetSorter = sorter
+				calibre = cal
+				variedad = var_
+				embalaje = emb
 				break
 			}
 			// Guardar el error más relevante
@@ -262,6 +266,19 @@ func (h *HTTPFrontend) setupRoutes() {
 				"sealer_id": request.SealerID,
 			})
 			return
+		}
+
+		// Insertar asignación en la base de datos
+		if h.postgresMgr != nil {
+			if dbMgr, ok := h.postgresMgr.(interface {
+				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error
+			}); ok {
+				ctx := c.Request.Context()
+				if err := dbMgr.InsertSalidaSKU(ctx, request.SealerID, calibre, variedad, embalaje); err != nil {
+					// Log el error pero no fallar el request (asignación en memoria ya está hecha)
+					fmt.Printf("⚠️  Error al insertar asignación en DB: %v\n", err)
+				}
+			}
 		}
 
 		c.JSON(http.StatusOK, gin.H{

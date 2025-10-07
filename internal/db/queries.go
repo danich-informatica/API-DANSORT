@@ -93,8 +93,8 @@ const INSERT_NEW_SORTER_IF_NOT_EXISTS_INTERNAL_DB = `
 `
 
 const INSERT_NEW_SALIDA_IF_NOT_EXISTS_INTERNAL_DB = `
-	INSERT INTO salida (id, sorter, salida_sorter, estado, calibre, variedad, embalaje)
-	VALUES ($1, $2, $3, $4, $5, $6, $7)
+	INSERT INTO salida (id, sorter, salida_sorter, estado)
+	VALUES ($1, $2, $3, $4)
 	ON CONFLICT (id) DO NOTHING
 `
 const SELECT_ALL_SORTERS_AND_OUTPUTS_INTERNAL_DB = `
@@ -103,10 +103,7 @@ const SELECT_ALL_SORTERS_AND_OUTPUTS_INTERNAL_DB = `
 		s.ubicacion AS sorter_ubicacion,
 		sal.id AS salida_id,
 		sal.salida_sorter AS salida_sorter,
-		sal.estado AS salida_estado,
-		sal.calibre AS salida_calibre,
-		sal.variedad AS salida_variedad,
-		sal.embalaje AS salida_embalaje
+		sal.estado AS salida_estado
 	FROM sorter s
 	LEFT JOIN salida sal ON s.id = sal.sorter
 	ORDER BY s.id, sal.id;
@@ -117,11 +114,15 @@ const SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB = `
 		sal.id AS salida_id,
 		sal.salida_sorter AS salida_sorter,
 		sal.estado AS salida_estado,
-		sal.calibre AS salida_calibre,
-		sal.variedad AS salida_variedad,
-		sal.embalaje AS salida_embalaje
+		sku.calibre AS salida_calibre,
+		sku.variedad AS salida_variedad,
+		sku.embalaje AS salida_embalaje
 	FROM sorter s
 	JOIN salida sal ON s.id = sal.sorter
-	WHERE s.id = $1
-	ORDER BY sal.id;
+	JOIN salida_sku sku ON sal.id = sku.salida_id
+`
+const INSERT_SALIDA_SKU_INTERNAL_DB = `
+	INSERT INTO salida_sku (salida_id, calibre, variedad, embalaje)
+	VALUES ($1, $2, $3, $4)
+	ON CONFLICT (salida_id, calibre, variedad, embalaje) DO NOTHING
 `

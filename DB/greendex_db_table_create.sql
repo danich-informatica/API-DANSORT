@@ -74,15 +74,22 @@ CREATE TABLE salida (
     sorter         INT NOT NULL,
     salida_sorter  INT NOT NULL,
     estado         BOOLEAN NOT NULL DEFAULT TRUE,
-    calibre        VARCHAR(50)  DEFAULT NULL,
-    variedad       VARCHAR(100) DEFAULT NULL,
-    embalaje       VARCHAR(50)  DEFAULT NULL,
     CONSTRAINT fk_salida_sorter FOREIGN KEY (sorter)
-        REFERENCES sorter (id) ON DELETE CASCADE,
-    CONSTRAINT fk_salida_sku FOREIGN KEY (calibre, variedad, embalaje)
-        REFERENCES sku (calibre, variedad, embalaje) ON DELETE SET NULL
+        REFERENCES sorter (id) ON DELETE CASCADE
 );
 CREATE INDEX idx_salida_sorter ON salida (sorter);
+
+CREATE TABLE salida_sku (
+    salida_id   INT NOT NULL,
+    calibre     VARCHAR(50)  NOT NULL,
+    variedad    VARCHAR(100) NOT NULL,
+    embalaje    VARCHAR(50)  NOT NULL,
+    CONSTRAINT pk_salida_sku PRIMARY KEY (salida_id, calibre, variedad, embalaje),
+    CONSTRAINT fk_salida_sku_salida FOREIGN KEY (salida_id)
+        REFERENCES salida (id) ON DELETE CASCADE,
+    CONSTRAINT fk_salida_sku_sku FOREIGN KEY (calibre, variedad, embalaje)
+        REFERENCES sku (calibre, variedad, embalaje) ON DELETE SET NULL
+);
 
 -- =======================
 -- Mesa

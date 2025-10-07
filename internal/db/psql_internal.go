@@ -276,13 +276,25 @@ func (m *PostgresManager) InsertSorterIfNotExists(ctx context.Context, id int, u
 }
 
 // Inserta una salida en la base de datos si no existe usando la query de queries.go
-func (m *PostgresManager) InsertSalidaIfNotExists(ctx context.Context, id int, sorterID int, salidaSorter int, estado bool, calibre, variedad, embalaje *string) error {
+func (m *PostgresManager) InsertSalidaIfNotExists(ctx context.Context, id int, sorterID int, salidaSorter int, estado bool) error {
 	if m == nil || m.pool == nil {
 		return fmt.Errorf("manager no inicializado")
 	}
-	_, err := m.pool.Exec(ctx, INSERT_NEW_SALIDA_IF_NOT_EXISTS_INTERNAL_DB, id, sorterID, salidaSorter, estado, calibre, variedad, embalaje)
+	_, err := m.pool.Exec(ctx, INSERT_NEW_SALIDA_IF_NOT_EXISTS_INTERNAL_DB, id, sorterID, salidaSorter, estado)
 	if err != nil {
 		return fmt.Errorf("error al insertar salida: %w", err)
+	}
+	return nil
+}
+
+// InsertSalidaSKU inserta una asignación de SKU a salida en la tabla salida_sku
+func (m *PostgresManager) InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+	_, err := m.pool.Exec(ctx, INSERT_SALIDA_SKU_INTERNAL_DB, salidaID, calibre, variedad, embalaje)
+	if err != nil {
+		return fmt.Errorf("error al insertar asignación salida-sku: %w", err)
 	}
 	return nil
 }

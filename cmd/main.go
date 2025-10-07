@@ -158,7 +158,7 @@ func main() {
 				salidas = append(salidas, salida)
 				log.Printf("       ↳ Salida %d: %s (%s)", salidaCfg.ID, salidaCfg.Name, tipo)
 				// Insertar salida en la base de datos si no existe
-				if err := dbManager.InsertSalidaIfNotExists(ctx, salidaCfg.ID, sorterCfg.ID, salida_counter, true, nil, nil, nil); err != nil {
+				if err := dbManager.InsertSalidaIfNotExists(ctx, salidaCfg.ID, sorterCfg.ID, salida_counter, true); err != nil {
 					log.Printf("         ⚠️  Error al insertar salida en DB: %v", err)
 				} else {
 					log.Printf("         ✅ Salida %d insertada en DB (o ya existía)", salidaCfg.ID)

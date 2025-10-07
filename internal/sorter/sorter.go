@@ -218,11 +218,12 @@ func (s *Sorter) GetCurrentSKUs() []models.SKUAssignable {
 }
 
 // AssignSKUToSalida asigna una SKU a una salida específica
+// Retorna los datos del SKU asignado (calibre, variedad, embalaje) para insertar en BD
 // Retorna error si:
 // - La salida no existe
 // - La SKU es REJECT (ID=0) y la salida es automática
 // - La SKU no existe en assignedSKUs
-func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) error {
+func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, err error) {
 	// Buscar la salida
 	var targetSalida *shared.Salida
 	for i := range s.Salidas {
@@ -233,12 +234,12 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) error {
 	}
 
 	if targetSalida == nil {
-		return fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
+		return "", "", "", fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
 	}
 
 	// VALIDACIÓN CRÍTICA: REJECT no puede ir a salida automática
 	if skuID == 0 && targetSalida.Tipo == "automatico" {
-		return fmt.Errorf("no se puede asignar SKU REJECT (ID=0) a salida automática '%s' (ID=%d)",
+		return "", "", "", fmt.Errorf("no se puede asignar SKU REJECT (ID=0) a salida automática '%s' (ID=%d)",
 			targetSalida.Salida_Sorter, salidaID)
 	}
 
@@ -252,15 +253,15 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) error {
 	}
 
 	if targetSKU == nil {
-		return fmt.Errorf("SKU con ID %d no encontrada en las SKUs disponibles del sorter #%d", skuID, s.ID)
+		return "", "", "", fmt.Errorf("SKU con ID %d no encontrada en las SKUs disponibles del sorter #%d", skuID, s.ID)
 	}
 
 	// Convertir SKUAssignable a SKU para agregar a la salida
 	sku := models.SKU{
 		SKU:      targetSKU.SKU,
-		Variedad: "",
-		Calibre:  "",
-		Embalaje: "",
+		Variedad: targetSKU.Variedad,
+		Calibre:  targetSKU.Calibre,
+		Embalaje: targetSKU.Embalaje,
 		Estado:   true,
 	}
 
@@ -273,7 +274,7 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) error {
 	log.Printf("✅ Sorter #%d: SKU '%s' (ID=%d) asignada a salida '%s' (ID=%d, tipo=%s)",
 		s.ID, targetSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID, targetSalida.Tipo)
 
-	return nil
+	return targetSKU.Calibre, targetSKU.Variedad, targetSKU.Embalaje, nil
 }
 
 // FindSalidaForSKU busca en qué salida está asignada una SKU específica

@@ -37,6 +37,9 @@ func (s *SKU) CleanSKU() string {
 type SKUAssignable struct {
 	ID           int     `json:"id"`
 	SKU          string  `json:"sku"`
+	Calibre      string  `json:"calibre,omitempty"`
+	Variedad     string  `json:"variedad,omitempty"`
+	Embalaje     string  `json:"embalaje,omitempty"`
 	Percentage   float64 `json:"percentage"`
 	IsAssigned   bool    `json:"is_assigned"`
 	IsMasterCase bool    `json:"is_master_case"`
@@ -65,6 +68,9 @@ func (s *SKU) ToAssignable(id int) SKUAssignable {
 	return SKUAssignable{
 		ID:           id,
 		SKU:          s.CleanSKU(), // Limpia paréntesis del formato de BD
+		Calibre:      s.Calibre,
+		Variedad:     s.Variedad,
+		Embalaje:     s.Embalaje,
 		Percentage:   0.0,
 		IsAssigned:   false,
 		IsMasterCase: false,
@@ -76,6 +82,9 @@ func (s *SKU) ToAssignableWithHash() SKUAssignable {
 	return SKUAssignable{
 		ID:           s.GetNumericID(),
 		SKU:          s.CleanSKU(),
+		Calibre:      s.Calibre,
+		Variedad:     s.Variedad,
+		Embalaje:     s.Embalaje,
 		Percentage:   0.0,
 		IsAssigned:   false,
 		IsMasterCase: false,
