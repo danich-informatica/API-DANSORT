@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"log"
+	"sync"
 
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/models"
@@ -13,15 +14,14 @@ type SKUManager struct {
 	ctx       context.Context
 	dbManager *db.PostgresManager
 	skus      map[string]models.SKU // Mapa para acceso rápido por SKU
+	mu        sync.RWMutex          // Mutex para acceso concurrente seguro
 }
 
-// NewSKUManager crea una nueva instancia de SKUManager.
-func NewSKUManager() (*SKUManager, error) {
-	ctx := context.Background()
-
-	dbManager, err := db.GetPostgresManager()
-	if err != nil {
-		return nil, err
+// NewSKUManager crea una nueva instancia de SKUManager usando un dbManager existente.
+func NewSKUManager(ctx context.Context, dbManager *db.PostgresManager) (*SKUManager, error) {
+	if dbManager == nil {
+		log.Println("⚠️  NewSKUManager: dbManager es nil")
+		return nil, nil
 	}
 
 	// Cargar todos los SKUs desde la base de datos al iniciar el manager
@@ -47,6 +47,9 @@ func NewSKUManager() (*SKUManager, error) {
 }
 
 func (m *SKUManager) GetAllSKUs() []models.SKU {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	skus := make([]models.SKU, 0, len(m.skus))
 	for _, sku := range m.skus {
 		skus = append(skus, sku)
@@ -55,6 +58,9 @@ func (m *SKUManager) GetAllSKUs() []models.SKU {
 }
 
 func (m *SKUManager) GetActiveSKUs() []models.SKU {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	activeSKUs := make([]models.SKU, 0)
 	for _, sku := range m.skus {
 		if sku.Estado {
@@ -62,4 +68,71 @@ func (m *SKUManager) GetActiveSKUs() []models.SKU {
 		}
 	}
 	return activeSKUs
+}
+
+// StreamActiveSKUs envía SKUs activos a través de un canal para procesamiento no bloqueante.
+// Ideal para conjuntos de datos grandes (millones de registros).
+// El canal se cierra automáticamente al finalizar.
+func (m *SKUManager) StreamActiveSKUs(ctx context.Context, skuChan models.SKUChannel) {
+	defer close(skuChan)
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, sku := range m.skus {
+		// Verificar si el contexto fue cancelado
+		select {
+		case <-ctx.Done():
+			log.Println("StreamActiveSKUs: contexto cancelado")
+			return
+		default:
+		}
+
+		// Enviar solo SKUs activos
+		if sku.Estado {
+			select {
+			case skuChan <- sku:
+				// SKU enviado correctamente
+			case <-ctx.Done():
+				log.Println("StreamActiveSKUs: contexto cancelado durante envío")
+				return
+			}
+		}
+	}
+}
+
+// StreamActiveSKUsWithLimit envía hasta 'limit' SKUs activos a través del canal.
+// Si limit <= 0, no hay límite (equivalente a StreamActiveSKUs).
+func (m *SKUManager) StreamActiveSKUsWithLimit(ctx context.Context, skuChan models.SKUChannel, limit int) {
+	defer close(skuChan)
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sent := 0
+	for _, sku := range m.skus {
+		// Verificar límite
+		if limit > 0 && sent >= limit {
+			return
+		}
+
+		// Verificar si el contexto fue cancelado
+		select {
+		case <-ctx.Done():
+			log.Println("StreamActiveSKUsWithLimit: contexto cancelado")
+			return
+		default:
+		}
+
+		// Enviar solo SKUs activos
+		if sku.Estado {
+			select {
+			case skuChan <- sku:
+				sent++
+			case <-ctx.Done():
+				log.Println("StreamActiveSKUsWithLimit: contexto cancelado durante envío")
+				return
+			}
+		}
+	}
 }

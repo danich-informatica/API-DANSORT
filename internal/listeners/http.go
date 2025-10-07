@@ -5,18 +5,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/models"
 )
+
+// SKUStreamer es una interfaz para streaming de SKUs sin crear import cycle
+type SKUStreamer interface {
+	StreamActiveSKUsWithLimit(ctx context.Context, skuChan models.SKUChannel, limit int)
+}
 
 type HTTPFrontend struct {
 	router       *gin.Engine
 	port         string
 	opcuaService *OPCUAService
 	postgresMgr  interface{}
+	skuManager   interface{} // Para usar SKUManager sin import cycle
 }
 
 func NewHTTPFrontend(port string) *HTTPFrontend {
@@ -34,6 +41,11 @@ func (h *HTTPFrontend) SetOPCUAService(service *OPCUAService) {
 // SetPostgresManager vincula el manager de PostgreSQL al frontend HTTP
 func (h *HTTPFrontend) SetPostgresManager(mgr interface{}) {
 	h.postgresMgr = mgr
+}
+
+// SetSKUManager vincula el SKU manager al frontend HTTP
+func (h *HTTPFrontend) SetSKUManager(mgr interface{}) {
+	h.skuManager = mgr
 }
 
 func (h *HTTPFrontend) setupRoutes() {
@@ -124,62 +136,61 @@ func (h *HTTPFrontend) setupRoutes() {
 	})
 
 	// Endpoint GET /skus/assignables/:sorter_id
+	// Usa streaming con canales para máxima eficiencia (millones de SKUs)
+	// Parámetros query opcionales: ?limit=1000 (default: sin límite)
 	h.router.GET("/skus/assignables/:sorter_id", func(c *gin.Context) {
 		sorterID := c.Param("sorter_id")
+		limitStr := c.DefaultQuery("limit", "0")
 
-		// Verificar que tengamos el dbManager
-		if h.postgresMgr == nil {
+		// Parsear el límite
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			limit = 0 // Sin límite
+		}
+
+		// Verificar que tengamos el skuManager
+		if h.skuManager == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error": "Base de datos no disponible",
+				"error": "SKU Manager no disponible",
 			})
 			return
 		}
 
-		// Cast a PostgresManager
-		dbManager, ok := h.postgresMgr.(*db.PostgresManager)
+		// Cast a SKUStreamer
+		streamer, ok := h.skuManager.(SKUStreamer)
 		if !ok {
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Error de configuración del manager",
+				"error": "Error de configuración del SKU Manager",
 			})
 			return
 		}
 
-		// Obtener SKUs activos
-		skus, err := dbManager.GetActiveSKUs(context.Background())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Error al obtener SKUs: " + err.Error(),
-			})
-			return
-		}
+		// Crear contexto con timeout de 30 segundos
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-		response := make([]map[string]interface{}, 0, len(skus)+1) // +1 para REJECT
+		// Crear canal tipado usando el constructor de models (buffer de 1000 para mejor performance)
+		skuChan := models.NewSKUChannel(1000)
 
-		// Agregar el SKU REJECT primero (ID 0)
-		rejectEntry := map[string]interface{}{
-			"id":             0,
-			"sku":            "REJECT",
-			"percentage":     0.0,
-			"is_assigned":    false,
-			"is_master_case": false,
-		}
-		response = append(response, rejectEntry)
+		// Iniciar streaming en goroutine
+		go streamer.StreamActiveSKUsWithLimit(ctx, skuChan, limit)
 
-		// Agregar las demás SKUs con IDs secuenciales (empezando desde 1)
-		for i, sku := range skus {
-			skuEntry := map[string]interface{}{
-				"id":             i + 1, // Empieza en 1 porque REJECT es 0
-				"sku":            sku.SKU,
-				"percentage":     0.0,
-				"is_assigned":    false,
-				"is_master_case": false,
-			}
-			response = append(response, skuEntry)
+		// Recolectar SKUs del canal usando estructuras limpias
+		response := make([]models.SKUAssignable, 0)
+
+		// Agregar el SKU REJECT primero (ID 0) usando helper de models
+		response = append(response, models.GetRejectSKU())
+
+		// Leer del canal hasta que se cierre o timeout
+		for sku := range skuChan {
+			// Convertir SKU usando su hash como ID numérico único (determinístico)
+			response = append(response, sku.ToAssignableWithHash())
 		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"sorter_id": sorterID,
 			"skus":      response,
+			"count":     len(response) - 1, // -1 para no contar REJECT
 		})
 	})
 }

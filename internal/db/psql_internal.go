@@ -230,7 +230,7 @@ func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]models.SKU, error) 
 	for rows.Next() {
 		var sku models.SKU
 
-		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Estado); err != nil {
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.SKU, &sku.Estado); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 
@@ -335,14 +335,10 @@ func (m *PostgresManager) GetActiveSKUs(ctx context.Context) ([]models.SKU, erro
 
 	for rows.Next() {
 		var sku models.SKU
-		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje); err != nil {
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.SKU, &sku.Estado); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
-		skuObj, err := models.RequestSKU(sku.Variedad, sku.Calibre, sku.Embalaje)
-		if err != nil {
-			return nil, fmt.Errorf("error al crear SKU: %w", err)
-		}
-		skus = append(skus, skuObj)
+		skus = append(skus, sku)
 	}
 
 	if err := rows.Err(); err != nil {

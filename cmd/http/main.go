@@ -9,7 +9,9 @@ import (
 
 	"API-GREENEX/internal/config"
 	"API-GREENEX/internal/db"
+	"API-GREENEX/internal/flow"
 	"API-GREENEX/internal/listeners"
+	"API-GREENEX/internal/shared"
 
 	"github.com/joho/godotenv"
 )
@@ -26,6 +28,11 @@ func main() {
 	fmt.Println("")
 	fmt.Println("🌐 Iniciando Servidor HTTP...")
 	fmt.Println("")
+
+	// Inicializar gestor de canales compartidos (Singleton)
+	channelMgr := shared.GetChannelManager()
+	defer channelMgr.CloseAll()
+	log.Println("✅ Gestor de canales inicializado")
 
 	// 1. Cargar .env
 	if err := godotenv.Load(); err != nil {
@@ -80,13 +87,31 @@ func main() {
 		httpService.SetPostgresManager(dbManager)
 	}
 
+	// 3.5. Inicializar SKUManager para endpoints de streaming
+	var skuManager *flow.SKUManager
+	if dbManager != nil {
+		skuManager, err = flow.NewSKUManager(ctx, dbManager)
+		if err != nil {
+			log.Printf("⚠️  Error al inicializar SKUManager: %v", err)
+			skuManager = nil
+		}
+	}
+
+	if skuManager != nil {
+		httpService.SetSKUManager(skuManager)
+	}
+
 	// 5. Mostrar información
 	log.Printf("🌐 Servidor HTTP iniciando en puerto %s...", httpPort)
 	log.Println("📊 Endpoints disponibles:")
 	log.Println("   GET  /Mesa/Estado")
 	log.Println("   POST /Mesa")
 	log.Println("   POST /Mesa/Vaciar")
-	log.Println("   GET  /skus/assignables/:sorter_id")
+	if skuManager != nil {
+		log.Println("   GET  /skus/assignables/:sorter_id (⚡ streaming eficiente)")
+	} else {
+		log.Println("   GET  /skus/assignables/:sorter_id (⚠️  SKUManager no disponible)")
+	}
 	log.Printf("🚀 Servidor listo en http://localhost:%s\n", httpPort)
 
 	// 6. Iniciar servidor usando HTTPFrontend

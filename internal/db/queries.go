@@ -21,7 +21,7 @@ const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `
 `
 
 const SELECT_ALL_SKUS_INTERNAL_DB = `
-	SELECT calibre, variedad, embalaje, estado
+	SELECT calibre, variedad, embalaje, sku, estado
 	FROM SKU
 	ORDER BY variedad, calibre, embalaje
 `
@@ -80,7 +80,8 @@ const COUNT_BOXES_INTERNAL_DB = `
 `
 
 const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
-	SELECT calibre, variedad, embalaje
+	SELECT calibre, variedad, embalaje, sku, estado
 	FROM sku
 	WHERE estado = true
+	ORDER BY variedad, calibre, embalaje
 `

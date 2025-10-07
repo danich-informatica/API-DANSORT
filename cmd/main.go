@@ -9,7 +9,9 @@ import (
 
 	"API-GREENEX/internal/config"
 	"API-GREENEX/internal/db"
+	"API-GREENEX/internal/flow"
 	"API-GREENEX/internal/listeners"
+	"API-GREENEX/internal/shared"
 
 	"github.com/joho/godotenv"
 )
@@ -33,6 +35,12 @@ func main() {
 
 	// Ahora activar fecha/hora para los logs normales
 	log.SetFlags(log.Ldate | log.Ltime)
+
+	// 0. Inicializar gestor de canales compartidos (Singleton)
+	channelMgr := shared.GetChannelManager()
+	defer channelMgr.CloseAll()
+	log.Println("✅ Gestor de canales inicializado")
+	log.Println("")
 
 	// 1. Cargar archivo .env para obtener ruta del config
 	if err := godotenv.Load(); err != nil {
@@ -71,6 +79,13 @@ func main() {
 	}
 	defer dbManager.Close()
 	log.Println("✅ Base de datos PostgreSQL inicializada correctamente")
+
+	// 3.5. Inicializar SKUManager para gestión eficiente con streaming
+	skuManager, err := flow.NewSKUManager(ctx, dbManager)
+	if err != nil {
+		log.Printf("⚠️  Error al inicializar SKUManager: %v (continuando sin caché de SKUs)", err)
+		skuManager = nil
+	}
 
 	// 4. Iniciar listeners de Cognex (todos los configurados)
 	log.Println("")
@@ -129,6 +144,12 @@ func main() {
 	// 5. Crear e iniciar el servidor HTTP con endpoints
 	httpPort := fmt.Sprintf("%d", cfg.HTTP.Port)
 	httpService := listeners.NewHTTPFrontend(httpPort)
+	httpService.SetPostgresManager(dbManager)
+
+	// Vincular SKUManager si está disponible para endpoints de streaming
+	if skuManager != nil {
+		httpService.SetSKUManager(skuManager)
+	}
 
 	log.Printf("🌐 Servidor HTTP iniciando en puerto %s...", httpPort)
 	log.Println("📊 Endpoints disponibles:")
@@ -136,7 +157,11 @@ func main() {
 	log.Println("   POST /Mesa")
 	log.Println("   POST /Mesa/Vaciar")
 	log.Println("   GET  /status")
-	log.Println("   GET  /skus/assignables/:sorter_id")
+	if skuManager != nil {
+		log.Println("   GET  /skus/assignables/:sorter_id (⚡ streaming eficiente)")
+	} else {
+		log.Println("   GET  /skus/assignables/:sorter_id (⚠️  SKUManager no disponible)")
+	}
 
 	// Iniciar servidor HTTP con las rutas configuradas
 	if err := httpService.Start(); err != nil {
