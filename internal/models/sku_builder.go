@@ -20,6 +20,7 @@ func RequestSKU(variedad, calibre, embalaje string) (SKU, error) {
 		Calibre:  cal,
 		Embalaje: amb,
 		SKU:      sku,
+		Estado:   true, // Por defecto, se asume activo
 	}
 	return skuObj, nil
 }

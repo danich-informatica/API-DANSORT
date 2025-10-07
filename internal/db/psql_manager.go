@@ -27,6 +27,42 @@ var (
 	postgresErr  error
 )
 
+// GetPostgresManagerWithURL crea un manager con una URL específica
+func GetPostgresManagerWithURL(ctx context.Context, connURL string, minConns, maxConns int32, connectTimeout, healthCheckPeriod time.Duration) (*PostgresManager, error) {
+	poolConfig, err := pgxpool.ParseConfig(connURL)
+	if err != nil {
+		return nil, fmt.Errorf("db: configuración PostgreSQL inválida: %w", err)
+	}
+
+	poolConfig.MinConns = minConns
+	poolConfig.MaxConns = maxConns
+	poolConfig.HealthCheckPeriod = healthCheckPeriod
+	poolConfig.ConnConfig.ConnectTimeout = connectTimeout
+
+	ctxTimeout := ctx
+	if connectTimeout > 0 {
+		var cancel context.CancelFunc
+		ctxTimeout, cancel = context.WithTimeout(ctx, connectTimeout)
+		defer cancel()
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctxTimeout, poolConfig)
+	if err != nil {
+		return nil, fmt.Errorf("db: no fue posible crear el pool de PostgreSQL: %w", err)
+	}
+
+	if err := pool.Ping(ctxTimeout); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db: ping fallido: %w", err)
+	}
+
+	log.Printf("db: Postgres pool inicializado -> host=%s port=%d user=%s db=%s sslmode=%s",
+		poolConfig.ConnConfig.Host, poolConfig.ConnConfig.Port, poolConfig.ConnConfig.User,
+		visibleDatabase(poolConfig.ConnConfig.Database), poolConfig.ConnConfig.RuntimeParams["sslmode"])
+
+	return &PostgresManager{pool: pool}, nil
+}
+
 func GetPostgresManager(ctx context.Context) (*PostgresManager, error) {
 	postgresOnce.Do(func() {
 		if err := godotenv.Load(); err != nil {

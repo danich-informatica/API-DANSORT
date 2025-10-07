@@ -5,4 +5,5 @@ type SKU struct {
 	Calibre  string
 	Embalaje string
 	SKU      string
+	Estado   bool
 }

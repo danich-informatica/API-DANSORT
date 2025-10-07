@@ -1,12 +1,14 @@
 package listeners
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/models"
 )
 
@@ -14,6 +16,7 @@ type HTTPFrontend struct {
 	router       *gin.Engine
 	port         string
 	opcuaService *OPCUAService
+	postgresMgr  interface{}
 }
 
 func NewHTTPFrontend(port string) *HTTPFrontend {
@@ -26,6 +29,11 @@ func NewHTTPFrontend(port string) *HTTPFrontend {
 // SetOPCUAService vincula el servicio OPC UA al frontend HTTP
 func (h *HTTPFrontend) SetOPCUAService(service *OPCUAService) {
 	h.opcuaService = service
+}
+
+// SetPostgresManager vincula el manager de PostgreSQL al frontend HTTP
+func (h *HTTPFrontend) SetPostgresManager(mgr interface{}) {
+	h.postgresMgr = mgr
 }
 
 func (h *HTTPFrontend) setupRoutes() {
@@ -113,6 +121,66 @@ func (h *HTTPFrontend) setupRoutes() {
 		}
 
 		c.JSON(http.StatusOK, jsonResponse)
+	})
+
+	// Endpoint GET /skus/assignables/:sorter_id
+	h.router.GET("/skus/assignables/:sorter_id", func(c *gin.Context) {
+		sorterID := c.Param("sorter_id")
+
+		// Verificar que tengamos el dbManager
+		if h.postgresMgr == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "Base de datos no disponible",
+			})
+			return
+		}
+
+		// Cast a PostgresManager
+		dbManager, ok := h.postgresMgr.(*db.PostgresManager)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Error de configuración del manager",
+			})
+			return
+		}
+
+		// Obtener SKUs activos
+		skus, err := dbManager.GetActiveSKUs(context.Background())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Error al obtener SKUs: " + err.Error(),
+			})
+			return
+		}
+
+		response := make([]map[string]interface{}, 0, len(skus)+1) // +1 para REJECT
+
+		// Agregar el SKU REJECT primero (ID 0)
+		rejectEntry := map[string]interface{}{
+			"id":             0,
+			"sku":            "REJECT",
+			"percentage":     0.0,
+			"is_assigned":    false,
+			"is_master_case": false,
+		}
+		response = append(response, rejectEntry)
+
+		// Agregar las demás SKUs con IDs secuenciales (empezando desde 1)
+		for i, sku := range skus {
+			skuEntry := map[string]interface{}{
+				"id":             i + 1, // Empieza en 1 porque REJECT es 0
+				"sku":            sku.SKU,
+				"percentage":     0.0,
+				"is_assigned":    false,
+				"is_master_case": false,
+			}
+			response = append(response, skuEntry)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"sorter_id": sorterID,
+			"skus":      response,
+		})
 	})
 }
 

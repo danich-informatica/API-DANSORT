@@ -78,3 +78,9 @@ const SELECT_RECENT_BOXES_INTERNAL_DB = `
 const COUNT_BOXES_INTERNAL_DB = `
 	SELECT COUNT(*) FROM caja;
 `
+
+const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
+	SELECT calibre, variedad, embalaje
+	FROM sku
+	WHERE estado = true
+`

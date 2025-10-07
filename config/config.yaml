@@ -1,0 +1,87 @@
+# Base de datos PostgreSQL
+database:
+  postgres:
+    url: "postgres://danich:danich155@172.16.100.20:5432/greenex?sslmode=disable"
+    min_conns: 1
+    max_conns: 10
+    connect_timeout: "10s"
+    healthcheck_interval: "30s"
+
+  sqlserver:
+    host: "190.110.163.22"
+    port: 1433
+    user: "Danich"
+    password: "yb*;NC&5r9U2"
+    database: ""
+    encrypt: "disable"
+    trust_cert: true
+    app_name: "API-Greenex"
+    connect_timeout: 15
+    max_conns: 10
+    min_conns: 5
+    max_conn_lifetime: "30m"
+    max_conn_idle_time: "5m"
+
+# OPC UA - WAGO PLC
+opcua:
+  endpoint: "opc.tcp://192.168.120.16:4840"
+  username: ""
+  password: ""
+  security_policy: "None"
+  security_mode: "None"
+  certificate_path: ""
+  private_key_path: ""
+  connection_timeout: "10s"
+  session_timeout: "60s"
+  subscription_interval: "500ms"
+  keepalive_count: 3
+  lifetime_count: 300
+  max_notifications: 0
+
+# Servidor HTTP
+http:
+  port: 8080
+
+# Dispositivos Cognex (múltiples)
+cognex_devices:
+  - id: 1
+    name: "Cognex Línea 1"
+    host: "127.0.0.1"
+    port: 8085
+    scan_method: "QR"
+    ubicacion: "Línea Principal"
+
+  - id: 2
+    name: "Cognex Línea 2"
+    host: "0.0.0.0"
+    port: 8086
+    scan_method: "QR"
+    ubicacion: "Línea Secundaria"
+
+# Sorters (múltiples)
+sorters:
+  - id: 1
+    name: "Sorter Principal"
+    ubicacion: "Planta A - Línea 1"
+    cognex_id: 1
+    scan_method: "QR"
+    salidas:
+      - id: 1
+        name: "Exportación"
+      - id: 2
+        name: "Mercado Nacional"
+      - id: 3
+        name: "Rechazo"
+
+  - id: 2
+    name: "Sorter Secundario"
+    ubicacion: "Planta A - Línea 2"
+    cognex_id: 2
+    scan_method: "QR"
+    salidas:
+      - id: 1
+        name: "Premium"
+      - id: 2
+        name: "Estándar"
+      - id: 3
+        name: "Descarte"

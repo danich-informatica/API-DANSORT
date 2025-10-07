@@ -1,6 +1,7 @@
 package db
 
 import (
+	"API-GREENEX/internal/models"
 	"context"
 	"fmt"
 	"log"
@@ -213,12 +214,7 @@ func (m *PostgresManager) InsertSKU(ctx context.Context, calibre, variedad, emba
 }
 
 // GetAllSKUs obtiene todas las SKUs de la base de datos
-func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]struct {
-	Calibre  string
-	Variedad string
-	Embalaje string
-	Estado   bool
-}, error) {
+func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]models.SKU, error) {
 	if m == nil || m.pool == nil {
 		return nil, fmt.Errorf("manager no inicializado")
 	}
@@ -229,20 +225,10 @@ func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]struct {
 	}
 	defer rows.Close()
 
-	var skus []struct {
-		Calibre  string
-		Variedad string
-		Embalaje string
-		Estado   bool
-	}
+	var skus []models.SKU
 
 	for rows.Next() {
-		var sku struct {
-			Calibre  string
-			Variedad string
-			Embalaje string
-			Estado   bool
-		}
+		var sku models.SKU
 
 		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Estado); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
@@ -332,4 +318,36 @@ func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, c
 
 	log.Printf("📦 Correlativo de caja insertado: %s", correlativo)
 	return correlativo, nil
+}
+
+func (m *PostgresManager) GetActiveSKUs(ctx context.Context) ([]models.SKU, error) {
+	if m == nil || m.pool == nil {
+		return nil, fmt.Errorf("manager no inicializado")
+	}
+
+	rows, err := m.pool.Query(ctx, SELECT_ACTIVE_SKUS_INTERNAL_DB)
+	if err != nil {
+		return nil, fmt.Errorf("error al consultar SKUs activas: %w", err)
+	}
+	defer rows.Close()
+
+	var skus []models.SKU
+
+	for rows.Next() {
+		var sku models.SKU
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje); err != nil {
+			return nil, fmt.Errorf("error al escanear fila: %w", err)
+		}
+		skuObj, err := models.RequestSKU(sku.Variedad, sku.Calibre, sku.Embalaje)
+		if err != nil {
+			return nil, fmt.Errorf("error al crear SKU: %w", err)
+		}
+		skus = append(skus, skuObj)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error al iterar filas: %w", err)
+	}
+
+	return skus, nil
 }

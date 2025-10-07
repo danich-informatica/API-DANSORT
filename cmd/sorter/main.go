@@ -4,11 +4,13 @@ import (
 	"context"
 	"log"
 	"os"
-	"strconv"
 
+	"API-GREENEX/internal/config"
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/listeners"
 	"API-GREENEX/internal/sorter"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -18,35 +20,81 @@ func main() {
 
 	log.Println("🚀 Iniciando sistema Sorter - API Greenex")
 
-	// 1. Inicializar PostgreSQL
+	// 1. Cargar archivo .env para obtener ruta del config
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️  Archivo .env no encontrado, usando valores por defecto")
+	}
+
+	// 2. Cargar configuración desde YAML
+	configPath := os.Getenv("CONFIG_FILE")
+	if configPath == "" {
+		configPath = "config/config.yaml"
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("❌ Error al cargar configuración: %v", err)
+	}
+	log.Printf("✅ Configuración cargada desde: %s", configPath)
+
+	// 3. Inicializar PostgreSQL usando config YAML
 	ctx := context.Background()
-	dbManager, err := db.GetPostgresManager(ctx)
+
+	connectTimeout, _ := cfg.Database.Postgres.GetConnectTimeoutDuration()
+	healthCheckInterval, _ := cfg.Database.Postgres.GetHealthcheckIntervalDuration()
+
+	dbManager, err := db.GetPostgresManagerWithURL(
+		ctx,
+		cfg.Database.Postgres.URL,
+		int32(cfg.Database.Postgres.MinConns),
+		int32(cfg.Database.Postgres.MaxConns),
+		connectTimeout,
+		healthCheckInterval,
+	)
 	if err != nil {
 		log.Fatalf("❌ Error al obtener PostgresManager: %v", err)
 	}
 	log.Println("✅ Base de datos PostgreSQL inicializada")
 
-	// 2. Obtener configuración desde variables de entorno
-	sorterID := getEnvInt("SORTER_ID", 1)
-	sorterUbicacion := getEnv("SORTER_UBICACION", "Ubicación 1")
-	cognexHost := getEnv("COGNEX_HOST", "127.0.0.1")
-	cognexPort := getEnvInt("COGNEX_PORT", 8085)
-	scanMethod := getEnv("SCAN_METHOD", "QR")
-
-	// 3. Crear salidas desde variables de entorno
-	salidas := []sorter.Salida{
-		sorter.Salida{}.GetNewSalida(1, getEnv("SALIDA_1", "Salida 1")),
-		sorter.Salida{}.GetNewSalida(2, getEnv("SALIDA_2", "Salida 2")),
-		sorter.Salida{}.GetNewSalida(3, getEnv("SALIDA_3", "Salida 3")),
+	// 4. Obtener el primer sorter configurado en el YAML
+	if len(cfg.Sorters) == 0 {
+		log.Fatalf("❌ No hay sorters configurados en el archivo YAML")
 	}
 
-	// 4. Crear el CognexListener
-	cognexListener := listeners.NewCognexListener(cognexHost, cognexPort, scanMethod, dbManager)
+	sorterCfg := cfg.Sorters[0] // Primer sorter
+	log.Printf("📦 Configurando Sorter #%d: %s", sorterCfg.ID, sorterCfg.Name)
 
-	// 5. Crear el sorter
-	s := sorter.GetNewSorter(sorterID, sorterUbicacion, salidas, cognexListener)
+	// 5. Buscar el Cognex asociado al sorter
+	var cognexCfg *config.CognexDevice
+	for i := range cfg.CognexDevices {
+		if cfg.CognexDevices[i].ID == sorterCfg.CognexID {
+			cognexCfg = &cfg.CognexDevices[i]
+			break
+		}
+	}
 
-	// 6. Iniciar el sorter
+	if cognexCfg == nil {
+		log.Fatalf("❌ No se encontró Cognex con ID %d para el sorter", sorterCfg.CognexID)
+	}
+
+	// 6. Crear el CognexListener
+	cognexListener := listeners.NewCognexListener(
+		cognexCfg.Host,
+		cognexCfg.Port,
+		cognexCfg.ScanMethod,
+		dbManager,
+	)
+
+	// 7. Crear salidas desde config YAML
+	var salidas []sorter.Salida
+	for _, salidaCfg := range sorterCfg.Salidas {
+		salidas = append(salidas, sorter.Salida{}.GetNewSalida(salidaCfg.ID, salidaCfg.Name))
+	}
+
+	// 8. Crear el sorter
+	s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener)
+
+	// 9. Iniciar el sorter
 	err = s.Start()
 	if err != nil {
 		log.Fatalf("❌ Error al iniciar sorter: %v", err)
@@ -57,22 +105,4 @@ func main() {
 
 	// Mantener el programa en ejecución
 	select {}
-}
-
-// getEnv obtiene una variable de entorno o devuelve un valor por defecto
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// getEnvInt obtiene una variable de entorno como int o devuelve un valor por defecto
-func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
 }
