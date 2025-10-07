@@ -73,8 +73,14 @@ CREATE TABLE salida (
     id             INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     sorter         INT NOT NULL,
     salida_sorter  INT NOT NULL,
+    estado         BOOLEAN NOT NULL DEFAULT TRUE,
+    calibre        VARCHAR(50)  DEFAULT NULL,
+    variedad       VARCHAR(100) DEFAULT NULL,
+    embalaje       VARCHAR(50)  DEFAULT NULL,
     CONSTRAINT fk_salida_sorter FOREIGN KEY (sorter)
-        REFERENCES sorter (id) ON DELETE CASCADE
+        REFERENCES sorter (id) ON DELETE CASCADE,
+    CONSTRAINT fk_salida_sku FOREIGN KEY (calibre, variedad, embalaje)
+        REFERENCES sku (calibre, variedad, embalaje) ON DELETE SET NULL
 );
 CREATE INDEX idx_salida_sorter ON salida (sorter);
 

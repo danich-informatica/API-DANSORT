@@ -12,6 +12,22 @@ import (
 	"time"
 )
 
+// Estructura para inserción asíncrona en DB
+type insertRequest struct {
+	especie  string
+	variedad string
+	calibre  string
+	embalaje string
+	sku      string
+	message  string
+	resultCh chan insertResult
+}
+
+type insertResult struct {
+	correlativo string
+	err         error
+}
+
 type CognexListener struct {
 	host        string
 	port        int
@@ -21,13 +37,14 @@ type CognexListener struct {
 	cancel      context.CancelFunc
 	dbManager   *db.PostgresManager
 	EventChan   chan models.LecturaEvent
+	insertChan  chan insertRequest // Canal para inserciones asíncronas
 	dispositivo string
 }
 
 func NewCognexListener(host string, port int, scan_method string, dbManager *db.PostgresManager) *CognexListener {
 	ctx, cancel := context.WithCancel(context.Background())
 	dispositivo := fmt.Sprintf("Cognex-%s:%d", host, port)
-	return &CognexListener{
+	cl := &CognexListener{
 		host:        host,
 		port:        port,
 		ctx:         ctx,
@@ -35,13 +52,53 @@ func NewCognexListener(host string, port int, scan_method string, dbManager *db.
 		cancel:      cancel,
 		dbManager:   dbManager,
 		EventChan:   make(chan models.LecturaEvent, 100), // buffer para 100 eventos
+		insertChan:  make(chan insertRequest, 200),       // buffer para 200 inserciones pendientes
 		dispositivo: dispositivo,
 	}
+
+	// Iniciar worker para inserciones asíncronas
+	go cl.insertWorker()
+
+	return cl
 }
 
 // String implementa la interfaz fmt.Stringer
 func (c *CognexListener) String() string {
 	return fmt.Sprintf("CognexListener{host: %s, port: %d}", c.host, c.port)
+}
+
+// insertWorker procesa inserciones a la base de datos de forma asíncrona
+func (c *CognexListener) insertWorker() {
+	for {
+		select {
+		case <-c.ctx.Done():
+			// Procesar requests pendientes antes de salir
+			close(c.insertChan)
+			for req := range c.insertChan {
+				c.processInsert(req)
+			}
+			return
+
+		case req := <-c.insertChan:
+			c.processInsert(req)
+		}
+	}
+}
+
+// processInsert realiza la inserción real en la base de datos
+func (c *CognexListener) processInsert(req insertRequest) {
+	correlativo, err := c.dbManager.InsertNewBox(
+		context.Background(),
+		req.especie,
+		req.variedad,
+		req.calibre,
+		req.embalaje,
+	)
+
+	req.resultCh <- insertResult{
+		correlativo: correlativo,
+		err:         err,
+	}
 }
 
 // Start inicia el servidor TCP para escuchar mensajes de Cognex
@@ -189,42 +246,97 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			return
 		}
 
-		// Correlativo ahora es string
-		correlativo, err := c.dbManager.InsertNewBox(
-			context.Background(),
-			especie,
-			variedad,
-			calibre,
-			embalaje,
-		)
+		// Inserción asíncrona en DB para máxima velocidad
+		resultCh := make(chan insertResult, 1)
+		insertReq := insertRequest{
+			especie:  especie,
+			variedad: variedad,
+			calibre:  calibre,
+			embalaje: embalaje,
+			sku:      sku.SKU,
+			message:  message,
+			resultCh: resultCh,
+		}
 
-		if err != nil {
-			log.Printf("❌ Error al insertar caja en DB desde mensaje: %s | Error: %v", message, err)
-			response := "NACK\r\n"
-			c.EventChan <- models.NewLecturaFallidaConDatos(
-				fmt.Errorf("error al insertar: %w", err),
+		// Enviar al worker (no bloqueante si hay buffer disponible)
+		select {
+		case c.insertChan <- insertReq:
+			// Enviado al worker, responder inmediatamente ACK
+			response := "ACK\r\n"
+			conn.Write([]byte(response))
+
+			// Procesar resultado en goroutine para no bloquear
+			go func() {
+				result := <-resultCh
+				if result.err != nil {
+					log.Printf("❌ Error al insertar caja en DB desde mensaje: %s | Error: %v", message, result.err)
+					c.EventChan <- models.NewLecturaFallidaConDatos(
+						fmt.Errorf("error al insertar: %w", result.err),
+						especie,
+						calibre,
+						variedad,
+						embalaje,
+						message,
+						c.dispositivo,
+					)
+				} else {
+					log.Printf("📦 Correlativo de caja insertado: %s", result.correlativo)
+					log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", result.correlativo, sku.SKU, especie)
+					c.EventChan <- models.NewLecturaExitosa(
+						sku.SKU,
+						especie,
+						calibre,
+						variedad,
+						embalaje,
+						result.correlativo,
+						message,
+						c.dispositivo,
+					)
+				}
+			}()
+
+		default:
+			// Buffer lleno, responder NACK y procesar síncrono
+			log.Printf("⚠️  Buffer de inserciones lleno, procesando síncronamente")
+			correlativo, err := c.dbManager.InsertNewBox(
+				context.Background(),
+				especie,
+				variedad,
+				calibre,
+				embalaje,
+			)
+
+			if err != nil {
+				log.Printf("❌ Error al insertar caja en DB desde mensaje: %s | Error: %v", message, err)
+				response := "NACK\r\n"
+				c.EventChan <- models.NewLecturaFallidaConDatos(
+					fmt.Errorf("error al insertar: %w", err),
+					especie,
+					calibre,
+					variedad,
+					embalaje,
+					message,
+					c.dispositivo,
+				)
+				conn.Write([]byte(response))
+				return
+			}
+
+			response := "ACK\r\n"
+			conn.Write([]byte(response))
+			log.Printf("📦 Correlativo de caja insertado: %s", correlativo)
+			log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", correlativo, sku.SKU, especie)
+			c.EventChan <- models.NewLecturaExitosa(
+				sku.SKU,
 				especie,
 				calibre,
 				variedad,
 				embalaje,
+				correlativo,
 				message,
 				c.dispositivo,
 			)
-			conn.Write([]byte(response))
-			return
 		}
-
-		log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", correlativo, sku.SKU, especie)
-		c.EventChan <- models.NewLecturaExitosa(
-			sku.SKU,
-			especie,
-			calibre,
-			variedad,
-			embalaje,
-			correlativo,
-			message,
-			c.dispositivo,
-		)
 	case "DATAMATRIX":
 		log.Printf("✅ Escaneo DataMatrix válido: %s ", strings.TrimSpace(message))
 	default:

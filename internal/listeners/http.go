@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"API-GREENEX/internal/models"
+	"API-GREENEX/internal/shared"
 )
 
 // SKUStreamer es una interfaz para streaming de SKUs sin crear import cycle
@@ -18,18 +18,23 @@ type SKUStreamer interface {
 	StreamActiveSKUsWithLimit(ctx context.Context, skuChan models.SKUChannel, limit int)
 }
 
+// SorterInterface define la interfaz para acceder a SKUs de un Sorter
+type SorterInterface = shared.SorterInterface
+
 type HTTPFrontend struct {
 	router       *gin.Engine
 	port         string
 	opcuaService *OPCUAService
 	postgresMgr  interface{}
-	skuManager   interface{} // Para usar SKUManager sin import cycle
+	skuManager   interface{}                // Para usar SKUManager sin import cycle
+	sorters      map[string]SorterInterface // Mapa de sorters por ID
 }
 
 func NewHTTPFrontend(port string) *HTTPFrontend {
 	return &HTTPFrontend{
-		router: gin.Default(),
-		port:   port,
+		router:  gin.Default(),
+		port:    port,
+		sorters: make(map[string]SorterInterface),
 	}
 }
 
@@ -48,7 +53,45 @@ func (h *HTTPFrontend) SetSKUManager(mgr interface{}) {
 	h.skuManager = mgr
 }
 
+// RegisterSorter registra un sorter para acceso desde HTTP
+func (h *HTTPFrontend) RegisterSorter(sorter SorterInterface) {
+	sorterID := fmt.Sprintf("%d", sorter.GetID())
+	h.sorters[sorterID] = sorter
+}
+
 func (h *HTTPFrontend) setupRoutes() {
+	// Endpoint GET /sku/assigned/:sorter_id
+	h.router.GET("/sku/assigned/:sorter_id", func(c *gin.Context) {
+		sorterID := c.Param("sorter_id")
+		sorter, exists := h.sorters[sorterID]
+		if !exists {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": fmt.Sprintf("Sorter #%s no encontrado o no registrado", sorterID),
+			})
+			return
+		}
+		var result []map[string]interface{}
+		for _, salida := range sorter.GetSalidas() {
+			assignments := []map[string]interface{}{}
+			for _, sku := range salida.SKUs_Actuales {
+				assignments = append(assignments, map[string]interface{}{
+					"sku_id":         sku.GetNumericID(),
+					"sku_name":       sku.SKU,
+					"is_master_case": false,
+				})
+			}
+			result = append(result, map[string]interface{}{
+				"sealer_db_id":       salida.ID,
+				"sealer_physical_id": salida.SealerPhysicalID,
+				"sorter_id":          sorter.GetID(),
+				"sorter_name":        "",
+				"mode":               salida.Tipo,
+				"assignments":        assignments,
+				"is_enabled":         salida.IsEnabled,
+			})
+		}
+		c.JSON(http.StatusOK, result)
+	})
 	// Ruta GET - ya está correcta
 	h.router.GET("/Mesa/Estado", func(c *gin.Context) {
 		id := c.Query("id")
@@ -136,61 +179,96 @@ func (h *HTTPFrontend) setupRoutes() {
 	})
 
 	// Endpoint GET /skus/assignables/:sorter_id
-	// Usa streaming con canales para máxima eficiencia (millones de SKUs)
-	// Parámetros query opcionales: ?limit=1000 (default: sin límite)
+	// Accede directamente a las SKUs cacheadas en el sorter (no usa canales)
 	h.router.GET("/skus/assignables/:sorter_id", func(c *gin.Context) {
 		sorterID := c.Param("sorter_id")
-		limitStr := c.DefaultQuery("limit", "0")
 
-		// Parsear el límite
-		limit, err := strconv.Atoi(limitStr)
+		// Validar sorter_id
+		_, err := strconv.Atoi(sorterID)
 		if err != nil {
-			limit = 0 // Sin límite
-		}
-
-		// Verificar que tengamos el skuManager
-		if h.skuManager == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error": "SKU Manager no disponible",
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "sorter_id debe ser un número válido",
 			})
 			return
 		}
 
-		// Cast a SKUStreamer
-		streamer, ok := h.skuManager.(SKUStreamer)
-		if !ok {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Error de configuración del SKU Manager",
+		// Obtener sorter directamente desde el mapa
+		sorter, exists := h.sorters[sorterID]
+		if !exists {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": fmt.Sprintf("Sorter #%s no encontrado o no registrado", sorterID),
 			})
 			return
 		}
 
-		// Crear contexto con timeout de 30 segundos
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		// Obtener SKUs directamente del sorter (inmediato, sin bloqueo)
+		skus := sorter.GetCurrentSKUs()
+		c.JSON(http.StatusOK, skus)
+	})
 
-		// Crear canal tipado usando el constructor de models (buffer de 1000 para mejor performance)
-		skuChan := models.NewSKUChannel(1000)
+	// Endpoint POST /assignment
+	// Asigna una SKU a una salida específica (sealer)
+	// Body: { "sku_id": uint32, "sealer_id": int }
+	h.router.POST("/assignment", func(c *gin.Context) {
+		var request struct {
+			SKUID    *uint32 `json:"sku_id" binding:"required"` // Pointer para aceptar 0
+			SealerID int     `json:"sealer_id" binding:"required"`
+		}
 
-		// Iniciar streaming en goroutine
-		go streamer.StreamActiveSKUsWithLimit(ctx, skuChan, limit)
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Formato de body inválido. Se requiere: {sku_id: number, sealer_id: number}",
+			})
+			return
+		}
 
-		// Recolectar SKUs del canal usando estructuras limpias
-		response := make([]models.SKUAssignable, 0)
+		if request.SKUID == nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "sku_id es requerido",
+			})
+			return
+		}
 
-		// Agregar el SKU REJECT primero (ID 0) usando helper de models
-		response = append(response, models.GetRejectSKU())
+		skuID := *request.SKUID
 
-		// Leer del canal hasta que se cierre o timeout
-		for sku := range skuChan {
-			// Convertir SKU usando su hash como ID numérico único (determinístico)
-			response = append(response, sku.ToAssignableWithHash())
+		// Buscar en qué sorter está la salida (sealer_id es único globalmente)
+		var targetSorter SorterInterface
+		var assignError error
+		for _, sorter := range h.sorters {
+			err := sorter.AssignSKUToSalida(skuID, request.SealerID)
+			if err == nil {
+				targetSorter = sorter
+				break
+			}
+			// Guardar el error más relevante
+			if assignError == nil || err.Error() != fmt.Sprintf("salida con ID %d no encontrada en sorter #%d", request.SealerID, sorter.GetID()) {
+				assignError = err
+			}
+		}
+
+		if targetSorter == nil {
+			// Si hubo error específico (ej: REJECT en automática), mostrarlo
+			if assignError != nil {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{
+					"error":     assignError.Error(),
+					"sku_id":    skuID,
+					"sealer_id": request.SealerID,
+				})
+				return
+			}
+
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":     fmt.Sprintf("No se encontró salida con ID %d en ningún sorter", request.SealerID),
+				"sealer_id": request.SealerID,
+			})
+			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"sorter_id": sorterID,
-			"skus":      response,
-			"count":     len(response) - 1, // -1 para no contar REJECT
+			"message":   "SKU asignada exitosamente",
+			"sku_id":    skuID,
+			"sealer_id": request.SealerID,
+			"sorter_id": targetSorter.GetID(),
 		})
 	})
 }

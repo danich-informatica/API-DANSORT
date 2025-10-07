@@ -7,7 +7,10 @@ import (
 
 	"API-GREENEX/internal/config"
 	"API-GREENEX/internal/db"
+	"API-GREENEX/internal/flow"
 	"API-GREENEX/internal/listeners"
+	"API-GREENEX/internal/models"
+	"API-GREENEX/internal/shared"
 	"API-GREENEX/internal/sorter"
 
 	"github.com/joho/godotenv"
@@ -19,6 +22,11 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime)
 
 	log.Println("🚀 Iniciando sistema Sorter - API Greenex")
+
+	// 0. Inicializar gestor de canales compartidos (Singleton)
+	channelMgr := shared.GetChannelManager()
+	defer channelMgr.CloseAll()
+	log.Println("✅ Gestor de canales inicializado")
 
 	// 1. Cargar archivo .env para obtener ruta del config
 	if err := godotenv.Load(); err != nil {
@@ -88,11 +96,43 @@ func main() {
 	// 7. Crear salidas desde config YAML
 	var salidas []sorter.Salida
 	for _, salidaCfg := range sorterCfg.Salidas {
-		salidas = append(salidas, sorter.Salida{}.GetNewSalida(salidaCfg.ID, salidaCfg.Name))
+		tipo := salidaCfg.Tipo
+		if tipo == "" {
+			tipo = "manual" // Default
+		}
+		salidas = append(salidas, sorter.Salida{}.GetNewSalida(salidaCfg.ID, salidaCfg.Name, tipo))
 	}
 
 	// 8. Crear el sorter
 	s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener)
+
+	// 8.5. Inicializar SKUManager para cargar SKUs activos
+	skuManager, err := flow.NewSKUManager(ctx, dbManager)
+	if err != nil {
+		log.Printf("⚠️  Error al inicializar SKUManager: %v (sorter sin SKUs iniciales)", err)
+		skuManager = nil
+	} else {
+		log.Printf("✅ SKUManager inicializado con %d SKUs", len(skuManager.GetActiveSKUs()))
+
+		// Cargar y publicar SKUs activos al canal del sorter
+		log.Println("🔄 Cargando SKUs activos para el sorter...")
+		activeSKUs := skuManager.GetActiveSKUs()
+
+		// Convertir SKUs a formato assignable con hash
+		assignableSKUs := make([]models.SKUAssignable, 0, len(activeSKUs)+1)
+
+		// Agregar SKU REJECT (ID 0) al inicio
+		assignableSKUs = append(assignableSKUs, models.GetRejectSKU())
+
+		// Convertir SKUs activos usando hash como ID
+		for _, sku := range activeSKUs {
+			assignableSKUs = append(assignableSKUs, sku.ToAssignableWithHash())
+		}
+
+		// Publicar SKUs al sorter
+		s.UpdateSKUs(assignableSKUs)
+		log.Printf("✅ Sorter #%d: %d SKUs publicados al canal", sorterCfg.ID, len(assignableSKUs))
+	}
 
 	// 9. Iniciar el sorter
 	err = s.Start()

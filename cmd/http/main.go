@@ -11,6 +11,7 @@ import (
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/flow"
 	"API-GREENEX/internal/listeners"
+	"API-GREENEX/internal/models"
 	"API-GREENEX/internal/shared"
 
 	"github.com/joho/godotenv"
@@ -99,6 +100,40 @@ func main() {
 
 	if skuManager != nil {
 		httpService.SetSKUManager(skuManager)
+
+		// Inicializar canales de sorters con SKUs activos
+		if len(cfg.Sorters) > 0 {
+			log.Println("🔄 Cargando SKUs iniciales para sorters...")
+			activeSKUs := skuManager.GetActiveSKUs()
+
+			// Convertir SKUs a formato assignable con hash
+			assignableSKUs := make([]models.SKUAssignable, 0, len(activeSKUs)+1)
+
+			// Agregar SKU REJECT (ID 0) al inicio
+			assignableSKUs = append(assignableSKUs, models.GetRejectSKU())
+
+			// Convertir SKUs activos usando hash como ID
+			for _, sku := range activeSKUs {
+				assignableSKUs = append(assignableSKUs, sku.ToAssignableWithHash())
+			}
+
+			// Publicar SKUs a cada canal de sorter
+			for _, sorterCfg := range cfg.Sorters {
+				sorterID := fmt.Sprintf("%d", sorterCfg.ID)
+				sorterChannel := channelMgr.GetSorterSKUChannel(sorterID)
+
+				if sorterChannel != nil {
+					// Publicar SKUs (no bloqueante)
+					select {
+					case sorterChannel <- assignableSKUs:
+						log.Printf("   ✅ Sorter #%s: %d SKUs publicados", sorterID, len(assignableSKUs))
+					default:
+						log.Printf("   ⚠️  Sorter #%s: Canal lleno, SKUs no publicados", sorterID)
+					}
+				}
+			}
+			log.Println("")
+		}
 	}
 
 	// 5. Mostrar información
@@ -108,7 +143,7 @@ func main() {
 	log.Println("   POST /Mesa")
 	log.Println("   POST /Mesa/Vaciar")
 	if skuManager != nil {
-		log.Println("   GET  /skus/assignables/:sorter_id (⚡ streaming eficiente)")
+		log.Println("   GET  /skus/assignables/:sorter_id (⚡ canal por sorter)")
 	} else {
 		log.Println("   GET  /skus/assignables/:sorter_id (⚠️  SKUManager no disponible)")
 	}

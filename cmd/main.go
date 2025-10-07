@@ -11,7 +11,9 @@ import (
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/flow"
 	"API-GREENEX/internal/listeners"
+	"API-GREENEX/internal/models"
 	"API-GREENEX/internal/shared"
+	"API-GREENEX/internal/sorter"
 
 	"github.com/joho/godotenv"
 )
@@ -87,7 +89,7 @@ func main() {
 		skuManager = nil
 	}
 
-	// 4. Iniciar listeners de Cognex (todos los configurados)
+	// 4. Crear listeners de Cognex (NO iniciarlos aún, los sorters lo harán)
 	log.Println("")
 	log.Printf("📷 Configurando %d dispositivo(s) Cognex...", len(cfg.CognexDevices))
 	var cognexListeners []*listeners.CognexListener
@@ -106,38 +108,102 @@ func main() {
 			dbManager,
 		)
 
-		if err := cognexListener.Start(); err != nil {
-			log.Fatalf("     ❌ Error al iniciar: %v", err)
-		}
 		cognexListeners = append(cognexListeners, cognexListener)
-		log.Printf("     ✅ Escuchando correctamente")
+		log.Printf("     ✅ CognexListener creado (será iniciado por el sorter)")
 	}
 	log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Println("")
 
-	// Mostrar información de Sorters configurados (si hay)
+	// Inicializar Sorters (si hay configurados)
+	var sorters []*sorter.Sorter
 	if len(cfg.Sorters) > 0 {
-		log.Printf("🔀 Sorters configurados: %d", len(cfg.Sorters))
+		log.Printf("🔀 Inicializando %d Sorter(s)...", len(cfg.Sorters))
+		log.Println("")
+
 		for _, sorterCfg := range cfg.Sorters {
 			log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 			log.Printf("  📦 Sorter #%d: %s", sorterCfg.ID, sorterCfg.Name)
 			log.Printf("     Ubicación: %s", sorterCfg.Ubicacion)
 			log.Printf("     Cognex ID: %d", sorterCfg.CognexID)
-			log.Printf("     Método: %s", sorterCfg.ScanMethod)
-			log.Printf("     Salidas: %d", len(sorterCfg.Salidas))
-			for _, salida := range sorterCfg.Salidas {
-				log.Printf("       ↳ Salida %d: %s", salida.ID, salida.Name)
+
+			// Buscar el CognexListener correspondiente por índice (CognexID - 1)
+			var cognexListener *listeners.CognexListener
+			if sorterCfg.CognexID > 0 && sorterCfg.CognexID <= len(cognexListeners) {
+				cognexListener = cognexListeners[sorterCfg.CognexID-1]
 			}
-			// despues se debe implementar una logica para que los sorters se inicien mediante go routines
+
+			if cognexListener == nil {
+				log.Printf("     ⚠️  No se encontró Cognex Listener para Cognex ID %d, usando el primero disponible", sorterCfg.CognexID)
+				if len(cognexListeners) > 0 {
+					cognexListener = cognexListeners[0]
+				}
+			}
+
+			// Crear salidas desde config YAML
+			var salidas []shared.Salida
+			for _, salidaCfg := range sorterCfg.Salidas {
+				tipo := salidaCfg.Tipo
+				if tipo == "" {
+					tipo = "manual" // Default si no está especificado
+				}
+				salidas = append(salidas, shared.GetNewSalida(salidaCfg.ID, salidaCfg.Name, tipo))
+				log.Printf("       ↳ Salida %d: %s (%s)", salidaCfg.ID, salidaCfg.Name, tipo)
+			}
+			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener)
+			sorters = append(sorters, s)
+
+			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)
 		}
+
 		log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		log.Println("")
+
+		// Cargar y publicar SKUs activos a TODOS los sorters
+		if skuManager != nil {
+			log.Println("🔄 Cargando SKUs activos para todos los sorters...")
+			activeSKUs := skuManager.GetActiveSKUs()
+
+			// Convertir SKUs a formato assignable con hash
+			assignableSKUs := make([]models.SKUAssignable, 0, len(activeSKUs)+1)
+
+			// Agregar SKU REJECT (ID 0) al inicio
+			assignableSKUs = append(assignableSKUs, models.GetRejectSKU())
+
+			// Convertir SKUs activos usando hash como ID
+			for _, sku := range activeSKUs {
+				assignableSKUs = append(assignableSKUs, sku.ToAssignableWithHash())
+			}
+
+			// Publicar SKUs a cada sorter usando su método UpdateSKUs
+			for _, s := range sorters {
+				s.UpdateSKUs(assignableSKUs)
+				log.Printf("   ✅ Sorter #%d: %d SKUs publicados", s.ID, len(assignableSKUs))
+			}
+			log.Println("")
+		} else {
+			log.Println("⚠️  SKUManager no disponible, sorters sin SKUs iniciales")
+			log.Println("")
+		}
+
+		// Iniciar todos los sorters
+		log.Println("🚀 Iniciando sorters...")
+		for _, s := range sorters {
+			if err := s.Start(); err != nil {
+				log.Printf("   ⚠️  Error al iniciar Sorter #%d: %v", s.ID, err)
+			} else {
+				log.Printf("   ✅ Sorter #%d iniciado correctamente", s.ID)
+			}
+		}
 		log.Println("")
 	}
 
-	// Cerrar todos los listeners al finalizar
+	// Cerrar todos los listeners y sorters al finalizar
 	defer func() {
 		for _, cl := range cognexListeners {
 			cl.Stop()
+		}
+		for _, s := range sorters {
+			s.Stop()
 		}
 	}()
 
@@ -151,17 +217,18 @@ func main() {
 		httpService.SetSKUManager(skuManager)
 	}
 
+	// Registrar todos los sorters para acceso directo desde HTTP
+	for _, s := range sorters {
+		httpService.RegisterSorter(s)
+	}
+
 	log.Printf("🌐 Servidor HTTP iniciando en puerto %s...", httpPort)
 	log.Println("📊 Endpoints disponibles:")
 	log.Println("   GET  /Mesa/Estado")
 	log.Println("   POST /Mesa")
 	log.Println("   POST /Mesa/Vaciar")
 	log.Println("   GET  /status")
-	if skuManager != nil {
-		log.Println("   GET  /skus/assignables/:sorter_id (⚡ streaming eficiente)")
-	} else {
-		log.Println("   GET  /skus/assignables/:sorter_id (⚠️  SKUManager no disponible)")
-	}
+	log.Printf("   GET  /skus/assignables/:sorter_id (⚡ acceso directo sin bloqueo, %d sorters registrados)", len(sorters))
 
 	// Iniciar servidor HTTP con las rutas configuradas
 	if err := httpService.Start(); err != nil {

@@ -86,6 +86,7 @@ type Sorter struct {
 type Salida struct {
 	ID   int    `yaml:"id"`
 	Name string `yaml:"name"`
+	Tipo string `yaml:"tipo"` // "automatico" o "manual"
 }
 
 // LoadConfig carga la configuración desde el archivo YAML

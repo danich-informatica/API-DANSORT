@@ -68,10 +68,13 @@ sorters:
     salidas:
       - id: 1
         name: "Exportación"
+        tipo: "automatico"
       - id: 2
         name: "Mercado Nacional"
+        tipo: "automatico"
       - id: 3
         name: "Rechazo"
+        tipo: "manual"
 
   - id: 2
     name: "Sorter Secundario"
@@ -79,9 +82,12 @@ sorters:
     cognex_id: 2
     scan_method: "QR"
     salidas:
-      - id: 1
+      - id: 4
         name: "Premium"
-      - id: 2
+        tipo: "automatico"
+      - id: 5
         name: "Estándar"
-      - id: 3
+        tipo: "automatico"
+      - id: 6
         name: "Descarte"
+        tipo: "manual"
