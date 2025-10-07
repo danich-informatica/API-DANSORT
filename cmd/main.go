@@ -126,6 +126,13 @@ func main() {
 			log.Printf("     Ubicación: %s", sorterCfg.Ubicacion)
 			log.Printf("     Cognex ID: %d", sorterCfg.CognexID)
 
+			// Insertar sorter en la base de datos si no existe
+			if err := dbManager.InsertSorterIfNotExists(ctx, sorterCfg.ID, sorterCfg.Ubicacion); err != nil {
+				log.Printf("     ⚠️  Error al insertar sorter en DB: %v", err)
+			} else {
+				log.Printf("     ✅ Sorter #%d insertado en DB (o ya existía)", sorterCfg.ID)
+			}
+
 			// Buscar el CognexListener correspondiente por índice (CognexID - 1)
 			var cognexListener *listeners.CognexListener
 			if sorterCfg.CognexID > 0 && sorterCfg.CognexID <= len(cognexListeners) {
@@ -139,15 +146,25 @@ func main() {
 				}
 			}
 
-			// Crear salidas desde config YAML
+			// Crear salidas desde config YAML e insertarlas en la base de datos
 			var salidas []shared.Salida
+			salida_counter := 1
 			for _, salidaCfg := range sorterCfg.Salidas {
 				tipo := salidaCfg.Tipo
 				if tipo == "" {
 					tipo = "manual" // Default si no está especificado
 				}
-				salidas = append(salidas, shared.GetNewSalida(salidaCfg.ID, salidaCfg.Name, tipo))
+				salida := shared.GetNewSalida(salidaCfg.ID, salidaCfg.Name, tipo)
+				salidas = append(salidas, salida)
 				log.Printf("       ↳ Salida %d: %s (%s)", salidaCfg.ID, salidaCfg.Name, tipo)
+				// Insertar salida en la base de datos si no existe
+				if err := dbManager.InsertSalidaIfNotExists(ctx, salidaCfg.ID, sorterCfg.ID, salida_counter, true, nil, nil, nil); err != nil {
+					log.Printf("         ⚠️  Error al insertar salida en DB: %v", err)
+				} else {
+					log.Printf("         ✅ Salida %d insertada en DB (o ya existía)", salidaCfg.ID)
+				}
+
+				salida_counter++
 			}
 			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener)
 			sorters = append(sorters, s)

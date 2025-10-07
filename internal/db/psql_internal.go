@@ -10,91 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// InsertSKUsBatch inserta múltiples SKUs en la base de datos
-// Excluye SKUs nulas, inválidas y duplicadas
-// Actualiza el estado: pone todas las SKUs existentes en false y las nuevas/actualizadas en true
-func (m *PostgresManager) InsertSKUsBatch(ctx context.Context, skus []struct {
-	Calibre  string
-	Variedad string
-	Embalaje string
-}) (inserted int, skipped int, errors []string) {
-	if m == nil || m.pool == nil {
-		return 0, 0, []string{"manager no inicializado"}
-	}
-
-	// Paso 1: Poner todas las SKUs existentes en estado false
-	log.Println("Desactivando todas las SKUs existentes (estado = false)...")
-	result, err := m.pool.Exec(ctx, UPDATE_TO_FALSE_SKU_STATE_INTERNAL_DB)
-	if err != nil {
-		errMsg := fmt.Sprintf("error al desactivar SKUs existentes: %v", err)
-		errors = append(errors, errMsg)
-		log.Println(errMsg)
-		return 0, 0, errors
-	}
-	deactivated := result.RowsAffected()
-	log.Printf("✓ %d SKUs desactivadas", deactivated)
-
-	// Mapa para detectar duplicados en el batch
-	seen := make(map[string]bool)
-
-	for i, sku := range skus {
-		// Validar que no sea nulo o vacío
-		if isNullOrEmpty(sku.Calibre, sku.Variedad, sku.Embalaje) {
-			skipped++
-			log.Printf("fila %d: SKU omitida - componentes nulos o vacíos: %s-%s-%s",
-				i+1, sku.Calibre, sku.Variedad, sku.Embalaje)
-			continue
-		}
-
-		// Crear clave única para detectar duplicados
-		key := fmt.Sprintf("%s|%s|%s",
-			strings.TrimSpace(sku.Calibre),
-			strings.TrimSpace(sku.Variedad),
-			strings.TrimSpace(sku.Embalaje))
-
-		// Verificar si ya se procesó en este batch
-		if seen[key] {
-			skipped++
-			log.Printf("fila %d: SKU duplicada en batch: %s-%s-%s",
-				i+1, sku.Calibre, sku.Variedad, sku.Embalaje)
-			continue
-		}
-
-		seen[key] = true
-
-		// Insertar o actualizar: si existe, actualiza estado a true; si no existe, inserta con estado true
-		result, err := m.pool.Exec(ctx, INSERT_SKU_INTERNAL_DB,
-			strings.TrimSpace(sku.Calibre),
-			strings.TrimSpace(sku.Variedad),
-			strings.TrimSpace(sku.Embalaje),
-			true)
-
-		if err != nil {
-			errMsg := fmt.Sprintf("fila %d: error al insertar/actualizar SKU %s-%s-%s: %v",
-				i+1, sku.Calibre, sku.Variedad, sku.Embalaje, err)
-			errors = append(errors, errMsg)
-			log.Println(errMsg)
-			continue
-		}
-
-		// RowsAffected() == 1 para INSERT o UPDATE
-		rowsAffected := result.RowsAffected()
-		if rowsAffected > 0 {
-			// SKU procesada exitosamente (insertada nueva o reactivada)
-			inserted++
-			log.Printf("fila %d: SKU procesada (insertada/reactivada): %s-%s-%s",
-				i+1, sku.Calibre, sku.Variedad, sku.Embalaje)
-		} else {
-			skipped++
-			log.Printf("fila %d: SKU no procesada: %s-%s-%s",
-				i+1, sku.Calibre, sku.Variedad, sku.Embalaje)
-		}
-	}
-
-	log.Printf("✓ Total SKUs procesadas: %d (insertadas nuevas + reactivadas)", inserted)
-	return inserted, skipped, errors
-}
-
 // CajaInfo representa información de una caja para el dashboard
 type CajaInfo struct {
 	Correlativo string
@@ -346,4 +261,28 @@ func (m *PostgresManager) GetActiveSKUs(ctx context.Context) ([]models.SKU, erro
 	}
 
 	return skus, nil
+}
+
+// Inserta un sorter en la base de datos si no existe usando la query de queries.go
+func (m *PostgresManager) InsertSorterIfNotExists(ctx context.Context, id int, ubicacion string) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+	_, err := m.pool.Exec(ctx, INSERT_NEW_SORTER_IF_NOT_EXISTS_INTERNAL_DB, id, ubicacion)
+	if err != nil {
+		return fmt.Errorf("error al insertar sorter: %w", err)
+	}
+	return nil
+}
+
+// Inserta una salida en la base de datos si no existe usando la query de queries.go
+func (m *PostgresManager) InsertSalidaIfNotExists(ctx context.Context, id int, sorterID int, salidaSorter int, estado bool, calibre, variedad, embalaje *string) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+	_, err := m.pool.Exec(ctx, INSERT_NEW_SALIDA_IF_NOT_EXISTS_INTERNAL_DB, id, sorterID, salidaSorter, estado, calibre, variedad, embalaje)
+	if err != nil {
+		return fmt.Errorf("error al insertar salida: %w", err)
+	}
+	return nil
 }

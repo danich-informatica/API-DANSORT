@@ -21,6 +21,14 @@ type PostgresManager struct {
 	closeOnce sync.Once
 }
 
+func (m *PostgresManager) InsertSKUsBatch(ctx context.Context, skuList []struct {
+	Calibre  string
+	Variedad string
+	Embalaje string
+}) (any, any, any) {
+	panic("unimplemented")
+}
+
 var (
 	postgresOnce sync.Once
 	postgresMgr  *PostgresManager

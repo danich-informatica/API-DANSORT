@@ -84,11 +84,12 @@ func main() {
 	log.Println("\n=== Resumen de Inserción ===")
 	log.Printf("✅ SKUs insertadas correctamente: %d", inserted)
 	log.Printf("⚠️  SKUs omitidas (nulas/inválidas/duplicadas): %d", skipped)
-	log.Printf("❌ Errores durante inserción: %d", len(errors))
+	log.Printf("❌ Errores durante inserción: %d", len(errors.([]error)))
 
-	if len(errors) > 0 {
+	errList, ok := errors.([]error)
+	if ok && len(errList) > 0 {
 		log.Println("\n=== Detalle de Errores ===")
-		for _, err := range errors {
+		for _, err := range errList {
 			log.Println(err)
 		}
 	}

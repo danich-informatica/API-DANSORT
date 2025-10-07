@@ -85,3 +85,43 @@ const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
 	WHERE estado = true
 	ORDER BY variedad, calibre, embalaje
 `
+
+const INSERT_NEW_SORTER_IF_NOT_EXISTS_INTERNAL_DB = `
+	INSERT INTO sorter (id, ubicacion)
+	VALUES ($1, $2)
+	ON CONFLICT (id) DO NOTHING
+`
+
+const INSERT_NEW_SALIDA_IF_NOT_EXISTS_INTERNAL_DB = `
+	INSERT INTO salida (id, sorter, salida_sorter, estado, calibre, variedad, embalaje)
+	VALUES ($1, $2, $3, $4, $5, $6, $7)
+	ON CONFLICT (id) DO NOTHING
+`
+const SELECT_ALL_SORTERS_AND_OUTPUTS_INTERNAL_DB = `
+	SELECT 
+		s.id AS sorter_id,
+		s.ubicacion AS sorter_ubicacion,
+		sal.id AS salida_id,
+		sal.salida_sorter AS salida_sorter,
+		sal.estado AS salida_estado,
+		sal.calibre AS salida_calibre,
+		sal.variedad AS salida_variedad,
+		sal.embalaje AS salida_embalaje
+	FROM sorter s
+	LEFT JOIN salida sal ON s.id = sal.sorter
+	ORDER BY s.id, sal.id;
+`
+
+const SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB = `
+	SELECT 
+		sal.id AS salida_id,
+		sal.salida_sorter AS salida_sorter,
+		sal.estado AS salida_estado,
+		sal.calibre AS salida_calibre,
+		sal.variedad AS salida_variedad,
+		sal.embalaje AS salida_embalaje
+	FROM sorter s
+	JOIN salida sal ON s.id = sal.sorter
+	WHERE s.id = $1
+	ORDER BY sal.id;
+`

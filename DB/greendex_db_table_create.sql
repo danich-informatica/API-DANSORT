@@ -62,7 +62,7 @@ CREATE INDEX idx_caja_correlativo_pallet ON caja (correlativo_pallet);
 -- Sorter
 -- =======================
 CREATE TABLE sorter (
-    id         INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id         INT PRIMARY KEY,
     ubicacion  VARCHAR(100) NOT NULL
 );
 
@@ -70,7 +70,7 @@ CREATE TABLE sorter (
 -- Salida
 -- =======================
 CREATE TABLE salida (
-    id             INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id             INT PRIMARY KEY,
     sorter         INT NOT NULL,
     salida_sorter  INT NOT NULL,
     estado         BOOLEAN NOT NULL DEFAULT TRUE,
