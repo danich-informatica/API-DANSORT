@@ -166,6 +166,28 @@ func main() {
 
 				salida_counter++
 			}
+
+			// Cargar SKUs asignadas desde la base de datos
+			skusBySalida, err := dbManager.LoadAssignedSKUsForSorter(ctx, sorterCfg.ID)
+			if err != nil {
+				log.Printf("     ⚠️  Error al cargar SKUs desde BD: %v", err)
+			} else if len(skusBySalida) > 0 {
+				log.Printf("     📥 Cargando SKUs persistidas desde BD...")
+				totalSKUsLoaded := 0
+				for i := range salidas {
+					salidaID := salidas[i].ID
+					if skus, existe := skusBySalida[salidaID]; existe && len(skus) > 0 {
+						salidas[i].SKUs_Actuales = skus
+						totalSKUsLoaded += len(skus)
+						for _, sku := range skus {
+							log.Printf("        ✓ Salida %d: SKU '%s' (Calibre:%s, Variedad:%s, Embalaje:%s)",
+								salidaID, sku.SKU, sku.Calibre, sku.Variedad, sku.Embalaje)
+						}
+					}
+				}
+				log.Printf("     ✅ Total: %d SKU(s) cargada(s) desde BD", totalSKUsLoaded)
+			}
+
 			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener)
 			sorters = append(sorters, s)
 

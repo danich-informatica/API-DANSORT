@@ -114,12 +114,16 @@ const SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB = `
 		sal.id AS salida_id,
 		sal.salida_sorter AS salida_sorter,
 		sal.estado AS salida_estado,
-		sku.calibre AS salida_calibre,
-		sku.variedad AS salida_variedad,
-		sku.embalaje AS salida_embalaje
+		ss.calibre AS salida_calibre,
+		ss.variedad AS salida_variedad,
+		ss.embalaje AS salida_embalaje,
+		s2.estado AS sku_estado
 	FROM sorter s
 	JOIN salida sal ON s.id = sal.sorter
-	JOIN salida_sku sku ON sal.id = sku.salida_id
+	JOIN salida_sku ss ON sal.id = ss.salida_id
+	JOIN sku s2 ON ss.calibre = s2.calibre AND ss.variedad = s2.variedad AND ss.embalaje = s2.embalaje
+	WHERE s.id = $1
+	ORDER BY sal.id
 `
 const INSERT_SALIDA_SKU_INTERNAL_DB = `
 	INSERT INTO salida_sku (salida_id, calibre, variedad, embalaje)

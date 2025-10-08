@@ -298,3 +298,61 @@ func (m *PostgresManager) InsertSalidaSKU(ctx context.Context, salidaID int, cal
 	}
 	return nil
 }
+
+// LoadAssignedSKUsForSorter carga todas las SKUs asignadas a las salidas de un sorter específico
+// Retorna un mapa donde la clave es el salida_id y el valor es un slice de SKUs
+func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterID int) (map[int][]models.SKU, error) {
+	if m == nil || m.pool == nil {
+		return nil, fmt.Errorf("manager no inicializado")
+	}
+
+	rows, err := m.pool.Query(ctx, SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB, sorterID)
+	if err != nil {
+		return nil, fmt.Errorf("error al consultar SKUs asignadas: %w", err)
+	}
+	defer rows.Close()
+
+	// Mapa para agrupar SKUs por salida_id
+	skusBySalida := make(map[int][]models.SKU)
+
+	for rows.Next() {
+		var salidaID int
+		var salidaSorter string
+		var salidaEstado bool
+		var calibre, variedad, embalaje string
+		var skuEstado bool
+
+		err := rows.Scan(
+			&salidaID,
+			&salidaSorter,
+			&salidaEstado,
+			&calibre,
+			&variedad,
+			&embalaje,
+			&skuEstado,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error al escanear fila: %w", err)
+		}
+
+		// Construir el SKU completo: calibre-variedad-embalaje
+		skuName := fmt.Sprintf("%s-%s-%s", calibre, variedad, embalaje)
+
+		sku := models.SKU{
+			Calibre:  calibre,
+			Variedad: variedad,
+			Embalaje: embalaje,
+			SKU:      skuName,
+			Estado:   skuEstado,
+		}
+
+		// Agregar SKU al mapa agrupado por salida_id
+		skusBySalida[salidaID] = append(skusBySalida[salidaID], sku)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error al iterar filas: %w", err)
+	}
+
+	return skusBySalida, nil
+}
