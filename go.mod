@@ -4,7 +4,6 @@ go 1.23.0
 
 require (
 	github.com/gin-gonic/gin v1.11.0
-	github.com/gopcua/opcua v0.8.0
 	github.com/joho/godotenv v1.5.1
 	github.com/microsoft/go-mssqldb v1.6.0
 	gopkg.in/yaml.v3 v3.0.1
