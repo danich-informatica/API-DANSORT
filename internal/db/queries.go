@@ -60,6 +60,26 @@ const INSERT_CAJA_SIN_CORRELATIVO_INTERNAL_DB = `
 		NULL
 	) RETURNING correlativo;
 `
+
+const INSERT_SALIDA_CAJA_INTERNAL_DB = `
+	INSERT INTO salida_caja (
+		correlativo_caja,
+		id_salida,
+		salida_enviada,
+		fecha_salida,
+		id_fabricacion
+	) VALUES (
+		$1,
+		$2,
+		$3,
+		CURRENT_TIMESTAMP,
+		NULL
+	)
+	ON CONFLICT (correlativo_caja, id_salida) DO UPDATE
+	SET 
+		salida_enviada = EXCLUDED.salida_enviada,
+		fecha_salida = EXCLUDED.fecha_salida;
+`
 const SELECT_RECENT_BOXES_INTERNAL_DB = `
 	SELECT 
 		c.correlativo,

@@ -2,6 +2,7 @@
 package sorter
 
 import (
+	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/listeners"
 	"API-GREENEX/internal/models"
 	"API-GREENEX/internal/shared"
@@ -41,6 +42,9 @@ type Sorter struct {
 
 	// WebSocket Hub para enviar eventos
 	wsHub *listeners.WebSocketHub
+
+	// Database manager para registrar salidas de cajas
+	dbManager interface{}
 
 	// Estadísticas generales
 	LecturasExitosas int
@@ -132,7 +136,7 @@ func (s *Sorter) updateBatchDistributor(skuName string) {
 	}
 }
 
-func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub) *Sorter {
+func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}) *Sorter {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Registrar canales para este sorter
@@ -155,6 +159,7 @@ func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *lis
 		lastFlowStats:    make(map[string]float64),              // Inicializar mapa de porcentajes
 		batchCounters:    make(map[string]*BatchDistributor),    // Inicializar distribuidores de lote
 		wsHub:            wsHub,                                 // Asignar WebSocket Hub
+		dbManager:        dbManager,                             // Asignar DB Manager
 	}
 }
 
@@ -248,6 +253,11 @@ func (s *Sorter) procesarEventosCognex() {
 				// 📤 Enviar evento WebSocket de lectura procesada
 				s.PublishLecturaEvent(evento, &salida, true)
 
+				// 💾 Registrar en base de datos la salida de la caja
+				if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida); err != nil {
+					log.Printf("⚠️  [Sorter] Error al registrar salida de caja %s: %v", evento.Correlativo, err)
+				}
+
 				// TODO: Activar actuadores/PLC para enviar a la salida
 			} else {
 				s.LecturasFallidas++
@@ -274,6 +284,11 @@ func (s *Sorter) procesarEventosCognex() {
 
 				// 📤 Enviar evento WebSocket de lectura fallida
 				s.PublishLecturaEvent(evento, &salida, false)
+
+				// 💾 Registrar en base de datos la salida de la caja (también para fallidas)
+				if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida); err != nil {
+					log.Printf("⚠️  [Sorter] Error al registrar salida de caja fallida %s: %v", evento.Correlativo, err)
+				}
 			}
 
 			// Mostrar estadísticas cada 10 lecturas
@@ -796,4 +811,26 @@ func (s *Sorter) PublishLecturaEvent(evento models.LecturaEvent, salida *shared.
 		RoomName: roomName,
 		Message:  jsonBytes,
 	}
+}
+
+// RegistrarSalidaCaja registra en la base de datos que una caja fue enviada a una salida física
+func (s *Sorter) RegistrarSalidaCaja(correlativo string, salida *shared.Salida) error {
+	if s.dbManager == nil {
+		return fmt.Errorf("dbManager no inicializado")
+	}
+
+	// Type assertion para obtener el PostgresManager
+	pgManager, ok := s.dbManager.(*db.PostgresManager)
+	if !ok {
+		return fmt.Errorf("dbManager no es un PostgresManager válido")
+	}
+
+	// Registrar en la tabla salida_caja
+	ctx := context.Background()
+	err := pgManager.InsertSalidaCaja(ctx, correlativo, salida.ID, salida.SealerPhysicalID)
+	if err != nil {
+		return fmt.Errorf("error al registrar salida de caja %s: %w", correlativo, err)
+	}
+
+	return nil
 }

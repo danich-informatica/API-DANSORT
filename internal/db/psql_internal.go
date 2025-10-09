@@ -403,3 +403,37 @@ func (m *PostgresManager) DeleteAllSalidaSKUs(ctx context.Context, salidaID int)
 	log.Printf("✅ [DB] Eliminadas %d SKUs de salida %d", rowsAffected, salidaID)
 	return rowsAffected, nil
 }
+
+// InsertSalidaCaja registra que una caja fue enviada a una salida específica
+// Parámetros:
+//   - correlativo: Correlativo de la caja (ej: "10888")
+//   - salidaID: ID de la salida física en la tabla salida (ej: 8)
+//   - salidaRelativa: Número relativo de salida del sorter (1, 2, 3, etc.)
+func (m *PostgresManager) InsertSalidaCaja(ctx context.Context, correlativo string, salidaID int, salidaRelativa int) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+
+	// Validaciones básicas
+	if correlativo == "" {
+		return fmt.Errorf("correlativo vacío")
+	}
+	if salidaID <= 0 {
+		return fmt.Errorf("salidaID inválido: %d", salidaID)
+	}
+	if salidaRelativa <= 0 {
+		return fmt.Errorf("salidaRelativa inválido: %d", salidaRelativa)
+	}
+
+	commandTag, err := m.pool.Exec(ctx, INSERT_SALIDA_CAJA_INTERNAL_DB, correlativo, salidaID, salidaRelativa)
+	if err != nil {
+		return fmt.Errorf("error al insertar salida_caja: %w", err)
+	}
+
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("no se pudo insertar registro en salida_caja")
+	}
+
+	log.Printf("✅ [DB] Caja %s registrada en salida %d (relativa: %d)", correlativo, salidaID, salidaRelativa)
+	return nil
+}

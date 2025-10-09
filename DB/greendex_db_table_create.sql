@@ -135,7 +135,7 @@ CREATE TABLE salida_caja (
     id_salida        INT NOT NULL,
     salida_enviada   INT NOT NULL,
     fecha_salida     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    id_fabricacion   INT NOT NULL,
+    id_fabricacion   INT,
     CONSTRAINT pk_salida_caja PRIMARY KEY (correlativo_caja, id_salida),
     CONSTRAINT fk_salida_caja_caja FOREIGN KEY (correlativo_caja)
         REFERENCES caja (correlativo) ON DELETE CASCADE,

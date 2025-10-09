@@ -90,12 +90,14 @@ type HTTPConfig struct {
 }
 
 type CognexDevice struct {
-	ID         int    `yaml:"id"`
-	Name       string `yaml:"name"`
-	Host       string `yaml:"host"`
-	Port       int    `yaml:"port"`
-	ScanMethod string `yaml:"scan_method"`
-	Ubicacion  string `yaml:"ubicacion"`
+	ID            int    `yaml:"id"`
+	Name          string `yaml:"name"`
+	Host          string `yaml:"host"`            // Host remoto informativo (de dónde viene)
+	Port          int    `yaml:"port"`            // Puerto en el que escuchará (siempre 0.0.0.0)
+	ScanMethod    string `yaml:"scan_method"`     // Método de escaneo por defecto: "QR" o "DATAMATRIX"
+	Ubicacion     string `yaml:"ubicacion"`       // Ubicación física del dispositivo
+	IntervalMs    int    `yaml:"interval_ms"`     // Intervalo entre lecturas (milisegundos) para simulador
+	NoReadPercent int    `yaml:"no_read_percent"` // Porcentaje de lecturas NO_READ para simulador
 }
 
 type Sorter struct {
@@ -108,10 +110,12 @@ type Sorter struct {
 }
 
 type Salida struct {
-	ID        int    `yaml:"id"`
-	Name      string `yaml:"name"`
-	Tipo      string `yaml:"tipo"`       // "automatico" o "manual"
-	BatchSize int    `yaml:"batch_size"` // Tamaño de lote para distribución
+	ID         int    `yaml:"id"`
+	PhysicalID int    `yaml:"physical_id"` // ID físico relativo del sorter (1, 2, 3, etc.)
+	CognexID   int    `yaml:"cognex_id"`   // ID de Cognex asignado a esta salida (opcional, 0 = sin cognex)
+	Name       string `yaml:"name"`
+	Tipo       string `yaml:"tipo"`       // "automatico" o "manual"
+	BatchSize  int    `yaml:"batch_size"` // Tamaño de lote para distribución
 }
 
 // LoadConfig carga la configuración desde el archivo YAML

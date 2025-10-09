@@ -7,6 +7,7 @@ import (
 type Salida struct {
 	ID               int          `json:"id"`
 	SealerPhysicalID int          `json:"sealer_physical_id"`
+	CognexID         int          `json:"cognex_id"` // ID de Cognex asignado a esta salida (0 = sin cognex)
 	Salida_Sorter    string       `json:"salida_sorter"`
 	Tipo             string       `json:"tipo"`       // "automatico" o "manual"
 	BatchSize        int          `json:"batch_size"` // Tamaño de lote para distribución
@@ -24,7 +25,8 @@ func GetNewSalida(ID int, salida_sorter string, tipo string, batchSize int) Sali
 
 	return Salida{
 		ID:               ID,
-		SealerPhysicalID: ID, // Por ahora igual, pero puede ser diferente en el futuro
+		SealerPhysicalID: ID, // Por defecto igual, se puede sobrescribir después
+		CognexID:         0,  // 0 = sin cognex asignado
 		Salida_Sorter:    salida_sorter,
 		Tipo:             tipo,
 		BatchSize:        batchSize,
@@ -33,4 +35,19 @@ func GetNewSalida(ID int, salida_sorter string, tipo string, batchSize int) Sali
 		Ingreso:          false,
 		IsEnabled:        true,
 	}
+}
+
+// GetNewSalidaWithPhysicalID crea una nueva salida con ID físico específico
+func GetNewSalidaWithPhysicalID(ID int, physicalID int, salida_sorter string, tipo string, batchSize int) Salida {
+	salida := GetNewSalida(ID, salida_sorter, tipo, batchSize)
+	salida.SealerPhysicalID = physicalID
+	return salida
+}
+
+// GetNewSalidaComplete crea una nueva salida con todos los parámetros
+func GetNewSalidaComplete(ID int, physicalID int, cognexID int, salida_sorter string, tipo string, batchSize int) Salida {
+	salida := GetNewSalida(ID, salida_sorter, tipo, batchSize)
+	salida.SealerPhysicalID = physicalID
+	salida.CognexID = cognexID
+	return salida
 }

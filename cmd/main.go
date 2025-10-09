@@ -178,9 +178,26 @@ func main() {
 				if batchSize <= 0 {
 					batchSize = 1 // Default: lote de 1
 				}
-				salida := shared.GetNewSalida(salidaCfg.ID, salidaCfg.Name, tipo, batchSize)
+
+				// Determinar PhysicalID (si no está configurado, usar salida_counter)
+				physicalID := salidaCfg.PhysicalID
+				if physicalID <= 0 {
+					physicalID = salida_counter
+				}
+
+				// Obtener CognexID (opcional, 0 = sin cognex)
+				cognexID := salidaCfg.CognexID
+
+				salida := shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, cognexID, salidaCfg.Name, tipo, batchSize)
 				salidas = append(salidas, salida)
-				log.Printf("       ↳ Salida %d: %s (%s, lote=%d)", salidaCfg.ID, salidaCfg.Name, tipo, batchSize)
+				// Log con o sin cognex
+				if cognexID > 0 {
+					log.Printf("       ↳ Salida %d: %s (%s, lote=%d, physical_id=%d, cognex_id=%d)",
+						salidaCfg.ID, salidaCfg.Name, tipo, batchSize, physicalID, cognexID)
+				} else {
+					log.Printf("       ↳ Salida %d: %s (%s, lote=%d, physical_id=%d)",
+						salidaCfg.ID, salidaCfg.Name, tipo, batchSize, physicalID)
+				}
 				// Insertar salida en la base de datos si no existe
 				if err := dbManager.InsertSalidaIfNotExists(ctx, salidaCfg.ID, sorterCfg.ID, salida_counter, true); err != nil {
 					log.Printf("         ⚠️  Error al insertar salida en DB: %v", err)
@@ -212,7 +229,7 @@ func main() {
 				log.Printf("     ✅ Total: %d SKU(s) cargada(s) desde BD", totalSKUsLoaded)
 			}
 
-			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener, httpService.GetWebSocketHub())
+			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager)
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)

@@ -29,7 +29,7 @@ type insertResult struct {
 }
 
 type CognexListener struct {
-	host        string
+	remoteHost  string // Host remoto de donde viene la cámara (solo informativo)
 	port        int
 	scan_method string // "QR" o "DATAMATRIX"
 	listener    net.Listener
@@ -41,11 +41,11 @@ type CognexListener struct {
 	dispositivo string
 }
 
-func NewCognexListener(host string, port int, scan_method string, dbManager *db.PostgresManager) *CognexListener {
+func NewCognexListener(remoteHost string, port int, scan_method string, dbManager *db.PostgresManager) *CognexListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	dispositivo := fmt.Sprintf("Cognex-%s:%d", host, port)
+	dispositivo := fmt.Sprintf("Cognex-%s:%d", remoteHost, port)
 	cl := &CognexListener{
-		host:        host,
+		remoteHost:  remoteHost,
 		port:        port,
 		ctx:         ctx,
 		scan_method: scan_method,
@@ -64,7 +64,7 @@ func NewCognexListener(host string, port int, scan_method string, dbManager *db.
 
 // String implementa la interfaz fmt.Stringer
 func (c *CognexListener) String() string {
-	return fmt.Sprintf("CognexListener{host: %s, port: %d}", c.host, c.port)
+	return fmt.Sprintf("CognexListener{remote: %s, port: %d}", c.remoteHost, c.port)
 }
 
 // insertWorker procesa inserciones a la base de datos de forma asíncrona
@@ -103,7 +103,8 @@ func (c *CognexListener) processInsert(req insertRequest) {
 
 // Start inicia el servidor TCP para escuchar mensajes de Cognex
 func (c *CognexListener) Start() error {
-	address := fmt.Sprintf("%s:%d", c.host, c.port)
+	// Siempre escuchar en todas las interfaces (0.0.0.0)
+	address := fmt.Sprintf("0.0.0.0:%d", c.port)
 
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -111,7 +112,7 @@ func (c *CognexListener) Start() error {
 	}
 
 	c.listener = listener
-	log.Printf("✓ CognexListener escuchando en %s\n", address)
+	log.Printf("✓ CognexListener escuchando en %s (esperando conexiones desde %s)\n", address, c.remoteHost)
 
 	// Aceptar conexiones en una goroutine
 	go c.acceptConnections()
@@ -338,7 +339,8 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			)
 		}
 	case "DATAMATRIX":
-		log.Printf("✅ Escaneo DataMatrix válido: %s ", strings.TrimSpace(message))
+		log.Printf("📊 DataMatrix detectado: %s", strings.TrimSpace(message))
+		// TODO: Implementar procesamiento de DataMatrix en el futuro
 	default:
 		log.Printf("❌ Método de escaneo desconocido: %s", c.scan_method)
 		response := "NACK\r\n"

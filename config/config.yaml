@@ -33,20 +33,36 @@ statistics:
   flow_window_duration: 20s # Ventana de tiempo para el cálculo (últimos X segundos)
 
 # Dispositivos Cognex (múltiples)
+# IMPORTANTE:
+#   - Siempre escuchan en 0.0.0.0 (todas las interfaces)
+#   - Se identifican por puerto único
+#   - El campo 'host' es solo informativo (IP de la cámara física)
 cognex_devices:
   - id: 1
     name: "Cognex Línea 1"
-    host: "127.0.0.1"
-    port: 8085
-    scan_method: "QR"
+    host: "127.0.0.1" # IP informativa de la cámara física
+    port: 8085 # Puerto ÚNICO donde escuchará (0.0.0.0:8085)
+    scan_method: "QR" # Método por defecto: QR o DATAMATRIX
     ubicacion: "Línea Principal"
+    interval_ms: 1000 # Para simulador: 1 segundo entre lecturas
+    no_read_percent: 5 # Para simulador: 5% de errores
 
   - id: 2
     name: "Cognex Línea 2"
-    host: "0.0.0.0"
-    port: 8086
-    scan_method: "QR"
+    host: "127.0.0.1" # IP informativa de la cámara física
+    port: 8086 # Puerto ÚNICO donde escuchará (0.0.0.0:8086)
+    scan_method: "QR" # Método por defecto: QR o DATAMATRIX
     ubicacion: "Línea Secundaria"
+    interval_ms: 100 # Para simulador: 10 lecturas/segundo
+    no_read_percent: 1 # Para simulador: 1% de errores
+  - id: 3
+    name: "Cognex salida 1"
+    host: "127.0.0.1" # IP informativa de la cámara física
+    port: 8087 # Puerto ÚNICO donde escuchará (0.0.0.0:8087)
+    scan_method: "DATAMATRIX" # Método por defecto: QR o DATAMATRIX
+    ubicacion: "Salida 1"
+    interval_ms: 1000 # Para simulador: 1 segundo entre lecturas
+    no_read_percent: 5 # Para simulador: 5% de errores
 
 # Sorters (múltiples)
 sorters:
@@ -60,6 +76,7 @@ sorters:
         name: "Exportación"
         tipo: "automatico"
         batch_size: 3 # Envía 2 cajas por lote
+        cognex_id: 3 # ← Cognex de verificación en esta salida
       - id: 2
         name: "Mercado Nacional"
         tipo: "automatico"

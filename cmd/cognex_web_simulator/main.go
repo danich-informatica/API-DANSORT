@@ -355,6 +355,16 @@ func main() {
 	// Crear simuladores desde configuración
 	log.Println("🔧 Inicializando simuladores Cognex...")
 	for _, cognexCfg := range cfg.CognexDevices {
+		// Valores por defecto si no están en config
+		intervalMs := cognexCfg.IntervalMs
+		if intervalMs <= 0 {
+			intervalMs = 1000 // Default: 1 segundo
+		}
+		noReadPercent := cognexCfg.NoReadPercent
+		if noReadPercent < 0 || noReadPercent > 100 {
+			noReadPercent = 10 // Default: 10% de NO_READ
+		}
+
 		sim := &CognexSimulator{
 			ID:            cognexCfg.ID,
 			Name:          cognexCfg.Name,
@@ -363,11 +373,12 @@ func main() {
 			ScanMethod:    cognexCfg.ScanMethod,
 			Ubicacion:     cognexCfg.Ubicacion,
 			IsRunning:     false,
-			IntervalMs:    1000, // Default: 1 segundo
-			NoReadPercent: 10,   // Default: 10% de NO_READ
+			IntervalMs:    intervalMs,
+			NoReadPercent: noReadPercent,
 		}
 		manager.simulators[sim.ID] = sim
-		log.Printf("  ↳ Cognex #%d: %s (%s:%d)", sim.ID, sim.Name, sim.Host, sim.Port)
+		log.Printf("  ↳ Cognex #%d: %s (%s:%d) - Intervalo: %dms, NO_READ: %d%%",
+			sim.ID, sim.Name, sim.Host, sim.Port, intervalMs, noReadPercent)
 	}
 
 	// Configurar servidor web
