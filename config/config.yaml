@@ -27,6 +27,11 @@ http:
   host: "0.0.0.0"
   port: 8081
 
+# Estadísticas de flujo en tiempo real
+statistics:
+  flow_calculation_interval: 1s # Cada cuántos segundos se calcula y publica el %
+  flow_window_duration: 20s # Ventana de tiempo para el cálculo (últimos X segundos)
+
 # Dispositivos Cognex (múltiples)
 cognex_devices:
   - id: 1
@@ -54,12 +59,15 @@ sorters:
       - id: 1
         name: "Exportación"
         tipo: "automatico"
+        batch_size: 2 # Envía 2 cajas por lote
       - id: 2
         name: "Mercado Nacional"
         tipo: "automatico"
+        batch_size: 5 # Envía 5 cajas por lote
       - id: 3
         name: "Rechazo"
         tipo: "manual"
+        batch_size: 1 # Manual siempre de 1 en 1
 
   - id: 2
     name: "Sorter Secundario"
@@ -70,9 +78,24 @@ sorters:
       - id: 4
         name: "Premium"
         tipo: "automatico"
+        batch_size: 3 # Envía 3 cajas por lote
       - id: 5
         name: "Estándar"
         tipo: "automatico"
+        batch_size: 7 # Envía 7 cajas por lote
       - id: 6
         name: "Descarte"
         tipo: "manual"
+        batch_size: 1 # Manual siempre de 1 en 1
+      - id: 7
+        name: "Rechazo"
+        tipo: "manual"
+        batch_size: 1 # Manual siempre de 1 en 1
+      - id: 8
+        name: "Rechazo"
+        tipo: "manual"
+        batch_size: 1 # Manual siempre de 1 en 1
+      - id: 9
+        name: "Rechazo"
+        tipo: "manual"
+        batch_size: 1 # Manual siempre de 1 en 1

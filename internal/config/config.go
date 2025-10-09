@@ -9,10 +9,34 @@ import (
 )
 
 type Config struct {
-	Database      DatabaseConfig `yaml:"database"`
-	HTTP          HTTPConfig     `yaml:"http"`
-	CognexDevices []CognexDevice `yaml:"cognex_devices"`
-	Sorters       []Sorter       `yaml:"sorters"`
+	Database      DatabaseConfig   `yaml:"database"`
+	HTTP          HTTPConfig       `yaml:"http"`
+	Statistics    StatisticsConfig `yaml:"statistics"`
+	CognexDevices []CognexDevice   `yaml:"cognex_devices"`
+	Sorters       []Sorter         `yaml:"sorters"`
+}
+
+type StatisticsConfig struct {
+	FlowCalculationInterval string `yaml:"flow_calculation_interval"` // ej: "10s"
+	FlowWindowDuration      string `yaml:"flow_window_duration"`      // ej: "60s"
+}
+
+// GetFlowCalculationInterval retorna la duración del intervalo de cálculo
+func (s *StatisticsConfig) GetFlowCalculationInterval() time.Duration {
+	duration, err := time.ParseDuration(s.FlowCalculationInterval)
+	if err != nil {
+		return 10 * time.Second // default
+	}
+	return duration
+}
+
+// GetFlowWindowDuration retorna la duración de la ventana de tiempo
+func (s *StatisticsConfig) GetFlowWindowDuration() time.Duration {
+	duration, err := time.ParseDuration(s.FlowWindowDuration)
+	if err != nil {
+		return 60 * time.Second // default
+	}
+	return duration
 }
 
 type DatabaseConfig struct {
@@ -84,9 +108,10 @@ type Sorter struct {
 }
 
 type Salida struct {
-	ID   int    `yaml:"id"`
-	Name string `yaml:"name"`
-	Tipo string `yaml:"tipo"` // "automatico" o "manual"
+	ID        int    `yaml:"id"`
+	Name      string `yaml:"name"`
+	Tipo      string `yaml:"tipo"`       // "automatico" o "manual"
+	BatchSize int    `yaml:"batch_size"` // Tamaño de lote para distribución
 }
 
 // LoadConfig carga la configuración desde el archivo YAML

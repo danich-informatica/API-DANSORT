@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"API-GREENEX/internal/models"
 	. "API-GREENEX/internal/shared"
 )
 
@@ -147,80 +148,53 @@ func (h *WebSocketHub) CreateRoomsForSorters(sorterIDs []int) {
 	}
 }
 
-// NotifySKUAssigned notifica el estado actual completo de SKUs asignadas
-// Envía TODAS las SKUs del sorter con sus asignaciones actuales
+// NotifySKUAssigned notifica el estado actual de asignaciones siguiendo la estructura de /sku/assigned
 func (h *WebSocketHub) NotifySKUAssigned(sorter SorterInterface) {
 	sorterID := sorter.GetID()
 	roomName := fmt.Sprintf("assignment_%d", sorterID)
 
-	assignedSKUs := sorter.GetCurrentSKUs()
-	salidas := sorter.GetSalidas()
-
-	// Pre-allocate con capacidad estimada (optimización para 10 SKUs/segundo)
-	estimatedSize := len(assignedSKUs) * 2 // Estimar 2 salidas promedio por SKU
-	skuData := make([]map[string]interface{}, 0, estimatedSize)
-
-	// Construir mapa de SKU → Salidas para búsqueda O(1)
-	skuToSalidas := make(map[uint32][]int) // SKU_ID → []Salida_ID
-	for _, salida := range salidas {
+	var result []map[string]interface{}
+	for _, salida := range sorter.GetSalidas() {
+		assignments := []map[string]interface{}{}
 		for _, sku := range salida.SKUs_Actuales {
-			skuID := uint32(sku.GetNumericID())
-			skuToSalidas[skuID] = append(skuToSalidas[skuID], salida.ID)
-		}
-	}
-
-	// Construir array de SKUs con todas sus asignaciones
-	for _, sku := range assignedSKUs {
-		skuID := uint32(sku.ID)
-		salidaIDs := skuToSalidas[skuID]
-
-		if len(salidaIDs) == 0 {
-			// SKU no asignada a ninguna salida
-			skuData = append(skuData, map[string]interface{}{
-				"id":             sku.ID,
-				"sku":            sku.SKU,
-				"percentage":     0,
-				"is_assigned":    false,
+			assignments = append(assignments, map[string]interface{}{
+				"sku_id":         sku.GetNumericID(),
+				"sku_name":       sku.SKU,
 				"is_master_case": false,
-				"sealer_id":      nil,
 			})
-		} else {
-			// SKU asignada a una o más salidas (repetir por cada salida)
-			for _, sealerID := range salidaIDs {
-				skuData = append(skuData, map[string]interface{}{
-					"id":             sku.ID,
-					"sku":            sku.SKU,
-					"percentage":     0,
-					"is_assigned":    true,
-					"is_master_case": false,
-					"sealer_id":      sealerID,
-				})
-			}
 		}
+		result = append(result, map[string]interface{}{
+			"sealer_db_id":       salida.ID,
+			"sealer_physical_id": salida.SealerPhysicalID,
+			"sorter_id":          sorter.GetID(),
+			"sorter_name":        "",
+			"mode":               salida.Tipo,
+			"assignments":        assignments,
+			"is_enabled":         salida.IsEnabled,
+		})
 	}
 
 	message := WebSocketMessage{
 		Type:      "sku_assigned",
 		Timestamp: time.Now().Format(time.RFC3339),
 		SorterID:  sorterID,
-		SealerID:  0, // No aplica en este evento
-		Data: map[string]interface{}{
-			"skus": skuData,
-		},
+		SealerID:  0, // No aplica
+		Data:      result,
 	}
 
 	h.sendMessageToRoom(roomName, message)
-	log.Printf("📤 [WS] sku_assigned → room %s (%d SKU entries)", roomName, len(skuData))
+	log.Printf("📤 [WS] sku_assigned → room %s (%d salidas)", roomName, len(result))
 }
 
 // SubscribeToSorter suscribe el hub al canal de SKUs de un sorter
 // Escucha cambios y hace broadcast automático a la room correspondiente
 func (h *WebSocketHub) SubscribeToSorter(sorter SorterInterface) {
+	// Suscripción al canal de SKUs
 	go func() {
 		sorterID := sorter.GetID()
 		channel := sorter.GetSKUChannel()
 
-		log.Printf("🔔 WebSocket suscrito al canal del Sorter #%d", sorterID)
+		log.Printf("🔔 WebSocket suscrito al canal de SKUs del Sorter #%d", sorterID)
 
 		// Escuchar canal indefinidamente
 		for range channel {
@@ -228,8 +202,41 @@ func (h *WebSocketHub) SubscribeToSorter(sorter SorterInterface) {
 			h.NotifySKUAssigned(sorter)
 		}
 
-		log.Printf("⚠️  Canal del Sorter #%d cerrado, suscripción terminada", sorterID)
+		log.Printf("⚠️  Canal de SKUs del Sorter #%d cerrado, suscripción terminada", sorterID)
 	}()
+
+	// Suscripción al canal de flow statistics
+	go func() {
+		sorterID := sorter.GetID()
+		channel := sorter.GetFlowStatsChannel()
+
+		log.Printf("📊 WebSocket suscrito al canal de Flow Stats del Sorter #%d", sorterID)
+
+		// Escuchar canal indefinidamente
+		for stats := range channel {
+			// Cuando el sorter publica estadísticas, notificar
+			h.NotifyFlowStatistics(stats)
+		}
+
+		log.Printf("⚠️  Canal de Flow Stats del Sorter #%d cerrado, suscripción terminada", sorterID)
+	}()
+}
+
+// NotifyFlowStatistics notifica las estadísticas de flujo a los clientes
+func (h *WebSocketHub) NotifyFlowStatistics(stats models.FlowStatistics) {
+	roomName := fmt.Sprintf("assignment_%d", stats.SorterID)
+
+	message := WebSocketMessage{
+		Type:      "sku_flow_stats",
+		Timestamp: stats.Timestamp.Format(time.RFC3339),
+		SorterID:  stats.SorterID,
+		SealerID:  0, // No aplica
+		Data:      stats,
+	}
+
+	h.sendMessageToRoom(roomName, message)
+	log.Printf("📤 [WS] sku_flow_stats → room %s (%d lecturas totales, %d SKUs diferentes, ventana: %ds)",
+		roomName, stats.TotalLecturas, len(stats.Stats), stats.WindowSeconds)
 }
 
 // sendMessageToRoom envía un mensaje a todos los clientes de una room

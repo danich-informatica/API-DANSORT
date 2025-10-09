@@ -17,6 +17,9 @@ type ChannelManager struct {
 	// Mapa de canales de SKUs assignables por sorter_id
 	sorterSKUChannels map[string]chan []models.SKUAssignable
 
+	// Mapa de canales de estadísticas de flujo por sorter_id
+	sorterFlowStatsChannels map[string]chan models.FlowStatistics
+
 	// Mutex para acceso concurrente seguro
 	mu sync.RWMutex
 
@@ -24,6 +27,7 @@ type ChannelManager struct {
 	cognexInitialized         bool
 	skuInitialized            bool
 	sorterChannelsInitialized bool
+	flowStatsInitialized      bool
 }
 
 var (
@@ -40,7 +44,9 @@ func GetChannelManager() *ChannelManager {
 			cognexInitialized:         false,
 			skuInitialized:            false,
 			sorterChannelsInitialized: false,
+			flowStatsInitialized:      false,
 			sorterSKUChannels:         make(map[string]chan []models.SKUAssignable),
+			sorterFlowStatsChannels:   make(map[string]chan models.FlowStatistics),
 		}
 	})
 	return instance
@@ -137,6 +143,32 @@ func (cm *ChannelManager) GetAllSorterIDs() []string {
 	return ids
 }
 
+// RegisterSorterFlowStatsChannel registra un nuevo canal de estadísticas de flujo para un sorter
+func (cm *ChannelManager) RegisterSorterFlowStatsChannel(sorterID string, bufferSize int) chan models.FlowStatistics {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// Si ya existe, retornar el canal existente
+	if ch, exists := cm.sorterFlowStatsChannels[sorterID]; exists {
+		return ch
+	}
+
+	// Crear nuevo canal con buffer especificado
+	ch := make(chan models.FlowStatistics, bufferSize)
+	cm.sorterFlowStatsChannels[sorterID] = ch
+	cm.flowStatsInitialized = true
+
+	return ch
+}
+
+// GetSorterFlowStatsChannel obtiene el canal de estadísticas de flujo de un sorter
+func (cm *ChannelManager) GetSorterFlowStatsChannel(sorterID string) chan models.FlowStatistics {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	return cm.sorterFlowStatsChannels[sorterID]
+}
+
 // CloseAll cierra todos los canales (llamar al finalizar la aplicación)
 func (cm *ChannelManager) CloseAll() {
 	cm.mu.Lock()
@@ -161,5 +193,16 @@ func (cm *ChannelManager) CloseAll() {
 			}
 		}
 		cm.sorterChannelsInitialized = false
+	}
+
+	// Cerrar todos los canales de estadísticas de flujo
+	if cm.flowStatsInitialized {
+		for id, ch := range cm.sorterFlowStatsChannels {
+			if ch != nil {
+				close(ch)
+				delete(cm.sorterFlowStatsChannels, id)
+			}
+		}
+		cm.flowStatsInitialized = false
 	}
 }

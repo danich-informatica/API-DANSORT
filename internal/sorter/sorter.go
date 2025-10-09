@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -22,12 +23,59 @@ type Sorter struct {
 	// Canal de SKUs assignables para este sorter
 	skuChannel chan []models.SKUAssignable
 
+	// Canal de estadísticas de flujo
+	flowStatsChannel chan models.FlowStatistics
+
 	// SKUs actualmente asignados
 	assignedSKUs []models.SKUAssignable
 
-	// Estadísticas
+	// Estadísticas de flujo (ventana deslizante)
+	lecturaRecords []models.LecturaRecord
+	lastFlowStats  map[string]float64 // SKU → Porcentaje del último cálculo
+	flowMutex      sync.RWMutex
+
+	// Sistema de distribución por lotes
+	batchCounters map[string]*BatchDistributor // SKU → Distribuidor de lotes
+	batchMutex    sync.RWMutex
+
+	// Estadísticas generales
 	LecturasExitosas int
 	LecturasFallidas int
+}
+
+// BatchDistributor maneja la distribución por lotes entre salidas
+type BatchDistributor struct {
+	Salidas      []int       // IDs de salidas con esta SKU
+	CurrentIndex int         // Índice de salida actual
+	CurrentCount int         // Contador actual del lote
+	BatchSizes   map[int]int // Salida ID → Batch Size
+}
+
+// NextSalida retorna el ID de la próxima salida según el patrón de lotes
+func (bd *BatchDistributor) NextSalida() int {
+	if len(bd.Salidas) == 0 {
+		return -1 // No hay salidas configuradas
+	}
+
+	// Si solo hay una salida, siempre retornar la misma
+	if len(bd.Salidas) == 1 {
+		return bd.Salidas[0]
+	}
+
+	// Obtener ID de salida actual
+	salidaID := bd.Salidas[bd.CurrentIndex]
+	batchSize := bd.BatchSizes[salidaID]
+
+	// Incrementar contador
+	bd.CurrentCount++
+
+	// Si alcanzamos el tamaño del lote, avanzar a siguiente salida
+	if bd.CurrentCount >= batchSize {
+		bd.CurrentIndex = (bd.CurrentIndex + 1) % len(bd.Salidas)
+		bd.CurrentCount = 0
+	}
+
+	return salidaID
 }
 
 // GetSalidas retorna todas las salidas del sorter
@@ -35,23 +83,73 @@ func (s *Sorter) GetSalidas() []shared.Salida {
 	return s.Salidas
 }
 
+// updateBatchDistributor actualiza o crea el distribuidor de lotes para una SKU
+// DEBE SER LLAMADO CON batchMutex LOCKED
+func (s *Sorter) updateBatchDistributor(skuName string) {
+	// Buscar todas las salidas que contienen esta SKU
+	var salidaIDs []int
+	batchSizes := make(map[int]int)
+
+	for _, salida := range s.Salidas {
+		for _, sku := range salida.SKUs_Actuales {
+			if sku.SKU == skuName {
+				salidaIDs = append(salidaIDs, salida.ID)
+				batchSizes[salida.ID] = salida.BatchSize
+				break
+			}
+		}
+	}
+
+	// Si solo hay una salida o ninguna, no necesitamos distribuidor
+	if len(salidaIDs) <= 1 {
+		delete(s.batchCounters, skuName)
+		return
+	}
+
+	// Crear o actualizar el distribuidor
+	if bd, exists := s.batchCounters[skuName]; exists {
+		// Actualizar existente
+		bd.Salidas = salidaIDs
+		bd.BatchSizes = batchSizes
+		// Resetear si cambió la configuración
+		if bd.CurrentIndex >= len(salidaIDs) {
+			bd.CurrentIndex = 0
+			bd.CurrentCount = 0
+		}
+	} else {
+		// Crear nuevo
+		s.batchCounters[skuName] = &BatchDistributor{
+			Salidas:      salidaIDs,
+			CurrentIndex: 0,
+			CurrentCount: 0,
+			BatchSizes:   batchSizes,
+		}
+		log.Printf("🔄 Sorter #%d: BatchDistributor creado para SKU '%s' con %d salidas", s.ID, skuName, len(salidaIDs))
+	}
+}
+
 func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *listeners.CognexListener) *Sorter {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Registrar canal de SKUs para este sorter
+	// Registrar canales para este sorter
 	channelMgr := shared.GetChannelManager()
 	sorterID := fmt.Sprintf("%d", ID)
-	skuChannel := channelMgr.RegisterSorterSKUChannel(sorterID, 10) // Buffer de 10
+	skuChannel := channelMgr.RegisterSorterSKUChannel(sorterID, 10)            // Buffer de 10
+	flowStatsChannel := channelMgr.RegisterSorterFlowStatsChannel(sorterID, 5) // Buffer de 5
 
 	return &Sorter{
-		ID:           ID,
-		Ubicacion:    ubicacion,
-		Salidas:      salidas,
-		Cognex:       cognex,
-		ctx:          ctx,
-		cancel:       cancel,
-		skuChannel:   skuChannel,
-		assignedSKUs: make([]models.SKUAssignable, 0),
+		ID:               ID,
+		Ubicacion:        ubicacion,
+		Salidas:          salidas,
+		Cognex:           cognex,
+		ctx:              ctx,
+		cancel:           cancel,
+		skuChannel:       skuChannel,
+		flowStatsChannel: flowStatsChannel,
+		assignedSKUs:     make([]models.SKUAssignable, 0),
+		lecturaRecords:   make([]models.LecturaRecord, 0, 1000), // Capacidad inicial 1000
+		lastFlowStats:    make(map[string]float64),              // Inicializar mapa de porcentajes
+		batchCounters:    make(map[string]*BatchDistributor),    // Inicializar distribuidores de lote
 	}
 }
 
@@ -79,6 +177,40 @@ func (s *Sorter) Start() error {
 	return nil
 }
 
+// StartFlowStatistics inicia el cálculo periódico de estadísticas de flujo
+func (s *Sorter) StartFlowStatistics(calculationInterval, windowDuration time.Duration) {
+	log.Printf("📊 Sorter #%d: Iniciando sistema de estadísticas de flujo", s.ID)
+	log.Printf("   ⏱️  Intervalo de cálculo: %v", calculationInterval)
+	log.Printf("   🪟  Ventana de tiempo: %v", windowDuration)
+
+	ticker := time.NewTicker(calculationInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			log.Printf("🛑 Sorter #%d: Deteniendo sistema de estadísticas de flujo", s.ID)
+			return
+
+		case <-ticker.C:
+			// Limpiar registros fuera de la ventana
+			s.limpiarVentana(windowDuration)
+
+			// Calcular estadísticas
+			stats := s.calcularFlowStatistics(windowDuration)
+
+			// Actualizar snapshot de porcentajes
+			s.actualizarLastFlowStats(stats)
+
+			// Publicar al canal de flow stats
+			s.publicarFlowStatistics(stats)
+
+			// 🔔 IMPORTANTE: Trigger UpdateSKUs para que WebSocket envíe sku_assigned actualizado
+			s.UpdateSKUs(s.assignedSKUs)
+		}
+	}
+}
+
 // 🆕 Procesar eventos de lectura de Cognex
 func (s *Sorter) procesarEventosCognex() {
 	log.Println("👂 Sorter: Escuchando eventos de Cognex...")
@@ -100,6 +232,10 @@ func (s *Sorter) procesarEventosCognex() {
 
 			if evento.Exitoso {
 				s.LecturasExitosas++
+
+				// 📊 Registrar lectura exitosa para estadísticas de flujo
+				s.registrarLectura(evento.SKU)
+
 				salida := s.determinarSalida(evento.SKU, evento.Calibre)
 				log.Printf("✅ [Sorter] Lectura #%d | SKU: %s | Salida: %s (ID: %d) | Razón: sort por SKU",
 					s.LecturasExitosas, evento.SKU, salida.Salida_Sorter, salida.ID)
@@ -154,7 +290,27 @@ func (s *Sorter) determinarSalida(sku, calibre string) shared.Salida {
 		}
 	}
 
-	// Buscar la salida que tenga configurado ese SKU
+	// Verificar si hay distribución por lotes para esta SKU
+	s.batchMutex.Lock()
+	bd, hasBatchDistribution := s.batchCounters[sku]
+	if hasBatchDistribution && len(bd.Salidas) > 1 {
+		// Obtener próxima salida según patrón de lotes
+		salidaID := bd.NextSalida()
+		s.batchMutex.Unlock()
+
+		// Buscar objeto Salida por ID
+		for _, salida := range s.Salidas {
+			if salida.ID == salidaID {
+				log.Printf("🔄 Sorter #%d: SKU '%s' → Salida %d '%s' (lote %d/%d)",
+					s.ID, sku, salida.ID, salida.Salida_Sorter,
+					bd.CurrentCount, bd.BatchSizes[salidaID])
+				return salida
+			}
+		}
+	}
+	s.batchMutex.Unlock()
+
+	// Buscar la salida que tenga configurado ese SKU (fallback sin distribución)
 	for _, salida := range s.Salidas {
 		for _, skuConfig := range salida.SKUs_Actuales {
 			if skuConfig.SKU == sku {
@@ -207,14 +363,153 @@ func (s *Sorter) GetID() int {
 	return s.ID
 }
 
+// GetFlowStatsChannel retorna el canal read-only de estadísticas de flujo (implementa SorterInterface)
+func (s *Sorter) GetFlowStatsChannel() <-chan models.FlowStatistics {
+	return s.flowStatsChannel
+}
+
+// registrarLectura registra una lectura exitosa en la ventana deslizante
+func (s *Sorter) registrarLectura(sku string) {
+	s.flowMutex.Lock()
+	defer s.flowMutex.Unlock()
+
+	s.lecturaRecords = append(s.lecturaRecords, models.LecturaRecord{
+		SKU:       sku,
+		Timestamp: time.Now(),
+	})
+}
+
+// limpiarVentana elimina lecturas fuera de la ventana de tiempo
+func (s *Sorter) limpiarVentana(windowDuration time.Duration) {
+	s.flowMutex.Lock()
+	defer s.flowMutex.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-windowDuration)
+
+	// Encontrar índice del primer registro dentro de la ventana
+	validIdx := 0
+	for i, record := range s.lecturaRecords {
+		if record.Timestamp.After(cutoff) {
+			validIdx = i
+			break
+		}
+	}
+
+	// Eliminar registros antiguos
+	if validIdx > 0 {
+		s.lecturaRecords = s.lecturaRecords[validIdx:]
+	}
+}
+
+// calcularFlowStatistics calcula las estadísticas de flujo para la ventana actual
+func (s *Sorter) calcularFlowStatistics(windowDuration time.Duration) models.FlowStatistics {
+	s.flowMutex.RLock()
+	defer s.flowMutex.RUnlock()
+
+	// Contar lecturas por SKU
+	skuCounts := make(map[string]int)
+	totalLecturas := 0
+
+	now := time.Now()
+	cutoff := now.Add(-windowDuration)
+
+	for _, record := range s.lecturaRecords {
+		if record.Timestamp.After(cutoff) {
+			skuCounts[record.SKU]++
+			totalLecturas++
+		}
+	}
+
+	// Convertir a slice de estadísticas y actualizar lastFlowStats
+	stats := make([]models.SKUFlowStat, 0, len(skuCounts))
+	newFlowStats := make(map[string]float64, len(skuCounts))
+
+	for sku, count := range skuCounts {
+		porcentaje := 0.0
+		if totalLecturas > 0 {
+			porcentajeRaw := float64(count) / float64(totalLecturas) * 100.0
+			porcentaje = float64(int(porcentajeRaw + 0.5)) // Redondear a entero
+		}
+
+		stats = append(stats, models.SKUFlowStat{
+			SKU:        sku,
+			Lecturas:   count,
+			Porcentaje: porcentaje,
+		})
+
+		newFlowStats[sku] = porcentaje
+	}
+
+	return models.FlowStatistics{
+		SorterID:      s.ID,
+		Timestamp:     now,
+		Stats:         stats,
+		TotalLecturas: totalLecturas,
+		WindowSeconds: int(windowDuration.Seconds()),
+	}
+}
+
+// actualizarLastFlowStats actualiza el snapshot de porcentajes (thread-safe)
+func (s *Sorter) actualizarLastFlowStats(stats models.FlowStatistics) {
+	s.flowMutex.Lock()
+	defer s.flowMutex.Unlock()
+
+	// Limpiar mapa anterior
+	s.lastFlowStats = make(map[string]float64, len(stats.Stats))
+
+	// Llenar con nuevos porcentajes
+	for _, stat := range stats.Stats {
+		s.lastFlowStats[stat.SKU] = stat.Porcentaje
+	}
+}
+
+// publicarFlowStatistics publica las estadísticas al canal
+func (s *Sorter) publicarFlowStatistics(stats models.FlowStatistics) {
+	select {
+	case s.flowStatsChannel <- stats:
+		log.Printf("📊 Sorter #%d: Flow stats publicadas (%d SKUs diferentes, %d lecturas totales)",
+			s.ID, len(stats.Stats), stats.TotalLecturas)
+	default:
+		log.Printf("⚠️  Sorter #%d: Canal de flow stats lleno", s.ID)
+	}
+}
+
 // GetSKUChannel retorna el canal de SKUs de este sorter (read-only)
 func (s *Sorter) GetSKUChannel() <-chan []models.SKUAssignable {
 	return s.skuChannel
 }
 
-// GetCurrentSKUs retorna la lista actual de SKUs asignados (implementa SorterInterface)
+// GetCurrentSKUs retorna la lista actual de SKUs asignados con porcentajes actualizados (implementa SorterInterface)
 func (s *Sorter) GetCurrentSKUs() []models.SKUAssignable {
-	return s.assignedSKUs
+	s.flowMutex.RLock()
+	defer s.flowMutex.RUnlock()
+
+	// Crear copia de SKUs con porcentajes actualizados
+	skusWithPercentage := make([]models.SKUAssignable, len(s.assignedSKUs))
+	copy(skusWithPercentage, s.assignedSKUs)
+
+	// Actualizar percentage de cada SKU (redondeado a entero)
+	for i := range skusWithPercentage {
+		if percentage, exists := s.lastFlowStats[skusWithPercentage[i].SKU]; exists {
+			skusWithPercentage[i].Percentage = float64(int(percentage + 0.5)) // Redondear a entero
+		} else {
+			skusWithPercentage[i].Percentage = 0.0
+		}
+	}
+
+	return skusWithPercentage
+}
+
+// GetSKUFlowPercentage retorna el porcentaje de flujo de un SKU (thread-safe)
+func (s *Sorter) GetSKUFlowPercentage(skuName string) float64 {
+	s.flowMutex.RLock()
+	defer s.flowMutex.RUnlock()
+
+	if percentage, exists := s.lastFlowStats[skuName]; exists {
+		return percentage
+	}
+	return 0.0
 }
 
 // AssignSKUToSalida asigna una SKU a una salida específica
@@ -270,6 +565,11 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 
 	// Marcar SKU como asignada
 	targetSKU.IsAssigned = true
+
+	// Actualizar BatchDistributor para esta SKU
+	s.batchMutex.Lock()
+	s.updateBatchDistributor(targetSKU.SKU)
+	s.batchMutex.Unlock()
 
 	log.Printf("✅ Sorter #%d: SKU '%s' (ID=%d) asignada a salida '%s' (ID=%d, tipo=%s)",
 		s.ID, targetSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID, targetSalida.Tipo)

@@ -155,9 +155,13 @@ func main() {
 				if tipo == "" {
 					tipo = "manual" // Default si no está especificado
 				}
-				salida := shared.GetNewSalida(salidaCfg.ID, salidaCfg.Name, tipo)
+				batchSize := salidaCfg.BatchSize
+				if batchSize <= 0 {
+					batchSize = 1 // Default: lote de 1
+				}
+				salida := shared.GetNewSalida(salidaCfg.ID, salidaCfg.Name, tipo, batchSize)
 				salidas = append(salidas, salida)
-				log.Printf("       ↳ Salida %d: %s (%s)", salidaCfg.ID, salidaCfg.Name, tipo)
+				log.Printf("       ↳ Salida %d: %s (%s, lote=%d)", salidaCfg.ID, salidaCfg.Name, tipo, batchSize)
 				// Insertar salida en la base de datos si no existe
 				if err := dbManager.InsertSalidaIfNotExists(ctx, salidaCfg.ID, sorterCfg.ID, salida_counter, true); err != nil {
 					log.Printf("         ⚠️  Error al insertar salida en DB: %v", err)
@@ -265,6 +269,20 @@ func main() {
 			} else {
 				log.Printf("   ✅ Sorter #%d iniciado correctamente", s.ID)
 			}
+		}
+		log.Println("")
+
+		// 🆕 Iniciar sistema de estadísticas de flujo para cada sorter
+		log.Println("📊 Iniciando sistema de estadísticas de flujo...")
+		calculationInterval := cfg.Statistics.GetFlowCalculationInterval()
+		windowDuration := cfg.Statistics.GetFlowWindowDuration()
+
+		log.Printf("   ⏱️  Intervalo de cálculo: %v", calculationInterval)
+		log.Printf("   🪟  Ventana de tiempo: %v", windowDuration)
+
+		for _, s := range sorters {
+			go s.StartFlowStatistics(calculationInterval, windowDuration)
+			log.Printf("   ✅ Sorter #%d: Sistema de flow stats iniciado", s.ID)
 		}
 		log.Println("")
 	}
