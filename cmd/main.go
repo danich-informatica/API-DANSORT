@@ -90,6 +90,25 @@ func main() {
 		skuManager = nil
 	}
 
+	// 3.6. Crear el servidor HTTP con endpoints (antes de crear sorters)
+	httpHost := cfg.HTTP.Host
+	if httpHost == "" {
+		httpHost = "0.0.0.0" // Default si no está configurado
+	}
+	httpPort := cfg.HTTP.Port
+	httpAddr := fmt.Sprintf("%s:%d", httpHost, httpPort)
+
+	httpService := listeners.NewHTTPFrontend(httpAddr)
+	httpService.SetPostgresManager(dbManager)
+
+	// Vincular SKUManager si está disponible para endpoints de streaming
+	if skuManager != nil {
+		httpService.SetSKUManager(skuManager)
+	}
+
+	log.Printf("✅ Servidor HTTP creado en %s", httpAddr)
+	log.Println("")
+
 	// 4. Crear listeners de Cognex (NO iniciarlos aún, los sorters lo harán)
 	log.Println("")
 	log.Printf("📷 Configurando %d dispositivo(s) Cognex...", len(cfg.CognexDevices))
@@ -193,7 +212,7 @@ func main() {
 				log.Printf("     ✅ Total: %d SKU(s) cargada(s) desde BD", totalSKUsLoaded)
 			}
 
-			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener)
+			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener, httpService.GetWebSocketHub())
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)
@@ -297,23 +316,7 @@ func main() {
 		}
 	}()
 
-	// 5. Crear e iniciar el servidor HTTP con endpoints
-	httpHost := cfg.HTTP.Host
-	if httpHost == "" {
-		httpHost = "0.0.0.0" // Default si no está configurado
-	}
-	httpPort := cfg.HTTP.Port
-	httpAddr := fmt.Sprintf("%s:%d", httpHost, httpPort)
-
-	httpService := listeners.NewHTTPFrontend(httpAddr)
-	httpService.SetPostgresManager(dbManager)
-
-	// Vincular SKUManager si está disponible para endpoints de streaming
-	if skuManager != nil {
-		httpService.SetSKUManager(skuManager)
-	}
-
-	// Registrar todos los sorters para acceso directo desde HTTP
+	// 5. Registrar todos los sorters para acceso directo desde HTTP
 	for _, s := range sorters {
 		httpService.RegisterSorter(s)
 	}

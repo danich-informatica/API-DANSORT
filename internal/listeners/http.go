@@ -79,6 +79,10 @@ func (h *HTTPFrontend) GetWebSocketHub() *WebSocketHub {
 }
 
 func (h *HTTPFrontend) setupRoutes() {
+	// Servir archivos estáticos (visualizador)
+	h.router.StaticFile("/visualizer", "./web/visualizer.html")
+	h.router.StaticFile("/simulator", "./web/simulator.html")
+
 	// Endpoint GET /sku/assigned/:sorter_id
 	h.router.GET("/sku/assigned/:sorter_id", func(c *gin.Context) {
 		sorterID := c.Param("sorter_id")

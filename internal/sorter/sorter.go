@@ -6,6 +6,7 @@ import (
 	"API-GREENEX/internal/models"
 	"API-GREENEX/internal/shared"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -34,9 +35,12 @@ type Sorter struct {
 	lastFlowStats  map[string]float64 // SKU → Porcentaje del último cálculo
 	flowMutex      sync.RWMutex
 
-	// Sistema de distribución por lotes
+	// Sistema de distribución por lotes (por SKU)
 	batchCounters map[string]*BatchDistributor // SKU → Distribuidor de lotes
 	batchMutex    sync.RWMutex
+
+	// WebSocket Hub para enviar eventos
+	wsHub *listeners.WebSocketHub
 
 	// Estadísticas generales
 	LecturasExitosas int
@@ -128,7 +132,7 @@ func (s *Sorter) updateBatchDistributor(skuName string) {
 	}
 }
 
-func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *listeners.CognexListener) *Sorter {
+func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub) *Sorter {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Registrar canales para este sorter
@@ -150,6 +154,7 @@ func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *lis
 		lecturaRecords:   make([]models.LecturaRecord, 0, 1000), // Capacidad inicial 1000
 		lastFlowStats:    make(map[string]float64),              // Inicializar mapa de porcentajes
 		batchCounters:    make(map[string]*BatchDistributor),    // Inicializar distribuidores de lote
+		wsHub:            wsHub,                                 // Asignar WebSocket Hub
 	}
 }
 
@@ -239,6 +244,10 @@ func (s *Sorter) procesarEventosCognex() {
 				salida := s.determinarSalida(evento.SKU, evento.Calibre)
 				log.Printf("✅ [Sorter] Lectura #%d | SKU: %s | Salida: %s (ID: %d) | Razón: sort por SKU",
 					s.LecturasExitosas, evento.SKU, salida.Salida_Sorter, salida.ID)
+				
+				// 📤 Enviar evento WebSocket de lectura procesada
+				s.PublishLecturaEvent(evento, &salida, true)
+				
 				// TODO: Activar actuadores/PLC para enviar a la salida
 			} else {
 				s.LecturasFallidas++
@@ -262,6 +271,9 @@ func (s *Sorter) procesarEventosCognex() {
 				}
 				log.Printf("❌ [Sorter] Fallo #%d | SKU: %s | Salida: %s (ID: %d) | Razón: %s | %s",
 					s.LecturasFallidas, evento.SKU, salida.Salida_Sorter, salida.ID, razon, evento.String())
+				
+				// 📤 Enviar evento WebSocket de lectura fallida
+				s.PublishLecturaEvent(evento, &salida, false)
 			}
 
 			// Mostrar estadísticas cada 10 lecturas
@@ -747,4 +759,41 @@ func (s *Sorter) RemoveAllSKUsFromSalida(salidaID int) ([]models.SKU, error) {
 	s.UpdateSKUs(s.assignedSKUs)
 
 	return removedSKUs, nil
+}
+
+// PublishLecturaEvent publica un evento de lectura individual procesada al WebSocket
+func (s *Sorter) PublishLecturaEvent(evento models.LecturaEvent, salida *shared.Salida, exitoso bool) {
+	if s.wsHub == nil {
+		return
+	}
+
+	// Construir el mensaje JSON
+	message := map[string]interface{}{
+		"type":        "lectura_procesada",
+		"qr_code":     evento.Mensaje,
+		"sku":         evento.SKU,
+		"salida_id":   salida.ID,
+		"salida_name": salida.Salida_Sorter,
+		"exitoso":     exitoso,
+		"timestamp":   evento.Timestamp.Format(time.RFC3339),
+		"sorter_id":   s.ID,
+		"correlativo": evento.Correlativo,
+		"calibre":     evento.Calibre,
+		"variedad":    evento.Variedad,
+		"embalaje":    evento.Embalaje,
+	}
+
+	// Serializar a JSON
+	jsonBytes, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("❌ Error al serializar lectura_procesada: %v", err)
+		return
+	}
+
+	// Publicar al room correspondiente
+	roomName := fmt.Sprintf("assignment_%d", s.ID)
+	s.wsHub.Broadcast <- &listeners.BroadcastMessage{
+		RoomName: roomName,
+		Message:  jsonBytes,
+	}
 }

@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador Sorter - Greenex</title>
+    <style>
+        :root {
+            --primary-color: #197979;
+            --cognex-color: #ff6b35;
+            --box-color: #4ecdc4;
+            --success-color: #28a745;
+            --reject-color: #dc3545;
+            --bg-color: #1a1a2e;
+            --card-bg: #16213e;
+            --text-color: #e8e8e8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            overflow-x: hidden;
+        }
+
+        .header {
+            background: var(--primary-color);
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            background: var(--card-bg);
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            border-bottom: 2px solid var(--primary-color);
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-group label {
+            font-weight: bold;
+        }
+
+        .control-group select {
+            padding: 8px 15px;
+            border-radius: 6px;
+            border: 2px solid var(--primary-color);
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 1rem;
+        }
+
+        .status-bar {
+            background: var(--card-bg);
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-around;
+            border-bottom: 1px solid #333;
+        }
+
+        .status-item {
+            text-align: center;
+        }
+
+        .status-item .label {
+            font-size: 0.9rem;
+            color: #999;
+        }
+
+        .status-item .value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .visualization-container {
+            padding: 40px 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .sorter-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 40px;
+        }
+
+        /* Cognex Reader */
+        .cognex-section {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .cognex-reader {
+            background: linear-gradient(135deg, var(--cognex-color), #ff8c5a);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(255, 107, 53, 0.3);
+            text-align: center;
+            min-width: 250px;
+        }
+
+        .cognex-reader .icon {
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+
+        .cognex-reader .name {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .cognex-reader .status {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .cognex-reader .last-read {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+        }
+
+        /* Conveyor Belt */
+        .conveyor {
+            position: relative;
+            height: 120px;
+            background: repeating-linear-gradient(
+                90deg,
+                #2d2d44 0px,
+                #2d2d44 20px,
+                #1a1a2e 20px,
+                #1a1a2e 40px
+            );
+            border: 3px solid #444;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .box {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            background: var(--box-color);
+            border: 3px solid #3ba99c;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+            animation: moveBox 3s linear;
+            top: 20px;
+            left: -100px;
+            z-index: 10;
+        }
+
+        @keyframes moveBox {
+            from {
+                left: -100px;
+            }
+            to {
+                left: calc(100% + 100px);
+            }
+        }
+
+        .box .sku-label {
+            font-size: 0.7rem;
+            font-weight: bold;
+            text-align: center;
+            padding: 2px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+            max-width: 70px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .box.reject {
+            background: var(--reject-color);
+            border-color: #c82333;
+        }
+
+        /* Sorter */
+        .sorter-section {
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+        }
+
+        .sorter-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .sorter-header h2 {
+            font-size: 1.8rem;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+
+        .sorter-header .info {
+            font-size: 0.9rem;
+            color: #999;
+        }
+
+        .salidas-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .salida {
+            background: linear-gradient(135deg, #0f3460, #16213e);
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid var(--primary-color);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .salida:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 16px rgba(25, 121, 121, 0.4);
+        }
+
+        .salida.active {
+            border-color: var(--success-color);
+            box-shadow: 0 0 20px rgba(40, 167, 69, 0.5);
+            animation: pulse 0.5s ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .salida.manual {
+            border-color: var(--reject-color);
+        }
+
+        .salida-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .salida-name {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .salida-type {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .salida-type.automatico {
+            background: var(--success-color);
+        }
+
+        .salida-type.manual {
+            background: var(--reject-color);
+        }
+
+        .salida-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .stat {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat .label {
+            font-size: 0.75rem;
+            color: #999;
+            margin-bottom: 5px;
+        }
+
+        .stat .value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .salida-skus {
+            margin-top: 15px;
+        }
+
+        .salida-skus .title {
+            font-size: 0.85rem;
+            color: #999;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .sku-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .sku-tag {
+            background: rgba(25, 121, 121, 0.3);
+            border: 1px solid var(--primary-color);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-family: 'Courier New', monospace;
+        }
+
+        .legend {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .legend h3 {
+            margin-bottom: 15px;
+            color: var(--primary-color);
+        }
+
+        .legend-items {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .legend-box {
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            border: 2px solid;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            z-index: 1000;
+        }
+
+        .connection-status.connected {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .connection-status.disconnected {
+            background: var(--reject-color);
+            color: white;
+        }
+
+        @media (max-width: 768px) {
+            .salidas-container {
+                grid-template-columns: 1fr;
+            }
+
+            .controls {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">
+        🔴 Desconectado
+    </div>
+
+    <div class="header">
+        <h1>🔬 Visualizador de Sorter en Tiempo Real</h1>
+        <p>Sistema de segregación automática de cajas</p>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>Sorter:</label>
+            <select id="sorterSelect">
+                <option value="">Cargando...</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <div class="status-item">
+            <div class="label">Lecturas Exitosas</div>
+            <div class="value" id="successCount">0</div>
+        </div>
+        <div class="status-item">
+            <div class="label">Lecturas Fallidas</div>
+            <div class="value" id="failCount">0</div>
+        </div>
+        <div class="status-item">
+            <div class="label">Total Procesado</div>
+            <div class="value" id="totalCount">0</div>
+        </div>
+    </div>
+
+    <div class="visualization-container">
+        <div class="sorter-layout">
+            <!-- Cognex Section -->
+            <div class="cognex-section">
+                <div class="cognex-reader">
+                    <div class="icon">📸</div>
+                    <div class="name" id="cognexName">Cognex Reader</div>
+                    <div class="status" id="cognexStatus">En espera...</div>
+                    <div class="last-read" id="lastRead">Sin lecturas</div>
+                </div>
+                <div style="font-size: 2rem; color: var(--primary-color);">→</div>
+            </div>
+
+            <!-- Conveyor Belt -->
+            <div class="conveyor" id="conveyor">
+                <!-- Boxes will be added here dynamically -->
+            </div>
+
+            <!-- Sorter Section -->
+            <div class="sorter-section">
+                <div class="sorter-header">
+                    <h2 id="sorterName">Sorter</h2>
+                    <div class="info" id="sorterInfo">Ubicación: --</div>
+                </div>
+
+                <div class="salidas-container" id="salidasContainer">
+                    <!-- Salidas will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Legend -->
+            <div class="legend">
+                <h3>Leyenda</h3>
+                <div class="legend-items">
+                    <div class="legend-item">
+                        <div class="legend-box" style="background: var(--box-color); border-color: #3ba99c;"></div>
+                        <span>Caja Normal</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-box" style="background: var(--reject-color); border-color: #c82333;"></div>
+                        <span>Rechazo / NO_READ</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-box" style="background: var(--success-color); border-color: #218838;"></div>
+                        <span>Salida Automática</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-box" style="background: var(--reject-color); border-color: #c82333;"></div>
+                        <span>Salida Manual</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const WS_URL = 'ws://localhost:8081/ws';
+        const API_URL = 'http://localhost:8081';
+        let ws = null;
+        let currentSorter = null;
+        let salidas = {};
+        let stats = { success: 0, fail: 0 };
+
+        // Initialize
+        async function init() {
+            await loadSorters();
+            connectWebSocket();
+        }
+
+        // Load available sorters
+        async function loadSorters() {
+            try {
+                // For now, hardcode sorter IDs
+                const select = document.getElementById('sorterSelect');
+                select.innerHTML = `
+                    <option value="1">Sorter Principal (ID: 1)</option>
+                    <option value="2">Sorter Secundario (ID: 2)</option>
+                `;
+                
+                select.addEventListener('change', (e) => {
+                    currentSorter = e.target.value;
+                    if (currentSorter) {
+                        loadSorterData(currentSorter);
+                        subscribeToSorter(currentSorter);
+                    }
+                });
+
+                // Auto-select first sorter
+                select.value = '1';
+                currentSorter = '1';
+                loadSorterData('1');
+            } catch (error) {
+                console.error('Error loading sorters:', error);
+            }
+        }
+
+        // Load sorter configuration
+        async function loadSorterData(sorterId) {
+            try {
+                const response = await fetch(`${API_URL}/sku/assigned/${sorterId}`);
+                const data = await response.json();
+
+                document.getElementById('sorterName').textContent = data.sorter_name || `Sorter #${sorterId}`;
+                document.getElementById('sorterInfo').textContent = `ID: ${sorterId} | Modo: ${data.mode}`;
+
+                // Load salidas
+                renderSalidas(data.assignments || []);
+            } catch (error) {
+                console.error('Error loading sorter data:', error);
+            }
+        }
+
+        // Render salidas
+        function renderSalidas(assignments) {
+            const container = document.getElementById('salidasContainer');
+            container.innerHTML = '';
+            salidas = {};
+
+            assignments.forEach(assignment => {
+                const salidaDiv = document.createElement('div');
+                salidaDiv.className = `salida ${assignment.tipo || 'automatico'}`;
+                salidaDiv.id = `salida-${assignment.id}`;
+                salidaDiv.innerHTML = `
+                    <div class="salida-header">
+                        <div class="salida-name">${assignment.salida_sorter}</div>
+                        <div class="salida-type ${assignment.tipo || 'automatico'}">${assignment.tipo || 'automatico'}</div>
+                    </div>
+                    <div class="salida-stats">
+                        <div class="stat">
+                            <div class="label">Cajas</div>
+                            <div class="value" id="count-${assignment.id}">0</div>
+                        </div>
+                        <div class="stat">
+                            <div class="label">Batch</div>
+                            <div class="value">${assignment.batch_size || 1}</div>
+                        </div>
+                    </div>
+                    <div class="salida-skus">
+                        <div class="title">SKUs Asignadas:</div>
+                        <div class="sku-list" id="skus-${assignment.id}">
+                            ${assignment.skus && assignment.skus.length > 0 
+                                ? assignment.skus.map(sku => `<div class="sku-tag">${sku}</div>`).join('') 
+                                : '<div style="color: #999; font-size: 0.8rem;">Sin SKUs</div>'}
+                        </div>
+                    </div>
+                `;
+                container.appendChild(salidaDiv);
+
+                salidas[assignment.id] = {
+                    count: 0,
+                    element: salidaDiv
+                };
+            });
+        }
+
+        // Connect WebSocket
+        function connectWebSocket() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                updateConnectionStatus(true);
+                if (currentSorter) {
+                    subscribeToSorter(currentSorter);
+                }
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateConnectionStatus(false);
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Subscribe to sorter events
+        function subscribeToSorter(sorterId) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'subscribe',
+                    sorter_id: sorterId
+                }));
+            }
+        }
+
+        // Handle WebSocket messages
+        function handleWebSocketMessage(data) {
+            if (data.type === 'cognex_read') {
+                handleCognexRead(data);
+            } else if (data.type === 'sku_assigned') {
+                // Update salidas if configuration changed
+                if (data.sorter_id == currentSorter) {
+                    loadSorterData(currentSorter);
+                }
+            }
+        }
+
+        // Handle Cognex read event
+        function handleCognexRead(data) {
+            const isReject = data.sku === 'REJECT' || data.sku === 'NO_READ';
+            const isSuccess = data.exitosa;
+
+            // Update stats
+            if (isSuccess) {
+                stats.success++;
+                document.getElementById('successCount').textContent = stats.success;
+            } else {
+                stats.fail++;
+                document.getElementById('failCount').textContent = stats.fail;
+            }
+            document.getElementById('totalCount').textContent = stats.success + stats.fail;
+
+            // Update Cognex display
+            document.getElementById('lastRead').textContent = data.qr_code || data.sku || 'NO_READ';
+            document.getElementById('cognexStatus').textContent = isSuccess ? '✅ Lectura exitosa' : '❌ Lectura fallida';
+
+            // Create and animate box
+            createBox(data.sku, isReject, data.salida_id);
+
+            // Highlight target salida
+            if (data.salida_id && salidas[data.salida_id]) {
+                highlightSalida(data.salida_id);
+                salidas[data.salida_id].count++;
+                document.getElementById(`count-${data.salida_id}`).textContent = salidas[data.salida_id].count;
+            }
+        }
+
+        // Create animated box
+        function createBox(sku, isReject, salidaId) {
+            const conveyor = document.getElementById('conveyor');
+            const box = document.createElement('div');
+            box.className = `box ${isReject ? 'reject' : ''}`;
+            box.innerHTML = `
+                <div class="sku-label">${sku || 'NO_READ'}</div>
+                <div style="font-size: 1.5rem;">${isReject ? '❌' : '📦'}</div>
+            `;
+
+            conveyor.appendChild(box);
+
+            // Remove box after animation
+            setTimeout(() => {
+                box.remove();
+            }, 3000);
+        }
+
+        // Highlight salida temporarily
+        function highlightSalida(salidaId) {
+            const element = document.getElementById(`salida-${salidaId}`);
+            if (element) {
+                element.classList.add('active');
+                setTimeout(() => {
+                    element.classList.remove('active');
+                }, 500);
+            }
+        }
+
+        // Update connection status
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            if (connected) {
+                status.className = 'connection-status connected';
+                status.textContent = '🟢 Conectado';
+            } else {
+                status.className = 'connection-status disconnected';
+                status.textContent = '🔴 Desconectado';
+            }
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>
