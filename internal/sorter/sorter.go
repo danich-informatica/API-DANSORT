@@ -244,10 +244,10 @@ func (s *Sorter) procesarEventosCognex() {
 				salida := s.determinarSalida(evento.SKU, evento.Calibre)
 				log.Printf("✅ [Sorter] Lectura #%d | SKU: %s | Salida: %s (ID: %d) | Razón: sort por SKU",
 					s.LecturasExitosas, evento.SKU, salida.Salida_Sorter, salida.ID)
-				
+
 				// 📤 Enviar evento WebSocket de lectura procesada
 				s.PublishLecturaEvent(evento, &salida, true)
-				
+
 				// TODO: Activar actuadores/PLC para enviar a la salida
 			} else {
 				s.LecturasFallidas++
@@ -271,7 +271,7 @@ func (s *Sorter) procesarEventosCognex() {
 				}
 				log.Printf("❌ [Sorter] Fallo #%d | SKU: %s | Salida: %s (ID: %d) | Razón: %s | %s",
 					s.LecturasFallidas, evento.SKU, salida.Salida_Sorter, salida.ID, razon, evento.String())
-				
+
 				// 📤 Enviar evento WebSocket de lectura fallida
 				s.PublishLecturaEvent(evento, &salida, false)
 			}
