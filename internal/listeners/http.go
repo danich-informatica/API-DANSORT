@@ -18,22 +18,42 @@ type SKUStreamer interface {
 	StreamActiveSKUsWithLimit(ctx context.Context, skuChan models.SKUChannel, limit int)
 }
 
-// SorterInterface define la interfaz para acceder a SKUs de un Sorter
-type SorterInterface = shared.SorterInterface
-
 type HTTPFrontend struct {
 	router      *gin.Engine
-	port        string
+	addr        string // Dirección completa host:port
 	postgresMgr interface{}
-	skuManager  interface{}                // Para usar SKUManager sin import cycle
-	sorters     map[string]SorterInterface // Mapa de sorters por ID
+	skuManager  interface{}                       // Para usar SKUManager sin import cycle
+	sorters     map[string]shared.SorterInterface // Mapa de sorters por ID
+	wsHub       *WebSocketHub                     // Hub de WebSocket
 }
 
-func NewHTTPFrontend(port string) *HTTPFrontend {
+func NewHTTPFrontend(addr string) *HTTPFrontend {
+	router := gin.Default()
+
+	// Configurar CORS para permitir todas las peticiones
+	router.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	})
+
+	// Crear e iniciar WebSocket Hub
+	wsHub := NewWebSocketHub()
+	go wsHub.Run()
+
 	return &HTTPFrontend{
-		router:  gin.Default(),
-		port:    port,
-		sorters: make(map[string]SorterInterface),
+		router:  router,
+		addr:    addr,
+		sorters: make(map[string]shared.SorterInterface),
+		wsHub:   wsHub,
 	}
 }
 
@@ -48,9 +68,14 @@ func (h *HTTPFrontend) SetSKUManager(mgr interface{}) {
 }
 
 // RegisterSorter registra un sorter para acceso desde HTTP
-func (h *HTTPFrontend) RegisterSorter(sorter SorterInterface) {
+func (h *HTTPFrontend) RegisterSorter(sorter shared.SorterInterface) {
 	sorterID := fmt.Sprintf("%d", sorter.GetID())
 	h.sorters[sorterID] = sorter
+}
+
+// GetWebSocketHub retorna el hub de WebSocket
+func (h *HTTPFrontend) GetWebSocketHub() *WebSocketHub {
+	return h.wsHub
 }
 
 func (h *HTTPFrontend) setupRoutes() {
@@ -200,6 +225,33 @@ func (h *HTTPFrontend) setupRoutes() {
 		c.JSON(http.StatusOK, skus)
 	})
 
+	// Endpoint GET /sku/assignables/:sorter_id (alias sin 's' para frontend)
+	h.router.GET("/sku/assignables/:sorter_id", func(c *gin.Context) {
+		sorterID := c.Param("sorter_id")
+
+		// Validar sorter_id
+		_, err := strconv.Atoi(sorterID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "sorter_id debe ser un número válido",
+			})
+			return
+		}
+
+		// Obtener sorter directamente desde el mapa
+		sorter, exists := h.sorters[sorterID]
+		if !exists {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": fmt.Sprintf("Sorter #%s no encontrado o no registrado", sorterID),
+			})
+			return
+		}
+
+		// Obtener SKUs directamente del sorter (inmediato, sin bloqueo)
+		skus := sorter.GetCurrentSKUs()
+		c.JSON(http.StatusOK, skus)
+	})
+
 	// Endpoint POST /assignment
 	// Asigna una SKU a una salida específica (sealer)
 	// Body: { "sku_id": uint32, "sealer_id": int }
@@ -226,7 +278,7 @@ func (h *HTTPFrontend) setupRoutes() {
 		skuID := *request.SKUID
 
 		// Buscar en qué sorter está la salida (sealer_id es único globalmente)
-		var targetSorter SorterInterface
+		var targetSorter shared.SorterInterface
 		var assignError error
 		var calibre, variedad, embalaje string
 		for _, sorter := range h.sorters {
@@ -262,8 +314,9 @@ func (h *HTTPFrontend) setupRoutes() {
 			return
 		}
 
-		// Insertar asignación en la base de datos
-		if h.postgresMgr != nil {
+		// Insertar asignación en la base de datos (solo si NO es REJECT)
+		// REJECT (ID=0) solo existe en memoria, no en BD
+		if skuID != 0 && h.postgresMgr != nil {
 			if dbMgr, ok := h.postgresMgr.(interface {
 				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error
 			}); ok {
@@ -273,8 +326,11 @@ func (h *HTTPFrontend) setupRoutes() {
 					fmt.Printf("⚠️  Error al insertar asignación en DB: %v\n", err)
 				}
 			}
+		} else if skuID == 0 {
+			fmt.Printf("ℹ️  SKU REJECT asignada solo en memoria (no se persiste en BD)\n")
 		}
 
+		// 🔔 Notificar a clientes WebSocket
 		c.JSON(http.StatusOK, gin.H{
 			"message":   "SKU asignada exitosamente",
 			"sku_id":    skuID,
@@ -282,11 +338,187 @@ func (h *HTTPFrontend) setupRoutes() {
 			"sorter_id": targetSorter.GetID(),
 		})
 	})
+
+	// Endpoint DELETE /assignment/:sealer_id/:sku_id
+	// Elimina una SKU específica de una salida (sealer)
+	// Params: sealer_id (int), sku_id (uint32)
+	h.router.DELETE("/assignment/:sealer_id/:sku_id", func(c *gin.Context) {
+		// Parsear parámetros
+		sealerIDStr := c.Param("sealer_id")
+		skuIDStr := c.Param("sku_id")
+
+		sealerID, err := strconv.Atoi(sealerIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "sealer_id debe ser un número entero válido",
+			})
+			return
+		}
+
+		skuIDInt, err := strconv.ParseUint(skuIDStr, 10, 32)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "sku_id debe ser un número entero válido",
+			})
+			return
+		}
+		skuID := uint32(skuIDInt)
+
+		// Buscar en qué sorter está la salida
+		var targetSorter shared.SorterInterface
+		var calibre, variedad, embalaje string
+		var removeError error
+
+		for _, sorter := range h.sorters {
+			cal, var_, emb, err := sorter.RemoveSKUFromSalida(skuID, sealerID)
+			if err == nil {
+				targetSorter = sorter
+				calibre = cal
+				variedad = var_
+				embalaje = emb
+				break
+			}
+			// Guardar el error más relevante
+			if removeError == nil || err.Error() != fmt.Sprintf("salida con ID %d no encontrada en sorter #%d", sealerID, sorter.GetID()) {
+				removeError = err
+			}
+		}
+
+		if targetSorter == nil {
+			if removeError != nil {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error":     removeError.Error(),
+					"sku_id":    skuID,
+					"sealer_id": sealerID,
+				})
+				return
+			}
+
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":     fmt.Sprintf("No se encontró salida con ID %d en ningún sorter", sealerID),
+				"sealer_id": sealerID,
+			})
+			return
+		}
+
+		// Eliminar de la base de datos (solo si NO es REJECT)
+		// REJECT (ID=0) solo existe en memoria, no en BD
+		if skuID != 0 && h.postgresMgr != nil {
+			if dbMgr, ok := h.postgresMgr.(interface {
+				DeleteSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error
+			}); ok {
+				ctx := c.Request.Context()
+				if err := dbMgr.DeleteSalidaSKU(ctx, sealerID, calibre, variedad, embalaje); err != nil {
+					// Si la SKU no existe en BD, no es un error crítico
+					// (puede haber sido asignada solo en memoria)
+					fmt.Printf("⚠️  Error al eliminar asignación de DB: %v\n", err)
+					// NO retornar error - la eliminación en memoria ya está hecha
+				}
+			}
+		} else if skuID == 0 {
+			fmt.Printf("ℹ️  SKU REJECT eliminada solo de memoria (no existe en BD)\n")
+		}
+
+		// 🔔 Notificar a clientes WebSocket
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "SKU eliminada exitosamente",
+			"sku_id":    skuID,
+			"sealer_id": sealerID,
+			"sorter_id": targetSorter.GetID(),
+			"removed_sku": gin.H{
+				"calibre":  calibre,
+				"variedad": variedad,
+				"embalaje": embalaje,
+			},
+		})
+	})
+
+	// Endpoint DELETE /assignment/:sealer_id
+	// Elimina TODAS las SKUs de una salida (sealer)
+	// Params: sealer_id (int)
+	h.router.DELETE("/assignment/:sealer_id", func(c *gin.Context) {
+		// Parsear parámetro
+		sealerIDStr := c.Param("sealer_id")
+		sealerID, err := strconv.Atoi(sealerIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "sealer_id debe ser un número entero válido",
+			})
+			return
+		}
+
+		// Buscar en qué sorter está la salida
+		var targetSorter shared.SorterInterface
+		var removedSKUs []models.SKU
+		var removeError error
+
+		for _, sorter := range h.sorters {
+			skus, err := sorter.RemoveAllSKUsFromSalida(sealerID)
+			if err == nil {
+				targetSorter = sorter
+				removedSKUs = skus
+				break
+			}
+			// Guardar el error más relevante
+			if removeError == nil || err.Error() != fmt.Sprintf("salida con ID %d no encontrada en sorter #%d", sealerID, sorter.GetID()) {
+				removeError = err
+			}
+		}
+
+		if targetSorter == nil {
+			if removeError != nil {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error":     removeError.Error(),
+					"sealer_id": sealerID,
+				})
+				return
+			}
+
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":     fmt.Sprintf("No se encontró salida con ID %d en ningún sorter", sealerID),
+				"sealer_id": sealerID,
+			})
+			return
+		}
+
+		// Eliminar de la base de datos
+		var rowsDeleted int64
+		if h.postgresMgr != nil {
+			if dbMgr, ok := h.postgresMgr.(interface {
+				DeleteAllSalidaSKUs(ctx context.Context, salidaID int) (int64, error)
+			}); ok {
+				ctx := c.Request.Context()
+				rowsDeleted, err = dbMgr.DeleteAllSalidaSKUs(ctx, sealerID)
+				if err != nil {
+					// Log el error pero la eliminación en memoria ya está hecha
+					fmt.Printf("⚠️  Error al eliminar asignaciones de DB: %v\n", err)
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"warning": "SKUs eliminadas de memoria pero falló eliminación en base de datos",
+						"error":   err.Error(),
+					})
+					return
+				}
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":             "Todas las SKUs eliminadas exitosamente",
+			"sealer_id":           sealerID,
+			"sorter_id":           targetSorter.GetID(),
+			"skus_removed_memory": len(removedSKUs),
+			"skus_removed_db":     rowsDeleted,
+			"removed_skus":        removedSKUs,
+		})
+	})
 }
 
 func (h *HTTPFrontend) Start() error {
 	h.setupRoutes()
-	return h.router.Run(":" + h.port)
+
+	// Configurar rutas de WebSocket
+	SetupWebSocketRoutes(h.router, h.wsHub)
+
+	return h.router.Run(h.addr)
 }
 
 func (h *HTTPFrontend) GetRouter() *gin.Engine {

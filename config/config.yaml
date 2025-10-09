@@ -24,7 +24,8 @@ database:
 
 # Servidor HTTP
 http:
-  port: 8080
+  host: "0.0.0.0"
+  port: 8081
 
 # Dispositivos Cognex (múltiples)
 cognex_devices:

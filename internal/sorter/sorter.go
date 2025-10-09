@@ -202,13 +202,13 @@ func (s *Sorter) UpdateSKUs(skus []models.SKUAssignable) {
 	}
 }
 
-// GetSKUChannel retorna el canal de SKUs de este sorter
 // GetID retorna el ID del sorter (implementa SorterInterface)
 func (s *Sorter) GetID() int {
 	return s.ID
 }
 
-func (s *Sorter) GetSKUChannel() chan []models.SKUAssignable {
+// GetSKUChannel retorna el canal de SKUs de este sorter (read-only)
+func (s *Sorter) GetSKUChannel() <-chan []models.SKUAssignable {
 	return s.skuChannel
 }
 
@@ -274,6 +274,9 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 	log.Printf("✅ Sorter #%d: SKU '%s' (ID=%d) asignada a salida '%s' (ID=%d, tipo=%s)",
 		s.ID, targetSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID, targetSalida.Tipo)
 
+	// Publicar estado actualizado al canal para WebSocket
+	s.UpdateSKUs(s.assignedSKUs)
+
 	return targetSKU.Calibre, targetSKU.Variedad, targetSKU.Embalaje, nil
 }
 
@@ -338,4 +341,110 @@ func (s *Sorter) StartSKUPublisher(intervalSeconds int, skuSource func() []model
 		}
 	}()
 	log.Printf("⏰ Sorter #%d: Publicador de SKUs iniciado (cada %ds)", s.ID, intervalSeconds)
+}
+
+// RemoveSKUFromSalida elimina una SKU específica de una salida
+// Retorna los datos del SKU eliminado (calibre, variedad, embalaje) para eliminar de BD
+// Retorna error si:
+// - La salida no existe
+// - La SKU no está asignada a esa salida
+func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, err error) {
+	// Buscar la salida
+	var targetSalida *shared.Salida
+	var salidaIndex int
+	for i := range s.Salidas {
+		if s.Salidas[i].ID == salidaID {
+			targetSalida = &s.Salidas[i]
+			salidaIndex = i
+			break
+		}
+	}
+
+	if targetSalida == nil {
+		return "", "", "", fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
+	}
+
+	// Buscar la SKU en la salida
+	skuFound := false
+	var removedSKU models.SKU
+	newSKUs := make([]models.SKU, 0, len(targetSalida.SKUs_Actuales))
+
+	for _, sku := range targetSalida.SKUs_Actuales {
+		// Generar ID del SKU actual para comparar
+		currentSKUID := uint32(sku.GetNumericID())
+		if currentSKUID == skuID {
+			skuFound = true
+			removedSKU = sku
+			continue // No agregar este SKU a la nueva lista
+		}
+		newSKUs = append(newSKUs, sku)
+	}
+
+	if !skuFound {
+		return "", "", "", fmt.Errorf("SKU con ID %d no encontrada en salida %d del sorter #%d", skuID, salidaID, s.ID)
+	}
+
+	// Actualizar la lista de SKUs en la salida
+	s.Salidas[salidaIndex].SKUs_Actuales = newSKUs
+
+	// Marcar la SKU como no asignada en assignedSKUs
+	for i := range s.assignedSKUs {
+		if uint32(s.assignedSKUs[i].ID) == skuID {
+			s.assignedSKUs[i].IsAssigned = false
+			break
+		}
+	}
+
+	log.Printf("🗑️  Sorter #%d: SKU '%s' (ID=%d) eliminada de salida '%s' (ID=%d)",
+		s.ID, removedSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID)
+
+	// Publicar estado actualizado al canal para WebSocket
+	s.UpdateSKUs(s.assignedSKUs)
+
+	return removedSKU.Calibre, removedSKU.Variedad, removedSKU.Embalaje, nil
+}
+
+// RemoveAllSKUsFromSalida elimina TODAS las SKUs de una salida específica
+// Retorna un slice con todas las SKUs eliminadas
+// Retorna error si la salida no existe
+func (s *Sorter) RemoveAllSKUsFromSalida(salidaID int) ([]models.SKU, error) {
+	// Buscar la salida
+	var targetSalida *shared.Salida
+	var salidaIndex int
+	for i := range s.Salidas {
+		if s.Salidas[i].ID == salidaID {
+			targetSalida = &s.Salidas[i]
+			salidaIndex = i
+			break
+		}
+	}
+
+	if targetSalida == nil {
+		return nil, fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
+	}
+
+	// Guardar copia de las SKUs eliminadas para retornar
+	removedSKUs := make([]models.SKU, len(targetSalida.SKUs_Actuales))
+	copy(removedSKUs, targetSalida.SKUs_Actuales)
+
+	// Marcar todas las SKUs como no asignadas en assignedSKUs
+	for _, sku := range removedSKUs {
+		skuID := uint32(sku.GetNumericID())
+		for i := range s.assignedSKUs {
+			if uint32(s.assignedSKUs[i].ID) == skuID {
+				s.assignedSKUs[i].IsAssigned = false
+			}
+		}
+	}
+
+	// Limpiar la lista de SKUs de la salida
+	s.Salidas[salidaIndex].SKUs_Actuales = []models.SKU{}
+
+	log.Printf("🧹 Sorter #%d: Eliminadas %d SKUs de salida '%s' (ID=%d)",
+		s.ID, len(removedSKUs), targetSalida.Salida_Sorter, salidaID)
+
+	// Publicar estado actualizado al canal para WebSocket
+	s.UpdateSKUs(s.assignedSKUs)
+
+	return removedSKUs, nil
 }

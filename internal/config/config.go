@@ -10,7 +10,6 @@ import (
 
 type Config struct {
 	Database      DatabaseConfig `yaml:"database"`
-	OPCUA         OPCUAConfig    `yaml:"opcua"`
 	HTTP          HTTPConfig     `yaml:"http"`
 	CognexDevices []CognexDevice `yaml:"cognex_devices"`
 	Sorters       []Sorter       `yaml:"sorters"`
@@ -62,7 +61,8 @@ type OPCUAConfig struct {
 }
 
 type HTTPConfig struct {
-	Port int `yaml:"port"`
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
 }
 
 type CognexDevice struct {

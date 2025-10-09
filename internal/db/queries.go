@@ -130,3 +130,25 @@ const INSERT_SALIDA_SKU_INTERNAL_DB = `
 	VALUES ($1, $2, $3, $4)
 	ON CONFLICT (salida_id, calibre, variedad, embalaje) DO NOTHING
 `
+
+const DELETE_SALIDA_SKU_INTERNAL_DB = `
+	DELETE FROM salida_sku 
+	WHERE salida_id = $1 
+	  AND calibre = $2 
+	  AND variedad = $3 
+	  AND embalaje = $4
+`
+const DELETE_ALL_SALIDA_SKUS_INTERNAL_DB = `
+    DELETE FROM salida_sku 
+    WHERE salida_id = $1
+`
+
+const CHECK_SALIDA_SKU_EXISTS_INTERNAL_DB = `
+	SELECT EXISTS(
+		SELECT 1 FROM salida_sku 
+		WHERE salida_id = $1 
+		  AND calibre = $2 
+		  AND variedad = $3 
+		  AND embalaje = $4
+	)
+`

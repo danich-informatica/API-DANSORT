@@ -356,3 +356,50 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 
 	return skusBySalida, nil
 }
+
+// DeleteSalidaSKU elimina una SKU específica de una salida en la base de datos
+func (m *PostgresManager) DeleteSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+
+	// Primero verificar si existe
+	var exists bool
+	err := m.pool.QueryRow(ctx, CHECK_SALIDA_SKU_EXISTS_INTERNAL_DB, salidaID, calibre, variedad, embalaje).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("error al verificar existencia de SKU: %w", err)
+	}
+
+	if !exists {
+		return fmt.Errorf("SKU %s-%s-%s no encontrada en salida %d", calibre, variedad, embalaje, salidaID)
+	}
+
+	// Ejecutar DELETE
+	commandTag, err := m.pool.Exec(ctx, DELETE_SALIDA_SKU_INTERNAL_DB, salidaID, calibre, variedad, embalaje)
+	if err != nil {
+		return fmt.Errorf("error al eliminar SKU de salida: %w", err)
+	}
+
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("no se pudo eliminar la SKU de la salida %d", salidaID)
+	}
+
+	log.Printf("✅ [DB] SKU %s-%s-%s eliminada de salida %d", calibre, variedad, embalaje, salidaID)
+	return nil
+}
+
+// DeleteAllSalidaSKUs elimina TODAS las SKUs asignadas a una salida
+func (m *PostgresManager) DeleteAllSalidaSKUs(ctx context.Context, salidaID int) (int64, error) {
+	if m == nil || m.pool == nil {
+		return 0, fmt.Errorf("manager no inicializado")
+	}
+
+	commandTag, err := m.pool.Exec(ctx, DELETE_ALL_SALIDA_SKUS_INTERNAL_DB, salidaID)
+	if err != nil {
+		return 0, fmt.Errorf("error al eliminar SKUs de salida: %w", err)
+	}
+
+	rowsAffected := commandTag.RowsAffected()
+	log.Printf("✅ [DB] Eliminadas %d SKUs de salida %d", rowsAffected, salidaID)
+	return rowsAffected, nil
+}

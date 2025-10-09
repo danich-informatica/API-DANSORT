@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"time"
 
@@ -224,6 +225,38 @@ func main() {
 			log.Println("")
 		}
 
+		// 🎲 Asignar REJECT a salidas manuales aleatorias (solo en memoria)
+		log.Println("🎲 Asignando SKU REJECT a salidas de descarte...")
+		for _, s := range sorters {
+			salidas := s.GetSalidas()
+
+			// Buscar salidas manuales
+			var manualSalidas []shared.Salida
+			for _, salida := range salidas {
+				if salida.Tipo == "manual" {
+					manualSalidas = append(manualSalidas, salida)
+				}
+			}
+
+			if len(manualSalidas) > 0 {
+				// Elegir salida manual aleatoria
+				randomIndex := rand.IntN(len(manualSalidas))
+				targetSalida := manualSalidas[randomIndex]
+
+				// Asignar REJECT (ID=0) a esta salida
+				_, _, _, err := s.AssignSKUToSalida(0, targetSalida.ID)
+				if err != nil {
+					log.Printf("   ⚠️  Error al asignar REJECT en Sorter #%d: %v", s.ID, err)
+				} else {
+					log.Printf("   ✅ Sorter #%d: REJECT asignado a '%s' (ID=%d)",
+						s.ID, targetSalida.Salida_Sorter, targetSalida.ID)
+				}
+			} else {
+				log.Printf("   ⚠️  Sorter #%d: No hay salidas manuales para REJECT", s.ID)
+			}
+		}
+		log.Println("")
+
 		// Iniciar todos los sorters
 		log.Println("🚀 Iniciando sorters...")
 		for _, s := range sorters {
@@ -247,8 +280,14 @@ func main() {
 	}()
 
 	// 5. Crear e iniciar el servidor HTTP con endpoints
-	httpPort := fmt.Sprintf("%d", cfg.HTTP.Port)
-	httpService := listeners.NewHTTPFrontend(httpPort)
+	httpHost := cfg.HTTP.Host
+	if httpHost == "" {
+		httpHost = "0.0.0.0" // Default si no está configurado
+	}
+	httpPort := cfg.HTTP.Port
+	httpAddr := fmt.Sprintf("%s:%d", httpHost, httpPort)
+
+	httpService := listeners.NewHTTPFrontend(httpAddr)
 	httpService.SetPostgresManager(dbManager)
 
 	// Vincular SKUManager si está disponible para endpoints de streaming
@@ -261,13 +300,44 @@ func main() {
 		httpService.RegisterSorter(s)
 	}
 
-	log.Printf("🌐 Servidor HTTP iniciando en puerto %s...", httpPort)
+	// 🔌 Configurar WebSocket para cada sorter
+	if len(sorters) > 0 {
+		wsHub := httpService.GetWebSocketHub()
+
+		// Crear rooms de WebSocket
+		sorterIDs := make([]int, len(sorters))
+		for i, s := range sorters {
+			sorterIDs[i] = s.ID
+		}
+		wsHub.CreateRoomsForSorters(sorterIDs)
+
+		// 🔔 Suscribir WebSocket Hub a los canales de cada sorter
+		for _, s := range sorters {
+			wsHub.SubscribeToSorter(s)
+		}
+
+		log.Printf("🔌 WebSocket: %d room(s) creadas y suscritas para notificaciones en tiempo real", len(sorterIDs))
+		for _, id := range sorterIDs {
+			log.Printf("   📦 Room: assignment_%d (Sorter #%d)", id, id)
+		}
+		log.Println("")
+	}
+
+	log.Printf("🌐 Servidor HTTP iniciando en %s...", httpAddr)
 	log.Println("📊 Endpoints disponibles:")
 	log.Println("   GET  /Mesa/Estado")
 	log.Println("   POST /Mesa")
 	log.Println("   POST /Mesa/Vaciar")
 	log.Println("   GET  /status")
+	log.Println("   POST /assignment")
+	log.Println("   DELETE /assignment/:sealer_id/:sku_id")
+	log.Println("   DELETE /assignment/:sealer_id")
 	log.Printf("   GET  /skus/assignables/:sorter_id (⚡ acceso directo sin bloqueo, %d sorters registrados)", len(sorters))
+	log.Printf("   GET  /sku/assigned/:sorter_id")
+	log.Println("")
+	log.Println("🔌 WebSocket endpoints:")
+	log.Println("   WS   /ws/:room (ej: ws://host/ws/assignment_1)")
+	log.Println("   GET  /ws/stats (estadísticas de conexiones)")
 
 	// Iniciar servidor HTTP con las rutas configuradas
 	if err := httpService.Start(); err != nil {
