@@ -15,6 +15,8 @@ type Salida struct {
 	Estado           int          `json:"estado"`
 	Ingreso          bool         `json:"ingreso"`
 	IsEnabled        bool         `json:"is_enabled"`
+	EstadoNode       string       `json:"estado_node"`  // Nodo OPC UA para estado
+	BloqueoNode      string       `json:"bloqueo_node"` // Nodo OPC UA para bloqueo
 }
 
 func GetNewSalida(ID int, salida_sorter string, tipo string, batchSize int) Salida {

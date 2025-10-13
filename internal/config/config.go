@@ -112,12 +112,14 @@ type Sorter struct {
 }
 
 type Salida struct {
-	ID         int    `yaml:"id"`
-	PhysicalID int    `yaml:"physical_id"` // ID físico relativo del sorter (1, 2, 3, etc.)
-	CognexID   int    `yaml:"cognex_id"`   // ID de Cognex asignado a esta salida (opcional, 0 = sin cognex)
-	Name       string `yaml:"name"`
-	Tipo       string `yaml:"tipo"`       // "automatico" o "manual"
-	BatchSize  int    `yaml:"batch_size"` // Tamaño de lote para distribución
+	ID          int    `yaml:"id"`
+	PhysicalID  int    `yaml:"physical_id"` // ID físico relativo del sorter (1, 2, 3, etc.)
+	CognexID    int    `yaml:"cognex_id"`   // ID de Cognex asignado a esta salida (opcional, 0 = sin cognex)
+	Name        string `yaml:"name"`
+	Tipo        string `yaml:"tipo"`         // "automatico" o "manual"
+	BatchSize   int    `yaml:"batch_size"`   // Tamaño de lote para distribución
+	EstadoNode  string `yaml:"estado_node"`  // Nodo OPC UA para leer/escribir estado numérico
+	BloqueoNode string `yaml:"bloqueo_node"` // Nodo OPC UA para leer/escribir bloqueo (opcional, "" = no tiene)
 }
 
 // LoadConfig carga la configuración desde el archivo YAML
