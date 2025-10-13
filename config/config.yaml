@@ -71,64 +71,81 @@ sorters:
     ubicacion: "Planta A - Línea 1"
     cognex_id: 1
     scan_method: "QR"
+    plc_input_node: "ns=4;s=|var|SORTER1.INPUT"
+    plc_output_node: "ns=4;s=|var|SORTER1.OUTPUT"
     salidas:
       - id: 1
+        physical_id: 1 # ← ID FÍSICO que se envía al PLC (1, 2, 3, 4...)
         name: "Exportación"
         tipo: "automatico"
-        batch_size: 3 # Envía 2 cajas por lote
-        cognex_id: 3 # ← Cognex de verificación en esta salida
+        batch_size: 3
+        cognex_id: 3
       - id: 2
+        physical_id: 2 # ← ID FÍSICO que se envía al PLC
         name: "Mercado Nacional"
         tipo: "automatico"
-        batch_size: 3 # Envía 5 cajas por lote
+        batch_size: 3
       - id: 3
+        physical_id: 3 # ← ID FÍSICO que se envía al PLC
         name: "Rechazo"
         tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
+        batch_size: 1
       - id: 4
+        physical_id: 4 # ← ID FÍSICO que se envía al PLC
         name: "Rechazo"
         tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
+        batch_size: 1
       - id: 5
+        physical_id: 5 # ← ID FÍSICO que se envía al PLC
         name: "Rechazo"
         tipo: "manual"
         batch_size: 1 # Manual siempre de 1 en 1
       - id: 6
+        physical_id: 6 # ← ID FÍSICO que se envía al PLC
         name: "Rechazo"
         tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
+        batch_size: 1
       - id: 7
+        physical_id: 7 # ← ID FÍSICO que se envía al PLC
         name: "Rechazo"
         tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
+        batch_size: 1
 
   - id: 2
     name: "Sorter Secundario"
     ubicacion: "Planta A - Línea 2"
     cognex_id: 2
     scan_method: "QR"
+    plc_input_node: "ns=4;s=|var|SORTER2.INPUT"
+    plc_output_node: "ns=4;s=|var|SORTER2.OUTPUT"
     salidas:
       - id: 8
+        physical_id: 1 # ← ID FÍSICO del SORTER 2 (1, 2, 3...)
         name: "Premium"
         tipo: "manual"
-        batch_size: 1 # Envía 3 cajas por lote
+        batch_size: 1
       - id: 9
+        physical_id: 2 # ← ID FÍSICO del SORTER 2
         name: "Estándar"
         tipo: "manual"
-        batch_size: 1 # Envía 7 cajas por lote
+        batch_size: 1
       - id: 10
+        physical_id: 3 # ← ID FÍSICO del SORTER 2
         name: "Descarte"
         tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
+        batch_size: 1
       - id: 11
+        physical_id: 4 # ← ID FÍSICO del SORTER 2
         name: "Rechazo"
         tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
+        batch_size: 1
       - id: 12
+        physical_id: 5 # ← ID FÍSICO del SORTER 2
         name: "Rechazo"
         tipo: "manual"
         batch_size: 1 # Manual siempre de 1 en 1
       - id: 13
+        physical_id: 6 # ← ID FÍSICO del SORTER 2
         name: "Rechazo"
         tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
+        batch_size: 1

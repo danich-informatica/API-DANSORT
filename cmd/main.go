@@ -229,7 +229,14 @@ func main() {
 				log.Printf("     ✅ Total: %d SKU(s) cargada(s) desde BD", totalSKUsLoaded)
 			}
 
-			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager)
+			// Información de nodos PLC
+			if sorterCfg.PLCInputNode != "" && sorterCfg.PLCOutputNode != "" {
+				log.Printf("     🔌 PLC Configurado:")
+				log.Printf("        ↳ Input Node:  %s", sorterCfg.PLCInputNode)
+				log.Printf("        ↳ Output Node: %s", sorterCfg.PLCOutputNode)
+			}
+
+			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, sorterCfg.PLCInputNode, sorterCfg.PLCOutputNode, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager)
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)

@@ -101,12 +101,14 @@ type CognexDevice struct {
 }
 
 type Sorter struct {
-	ID         int      `yaml:"id"`
-	Name       string   `yaml:"name"`
-	Ubicacion  string   `yaml:"ubicacion"`
-	CognexID   int      `yaml:"cognex_id"`
-	ScanMethod string   `yaml:"scan_method"`
-	Salidas    []Salida `yaml:"salidas"`
+	ID            int      `yaml:"id"`
+	Name          string   `yaml:"name"`
+	Ubicacion     string   `yaml:"ubicacion"`
+	CognexID      int      `yaml:"cognex_id"`
+	ScanMethod    string   `yaml:"scan_method"`
+	PLCInputNode  string   `yaml:"plc_input_node"`  // Nodo OPC UA para enviar datos al PLC
+	PLCOutputNode string   `yaml:"plc_output_node"` // Nodo OPC UA para recibir datos del PLC
+	Salidas       []Salida `yaml:"salidas"`
 }
 
 type Salida struct {

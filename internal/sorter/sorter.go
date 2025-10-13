@@ -15,12 +15,14 @@ import (
 )
 
 type Sorter struct {
-	ID        int                       `json:"id"`
-	Ubicacion string                    `json:"ubicacion"`
-	Salidas   []shared.Salida           `json:"salidas"`
-	Cognex    *listeners.CognexListener `json:"cognex"`
-	ctx       context.Context
-	cancel    context.CancelFunc
+	ID            int                       `json:"id"`
+	Ubicacion     string                    `json:"ubicacion"`
+	PLCInputNode  string                    `json:"plc_input_node"`  // Nodo OPC UA para enviar al PLC
+	PLCOutputNode string                    `json:"plc_output_node"` // Nodo OPC UA para recibir del PLC
+	Salidas       []shared.Salida           `json:"salidas"`
+	Cognex        *listeners.CognexListener `json:"cognex"`
+	ctx           context.Context
+	cancel        context.CancelFunc
 
 	// Canal de SKUs assignables para este sorter
 	skuChannel chan []models.SKUAssignable
@@ -136,7 +138,7 @@ func (s *Sorter) updateBatchDistributor(skuName string) {
 	}
 }
 
-func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}) *Sorter {
+func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}) *Sorter {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Registrar canales para este sorter
@@ -148,6 +150,8 @@ func GetNewSorter(ID int, ubicacion string, salidas []shared.Salida, cognex *lis
 	return &Sorter{
 		ID:               ID,
 		Ubicacion:        ubicacion,
+		PLCInputNode:     plcInputNode,
+		PLCOutputNode:    plcOutputNode,
 		Salidas:          salidas,
 		Cognex:           cognex,
 		ctx:              ctx,
