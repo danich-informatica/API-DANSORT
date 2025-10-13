@@ -79,9 +79,19 @@ func (h *HTTPFrontend) GetWebSocketHub() *WebSocketHub {
 }
 
 func (h *HTTPFrontend) setupRoutes() {
-	// Servir archivos estáticos (visualizador)
-	h.router.StaticFile("/visualizer", "./web/visualizer.html")
-	h.router.StaticFile("/simulator", "./web/simulator.html")
+	// Servir archivos estáticos (visualizador) sin caché
+	h.router.GET("/visualizer", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.File("./web/visualizer.html")
+	})
+	h.router.GET("/simulator", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.File("./web/simulator.html")
+	})
 
 	// Endpoint GET /sku/assigned/:sorter_id
 	h.router.GET("/sku/assigned/:sorter_id", func(c *gin.Context) {
@@ -115,6 +125,7 @@ func (h *HTTPFrontend) setupRoutes() {
 		}
 		c.JSON(http.StatusOK, result)
 	})
+
 	// Ruta GET - ya está correcta
 	h.router.GET("/Mesa/Estado", func(c *gin.Context) {
 		id := c.Query("id")

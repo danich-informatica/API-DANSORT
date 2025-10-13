@@ -71,10 +71,11 @@ sorters:
     ubicacion: "Planta A - Línea 1"
     cognex_id: 1
     scan_method: "QR"
-    plc_input_node: "ns=4;i=22"
-    plc_output_node: "ns=4;i=23"
-    # Salidas: cada una tiene nodos OPC UA para estado y bloqueo
-    # Si una salida no tiene nodo de bloqueo, usar bloqueo_node: ""
+    plc_endpoint: "opc.tcp://192.168.120.100:4840"
+    plc_object_id: "ns=4;i=1" # NodeID del objeto (ServerInterface_1 en UaExpert)
+    plc_method_id: "ns=4;i=21" # NodeID del método DB_OPC_S7000 en UaExpert
+    plc_input_node: "ns=4;i=22" # DEPRECADO: Ahora son InputArguments del método
+    plc_output_node: "ns=4;i=23" # DEPRECADO: Ahora son OutputArguments del método
     salidas:
       - id: 1
         physical_id: 1 # ← ID FÍSICO que se envía al PLC (1, 2, 3, 4...)
@@ -82,79 +83,79 @@ sorters:
         tipo: "manual"
         batch_size: 3
         cognex_id: 3
-        estado_node: "ns=4;i=28"
-        bloqueo_node: "ns=4;i=27"
+        estado_node: "ns=4;i=27"
+        bloqueo_node: "ns=4;i=28"
       - id: 2
         physical_id: 2 # ← ID FÍSICO que se envía al PLC
         name: "Salida manual"
         tipo: "manual"
         batch_size: 3
-        estado_node: "ns=4;i=33"
-        bloqueo_node: "ns=4;i=32"
+        estado_node: "ns=4;i=32"
+        bloqueo_node: "ns=4;i=33"
       - id: 3
         physical_id: 3 # ← ID FÍSICO que se envía al PLC
         name: "Salida manual"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;i=38"
-        bloqueo_node: "ns=4;i=37"
+        estado_node: "ns=4;i=37"
+        bloqueo_node: "ns=4;i=38"
       - id: 4
         physical_id: 4 # ← ID FÍSICO que se envía al PLC
         name: "Salida manual"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;i=43"
-        bloqueo_node: "ns=4;i=42"
+        estado_node: "ns=4;i=42"
+        bloqueo_node: "ns=4;i=43"
       - id: 5
         physical_id: 5 # ← ID FÍSICO que se envía al PLC
         name: "Salida manual"
         tipo: "manual"
         batch_size: 1 # Manual siempre de 1 en 1
-        estado_node: "ns=4;i=48"
-        bloqueo_node: "ns=4;i=47"
+        estado_node: "ns=4;i=47"
+        bloqueo_node: "ns=4;i=48"
       - id: 6
         physical_id: 6 # ← ID FÍSICO que se envía al PLC
         name: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=53"
-        bloqueo_node: "ns=4;i=52"
+        estado_node: "ns=4;i=52"
+        bloqueo_node: "ns=4;i=53"
       - id: 7
         physical_id: 7 # ← ID FÍSICO que se envía al PLC
         name: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=58"
-        bloqueo_node: "ns=4;i=57"
-    - id: 8
+        estado_node: "ns=4;i=57"
+        bloqueo_node: "ns=4;i=58"
+      - id: 8
         physical_id: 8 # ← ID FÍSICO que se envía al PLC
         name: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=63"
-        bloqueo_node: "ns=4;i=62"
-    - id: 9
+        estado_node: "ns=4;i=62"
+        bloqueo_node: "ns=4;i=63"
+      - id: 9
         physical_id: 9 # ← ID FÍSICO que se envía al PLC
         name: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=68"
-        bloqueo_node: "ns=4;i=67"
-    - id: 10
+        estado_node: "ns=4;i=67"
+        bloqueo_node: "ns=4;i=68"
+      - id: 10
         physical_id: 10 # ← ID FÍSICO que se envía al PLC
         name: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=73"
-        bloqueo_node: "ns=4;i=72"
-    - id: 11
+        estado_node: "ns=4;i=72"
+        bloqueo_node: "ns=4;i=73"
+      - id: 11
         physical_id: 11 # ← ID FÍSICO que se envía al PLC
         name: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=78"
-        bloqueo_node: "ns=4;i=77"
-    - id: 12
+        estado_node: "ns=4;i=77"
+        bloqueo_node: "ns=4;i=78"
+      - id: 12
         physical_id: 12 # ← ID FÍSICO que se envía al PLC
         name: "Salida de descarte"
         tipo: "descarte"
@@ -167,6 +168,7 @@ sorters:
     ubicacion: "Planta A - Línea 2"
     cognex_id: 2
     scan_method: "QR"
+    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora
     plc_input_node: "ns=4;s=|var|SORTER2.INPUT"
     plc_output_node: "ns=4;s=|var|SORTER2.OUTPUT"
     salidas:

@@ -106,8 +106,11 @@ type Sorter struct {
 	Ubicacion     string   `yaml:"ubicacion"`
 	CognexID      int      `yaml:"cognex_id"`
 	ScanMethod    string   `yaml:"scan_method"`
-	PLCInputNode  string   `yaml:"plc_input_node"`  // Nodo OPC UA para enviar datos al PLC
-	PLCOutputNode string   `yaml:"plc_output_node"` // Nodo OPC UA para recibir datos del PLC
+	PLCEndpoint   string   `yaml:"plc_endpoint"`    // Endpoint OPC UA (ej: "opc.tcp://192.168.120.100:4840")
+	PLCObjectID   string   `yaml:"plc_object_id"`   // NodeID del objeto para llamadas a métodos (ej: "ns=4;i=5001")
+	PLCMethodID   string   `yaml:"plc_method_id"`   // NodeID del método a llamar (ej: "ns=4;i=5002")
+	PLCInputNode  string   `yaml:"plc_input_node"`  // DEPRECADO: Ahora se usan métodos. Mantener por compatibilidad
+	PLCOutputNode string   `yaml:"plc_output_node"` // DEPRECADO: Ahora se usan métodos. Mantener por compatibilidad
 	Salidas       []Salida `yaml:"salidas"`
 }
 
