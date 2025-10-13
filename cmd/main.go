@@ -199,10 +199,10 @@ func main() {
 						salidaCfg.ID, salidaCfg.Name, tipo, batchSize, physicalID)
 				}
 				// Insertar salida en la base de datos si no existe
-				if err := dbManager.InsertSalidaIfNotExists(ctx, salidaCfg.ID, sorterCfg.ID, salida_counter, true); err != nil {
-					log.Printf("         ⚠️  Error al insertar salida en DB: %v", err)
+				if err := dbManager.InsertSalidaIfNotExists(ctx, salidaCfg.ID, sorterCfg.ID, physicalID, true); err != nil {
+					log.Printf("         ⚠️  Error al sincronizar salida en DB: %v", err)
 				} else {
-					log.Printf("         ✅ Salida %d insertada en DB (o ya existía)", salidaCfg.ID)
+					log.Printf("         ✅ Salida %d sincronizada en DB (physical_id=%d)", salidaCfg.ID, physicalID)
 				}
 
 				salida_counter++
@@ -377,7 +377,7 @@ func main() {
 	log.Println("   POST /assignment")
 	log.Println("   DELETE /assignment/:sealer_id/:sku_id")
 	log.Println("   DELETE /assignment/:sealer_id")
-	log.Printf("   GET  /skus/assignables/:sorter_id (⚡ acceso directo sin bloqueo, %d sorters registrados)", len(sorters))
+	log.Printf("   GET  /skus/assignables/:sorter_id (acceso directo sin bloqueo, %d sorters registrados)", len(sorters))
 	log.Printf("   GET  /sku/assigned/:sorter_id")
 	log.Println("")
 	log.Println("🔌 WebSocket endpoints:")

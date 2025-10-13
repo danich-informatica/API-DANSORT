@@ -109,13 +109,18 @@ const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
 const INSERT_NEW_SORTER_IF_NOT_EXISTS_INTERNAL_DB = `
 	INSERT INTO sorter (id, ubicacion)
 	VALUES ($1, $2)
-	ON CONFLICT (id) DO NOTHING
+	ON CONFLICT (id) 
+	DO UPDATE SET ubicacion = EXCLUDED.ubicacion
 `
 
 const INSERT_NEW_SALIDA_IF_NOT_EXISTS_INTERNAL_DB = `
 	INSERT INTO salida (id, sorter, salida_sorter, estado)
 	VALUES ($1, $2, $3, $4)
-	ON CONFLICT (id) DO NOTHING
+	ON CONFLICT (id) 
+	DO UPDATE SET 
+		sorter = EXCLUDED.sorter,
+		salida_sorter = EXCLUDED.salida_sorter,
+		estado = EXCLUDED.estado
 `
 const SELECT_ALL_SORTERS_AND_OUTPUTS_INTERNAL_DB = `
 	SELECT 
