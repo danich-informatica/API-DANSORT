@@ -116,22 +116,35 @@ func (s *Sorter) RemoveAllSKUsFromSalida(salidaID int) ([]models.SKU, error) {
 		return nil, fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
 	}
 
-	removedSKUs := make([]models.SKU, len(targetSalida.SKUs_Actuales))
-	copy(removedSKUs, targetSalida.SKUs_Actuales)
+	// Separar SKUs removibles de REJECT (ID=0)
+	var removedSKUs []models.SKU
+	var keepSKUs []models.SKU
 
-	for _, sku := range removedSKUs {
+	for _, sku := range targetSalida.SKUs_Actuales {
 		skuID := uint32(sku.GetNumericID())
+
+		// ✅ PROTECCIÓN: NO eliminar SKU REJECT (ID=0)
+		if skuID == 0 {
+			keepSKUs = append(keepSKUs, sku)
+			log.Printf("🛡️  Sorter #%d: SKU REJECT (ID=0) protegida, NO se eliminará de salida %d", s.ID, salidaID)
+			continue
+		}
+
+		// Marcar SKU como no asignada
 		for i := range s.assignedSKUs {
 			if uint32(s.assignedSKUs[i].ID) == skuID {
 				s.assignedSKUs[i].IsAssigned = false
 			}
 		}
+
+		removedSKUs = append(removedSKUs, sku)
 	}
 
-	s.Salidas[salidaIndex].SKUs_Actuales = []models.SKU{}
+	// Mantener solo las SKUs protegidas (REJECT)
+	s.Salidas[salidaIndex].SKUs_Actuales = keepSKUs
 
-	log.Printf("🧹 Sorter #%d: Eliminadas %d SKUs de salida '%s' (ID=%d)",
-		s.ID, len(removedSKUs), targetSalida.Salida_Sorter, salidaID)
+	log.Printf("🧹 Sorter #%d: Eliminadas %d SKUs de salida '%s' (ID=%d), %d SKUs protegidas",
+		s.ID, len(removedSKUs), targetSalida.Salida_Sorter, salidaID, len(keepSKUs))
 
 	s.UpdateSKUs(s.assignedSKUs)
 

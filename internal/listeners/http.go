@@ -547,14 +547,29 @@ func (h *HTTPFrontend) setupRoutes() {
 			}
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"message":             "Todas las SKUs eliminadas exitosamente",
+		// Contar SKUs no REJECT (removidas)
+		nonRejectRemoved := 0
+		for _, sku := range removedSKUs {
+			if uint32(sku.GetNumericID()) != 0 {
+				nonRejectRemoved++
+			}
+		}
+
+		response := gin.H{
+			"message":             fmt.Sprintf("Eliminadas %d SKUs de salida %d", nonRejectRemoved, sealerID),
 			"sealer_id":           sealerID,
 			"sorter_id":           targetSorter.GetID(),
 			"skus_removed_memory": len(removedSKUs),
 			"skus_removed_db":     rowsDeleted,
 			"removed_skus":        removedSKUs,
-		})
+		}
+
+		// Agregar nota si SKU REJECT fue protegida
+		if nonRejectRemoved < len(removedSKUs) {
+			response["note"] = "SKU REJECT (ID=0) está protegida y NO fue eliminada"
+		}
+
+		c.JSON(http.StatusOK, response)
 	})
 }
 
