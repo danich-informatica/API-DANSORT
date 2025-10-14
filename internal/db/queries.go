@@ -177,3 +177,19 @@ const CHECK_SALIDA_SKU_EXISTS_INTERNAL_DB = `
 		  AND embalaje = $4
 	)
 `
+
+const SELECT_HISTORIAL_DESVIOS_INTERNAL_DB = `
+	SELECT 
+		sc.correlativo_caja AS box_id,
+		CONCAT(c.calibre, '-', c.variedad, '-', c.embalaje) AS sku,
+		c.calibre,
+		sc.salida_enviada AS sealer,
+		sc.fecha_salida AS created_at,
+		s.sorter AS sorter_id
+	FROM salida_caja sc
+	INNER JOIN caja c ON sc.correlativo_caja = c.correlativo
+	INNER JOIN salida s ON sc.id_salida = s.id
+	WHERE s.sorter = $1
+	ORDER BY sc.fecha_salida DESC
+	LIMIT 100
+`

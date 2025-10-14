@@ -437,3 +437,41 @@ func (m *PostgresManager) InsertSalidaCaja(ctx context.Context, correlativo stri
 	log.Printf("✅ [DB] Caja %s registrada en salida %d (relativa: %d)", correlativo, salidaID, salidaRelativa)
 	return nil
 }
+
+// GetHistorialDesvios obtiene las últimas 100 lecturas/desvíos de un sorter
+func (m *PostgresManager) GetHistorialDesvios(ctx context.Context, sorterID int) ([]map[string]interface{}, error) {
+	if m == nil || m.pool == nil {
+		return nil, fmt.Errorf("manager no inicializado")
+	}
+
+	rows, err := m.pool.Query(ctx, SELECT_HISTORIAL_DESVIOS_INTERNAL_DB, sorterID)
+	if err != nil {
+		return nil, fmt.Errorf("error al consultar historial: %w", err)
+	}
+	defer rows.Close()
+
+	var historial []map[string]interface{}
+	for rows.Next() {
+		var boxID, sku, caliber string
+		var sealer, sorterIDResult int
+		var createdAt interface{}
+
+		err := rows.Scan(&boxID, &sku, &caliber, &sealer, &createdAt, &sorterIDResult)
+		if err != nil {
+			log.Printf("⚠️  Error al escanear fila: %v", err)
+			continue
+		}
+
+		historial = append(historial, map[string]interface{}{
+			"box_id":              boxID,
+			"sku":                 sku,
+			"caliber":             caliber,
+			"sealer":              sealer,
+			"is_sealer_full_type": nil,
+			"created_at":          createdAt,
+			"sorter_id":           sorterIDResult,
+		})
+	}
+
+	return historial, nil
+}

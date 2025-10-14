@@ -47,7 +47,7 @@ func (s *Sorter) PublishLecturaEvent(evento models.LecturaEvent, salida *shared.
 }
 
 // RegistrarSalidaCaja registra en la base de datos que una caja fue enviada a una salida física
-func (s *Sorter) RegistrarSalidaCaja(correlativo string, salida *shared.Salida) error {
+func (s *Sorter) RegistrarSalidaCaja(correlativo string, salida *shared.Salida, sku, calibre string) error {
 	if s.dbManager == nil {
 		return fmt.Errorf("dbManager no inicializado")
 	}
@@ -63,5 +63,38 @@ func (s *Sorter) RegistrarSalidaCaja(correlativo string, salida *shared.Salida) 
 		return fmt.Errorf("error al registrar salida de caja %s: %w", correlativo, err)
 	}
 
+	// 📡 Broadcast a WebSocket de historial
+	s.PublishHistorialEvent(correlativo, sku, calibre, salida)
+
 	return nil
+}
+
+// PublishHistorialEvent publica un evento de historial al WebSocket
+func (s *Sorter) PublishHistorialEvent(correlativo, sku, calibre string, salida *shared.Salida) {
+	if s.wsHub == nil {
+		return
+	}
+
+	message := map[string]interface{}{
+		"type":                "history_update",
+		"box_id":              correlativo,
+		"sku":                 sku,
+		"caliber":             calibre,
+		"sealer":              salida.SealerPhysicalID,
+		"is_sealer_full_type": nil,
+		"created_at":          time.Now().UTC().Format(time.RFC3339),
+		"sorter_id":           s.ID,
+	}
+
+	jsonBytes, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("❌ Error al serializar history_update: %v", err)
+		return
+	}
+
+	roomName := fmt.Sprintf("history_sorter_%d", s.ID)
+	s.wsHub.Broadcast <- &listeners.BroadcastMessage{
+		RoomName: roomName,
+		Message:  jsonBytes,
+	}
 }

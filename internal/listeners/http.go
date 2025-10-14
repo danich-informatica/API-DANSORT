@@ -569,6 +569,48 @@ func (h *HTTPFrontend) setupRoutes() {
 
 		c.JSON(http.StatusOK, response)
 	})
+
+	// Endpoint GET /assignment/sorter/:sorter_id/history
+	h.router.GET("/assignment/sorter/:sorter_id/history", func(c *gin.Context) {
+		sorterIDStr := c.Param("sorter_id")
+		sorterID, err := strconv.Atoi(sorterIDStr)
+		if err != nil {
+			BadRequest(c, "sorter_id debe ser un número entero válido", gin.H{"sorter_id": sorterIDStr})
+			return
+		}
+
+		// Validar que el sorter existe
+		found := false
+		for _, sorter := range h.sorters {
+			if sorter.GetID() == sorterID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			SorterNotFound(c, sorterIDStr)
+			return
+		}
+
+		// Obtener historial desde DB
+		type HistorialGetter interface {
+			GetHistorialDesvios(ctx context.Context, sorterID int) ([]map[string]interface{}, error)
+		}
+
+		dbManager, ok := h.postgresMgr.(HistorialGetter)
+		if !ok || h.postgresMgr == nil {
+			InternalServerError(c, "Base de datos no disponible", gin.H{"sorter_id": sorterID})
+			return
+		}
+
+		historial, err := dbManager.GetHistorialDesvios(c.Request.Context(), sorterID)
+		if err != nil {
+			InternalServerError(c, "Error al consultar historial", gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, historial)
+	})
 }
 
 func (h *HTTPFrontend) Start() error {

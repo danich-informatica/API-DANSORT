@@ -47,7 +47,7 @@ func (s *Sorter) processLecturaExitosa(evento models.LecturaEvent) {
 	s.sendPLCSignal(&salida)
 	s.PublishLecturaEvent(evento, &salida, true)
 
-	if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida); err != nil {
+	if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida, evento.SKU, evento.Calibre); err != nil {
 		log.Printf("⚠️  Sorter #%d: Error al registrar salida de caja %s: %v", s.ID, evento.Correlativo, err)
 	}
 }
@@ -65,7 +65,7 @@ func (s *Sorter) processLecturaFallida(evento models.LecturaEvent) {
 	s.sendPLCSignal(&salida)
 	s.PublishLecturaEvent(evento, &salida, false)
 
-	if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida); err != nil {
+	if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida, evento.SKU, evento.Calibre); err != nil {
 		log.Printf("⚠️  Sorter #%d: Error al registrar salida de caja fallida %s: %v", s.ID, evento.Correlativo, err)
 	}
 }
