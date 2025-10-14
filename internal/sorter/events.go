@@ -55,7 +55,7 @@ func (s *Sorter) processLecturaExitosa(evento models.LecturaEvent) {
 // processLecturaFallida procesa una lectura fallida
 func (s *Sorter) processLecturaFallida(evento models.LecturaEvent) {
 	s.LecturasFallidas++
-	
+
 	tipoLectura := evento.GetTipo()
 	salida, razon := s.getSalidaForFallo(tipoLectura)
 
@@ -73,7 +73,7 @@ func (s *Sorter) processLecturaFallida(evento models.LecturaEvent) {
 // getSalidaForFallo obtiene la salida y razón para un fallo
 func (s *Sorter) getSalidaForFallo(tipoLectura models.TipoLectura) (salida shared.Salida, razon string) {
 	var salidaPtr *shared.Salida
-	
+
 	switch tipoLectura {
 	case models.LecturaNoRead:
 		salidaPtr = s.GetDiscardSalida()
@@ -88,7 +88,7 @@ func (s *Sorter) getSalidaForFallo(tipoLectura models.TipoLectura) (salida share
 	if salidaPtr != nil {
 		salida = *salidaPtr
 	}
-	
+
 	return salida, razon
 }
 
