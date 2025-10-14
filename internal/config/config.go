@@ -119,6 +119,7 @@ type SorterPLCConfig struct {
 type Salida struct {
 	ID         int             `yaml:"id"`
 	Nombre     string          `yaml:"nombre"`
+	Tipo       string          `yaml:"tipo"`        // "manual", "automatico", "automatica", "descarte"
 	PhysicalID int             `yaml:"physical_id"` // ID físico relativo del sorter (1, 2, 3, etc.)
 	PLC        SalidaPLCConfig `yaml:"plc"`
 }

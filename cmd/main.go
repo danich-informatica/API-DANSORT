@@ -189,14 +189,24 @@ func main() {
 					physicalID = salidaCfg.ID // Usar ID como PhysicalID si no está configurado
 				}
 
-				// Crear salida con nodos PLC
-				salida := shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, "automatico", 1)
+				// Normalizar tipo de salida desde YAML
+				tipo := salidaCfg.Tipo
+				if tipo == "" {
+					tipo = "automatico" // Default si no está especificado
+				}
+				// Normalizar "automatica" -> "automatico" (plural a singular)
+				if tipo == "automatica" {
+					tipo = "automatico"
+				}
+
+				// Crear salida con tipo desde config YAML
+				salida := shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, 1)
 				salida.EstadoNode = salidaCfg.PLC.EstadoNodeID
 				salida.BloqueoNode = salidaCfg.PLC.BloqueoNodeID
 
 				salidas = append(salidas, salida)
 
-				log.Printf("       ↳ Salida %d: %s (physical_id=%d)", salidaCfg.ID, salidaCfg.Nombre, physicalID)
+				log.Printf("       ↳ Salida %d: %s [%s] (physical_id=%d)", salidaCfg.ID, salidaCfg.Nombre, tipo, physicalID)
 				if salidaCfg.PLC.EstadoNodeID != "" {
 					log.Printf("           EstadoNode: %s", salidaCfg.PLC.EstadoNodeID)
 				}
