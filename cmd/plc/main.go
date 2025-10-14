@@ -80,7 +80,9 @@ func interactiveMenu(manager *plc.Manager, cfg *config.Config) {
 		fmt.Println("  9. Asignar salida a caja (Plan A/B)")
 		fmt.Println(" 10. Escribir NodeID en InputArguments")
 		fmt.Println(" 11. Descubrir estructura completa del PLC")
-		fmt.Println(" 12. Salir")
+		fmt.Println(" 12. Bloquear/Desbloquear salida")
+		fmt.Println(" 13. Enviar señal a salida (ESTADO)")
+		fmt.Println(" 14. Salir")
 		fmt.Println(strings.Repeat("═", 40))
 		fmt.Print("Seleccione una opción: ")
 
@@ -115,6 +117,10 @@ func interactiveMenu(manager *plc.Manager, cfg *config.Config) {
 		case 11:
 			handleDiscoverPLCStructure(manager, reader)
 		case 12:
+			handleBloqueoSalida(manager, reader, cfg)
+		case 13:
+			handleSenalSalida(manager, reader, cfg)
+		case 14:
 			return
 		default:
 			log.Println("⚠️ Opción no válida.")
@@ -1159,4 +1165,169 @@ func getNodeIcon(nc ua.NodeClass) string {
 	default:
 		return "❓"
 	}
+}
+
+// handleBloqueoSalida permite bloquear/desbloquear una salida específica
+func handleBloqueoSalida(plcManager *plc.Manager, reader *bufio.Reader, cfg *config.Config) {
+	fmt.Println("\n" + strings.Repeat("═", 50))
+	fmt.Println("   BLOQUEAR/DESBLOQUEAR SALIDA")
+	fmt.Println(strings.Repeat("─", 50))
+
+	// Seleccionar sorter
+	fmt.Print("Ingrese ID del Sorter (1, 2, etc.): ")
+	sorterInput, _ := reader.ReadString('\n')
+	sorterID, err := strconv.Atoi(strings.TrimSpace(sorterInput))
+	if err != nil || sorterID < 1 || sorterID > len(cfg.Sorters) {
+		log.Printf("❌ ID de sorter inválido")
+		return
+	}
+
+	sorterConfig := cfg.Sorters[sorterID-1]
+
+	// Mostrar salidas disponibles
+	fmt.Println("\n📦 Salidas disponibles:")
+	for _, salida := range sorterConfig.Salidas {
+		fmt.Printf("  %d. %s (PhysicalID: %d)\n", salida.ID, salida.Nombre, salida.PhysicalID)
+	}
+
+	// Seleccionar salida
+	fmt.Print("\nIngrese ID de la salida: ")
+	salidaInput, _ := reader.ReadString('\n')
+	salidaID, err := strconv.Atoi(strings.TrimSpace(salidaInput))
+	if err != nil {
+		log.Printf("❌ ID de salida inválido")
+		return
+	}
+
+	// Buscar la salida
+	var bloqueoNodeID string
+	var salidaNombre string
+	for _, salida := range sorterConfig.Salidas {
+		if salida.ID == salidaID {
+			bloqueoNodeID = salida.PLC.BloqueoNodeID
+			salidaNombre = salida.Nombre
+			break
+		}
+	}
+
+	if bloqueoNodeID == "" {
+		log.Printf("❌ Salida %d no encontrada", salidaID)
+		return
+	}
+
+	// Seleccionar acción
+	fmt.Println("\n¿Qué acción desea realizar?")
+	fmt.Println("  1. Bloquear (true)")
+	fmt.Println("  2. Desbloquear (false)")
+	fmt.Print("Seleccione: ")
+	accionInput, _ := reader.ReadString('\n')
+	accion, err := strconv.Atoi(strings.TrimSpace(accionInput))
+	if err != nil || (accion != 1 && accion != 2) {
+		log.Printf("❌ Acción inválida")
+		return
+	}
+
+	bloquear := accion == 1
+
+	fmt.Println("\n📋 Resumen:")
+	fmt.Printf("   - Sorter: %s (ID: %d)\n", sorterConfig.Name, sorterID)
+	fmt.Printf("   - Salida: %s (ID: %d)\n", salidaNombre, salidaID)
+	fmt.Printf("   - Nodo BLOQUEO: %s\n", bloqueoNodeID)
+	fmt.Printf("   - Acción: %v\n", bloquear)
+	fmt.Println(strings.Repeat("─", 50))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	log.Printf("🔄 Escribiendo %v en nodo BLOQUEO...", bloquear)
+	err = plcManager.WriteNodeTyped(ctx, sorterID, bloqueoNodeID, bloquear, "bool")
+	if err != nil {
+		log.Printf("❌ Error escribiendo: %v", err)
+		return
+	}
+
+	fmt.Println(strings.Repeat("═", 50))
+	if bloquear {
+		fmt.Printf("✅ Salida '%s' BLOQUEADA exitosamente\n", salidaNombre)
+	} else {
+		fmt.Printf("✅ Salida '%s' DESBLOQUEADA exitosamente\n", salidaNombre)
+	}
+	fmt.Println(strings.Repeat("═", 50))
+}
+
+// handleSenalSalida llama al método del PLC para asignar una salida
+func handleSenalSalida(plcManager *plc.Manager, reader *bufio.Reader, cfg *config.Config) {
+	fmt.Println("\n" + strings.Repeat("═", 50))
+	fmt.Println("   ENVIAR SEÑAL A SALIDA (MÉTODO PLC)")
+	fmt.Println(strings.Repeat("─", 50))
+
+	// Seleccionar sorter
+	fmt.Print("Ingrese ID del Sorter (1, 2, etc.): ")
+	sorterInput, _ := reader.ReadString('\n')
+	sorterID, err := strconv.Atoi(strings.TrimSpace(sorterInput))
+	if err != nil || sorterID < 1 || sorterID > len(cfg.Sorters) {
+		log.Printf("❌ ID de sorter inválido")
+		return
+	}
+
+	sorterConfig := cfg.Sorters[sorterID-1]
+
+	// Mostrar salidas disponibles
+	fmt.Println("\n📦 Salidas disponibles:")
+	for _, salida := range sorterConfig.Salidas {
+		fmt.Printf("  %d. %s (PhysicalID: %d)\n", salida.ID, salida.Nombre, salida.PhysicalID)
+	}
+
+	// Seleccionar salida
+	fmt.Print("\nIngrese ID de la salida: ")
+	salidaInput, _ := reader.ReadString('\n')
+	salidaID, err := strconv.Atoi(strings.TrimSpace(salidaInput))
+	if err != nil {
+		log.Printf("❌ ID de salida inválido")
+		return
+	}
+
+	// Buscar la salida
+	var physicalID int16
+	var salidaNombre string
+	for _, salida := range sorterConfig.Salidas {
+		if salida.ID == salidaID {
+			physicalID = int16(salida.PhysicalID)
+			salidaNombre = salida.Nombre
+			break
+		}
+	}
+
+	if salidaNombre == "" {
+		log.Printf("❌ Salida %d no encontrada", salidaID)
+		return
+	}
+
+	fmt.Println("\n📋 Resumen:")
+	fmt.Printf("   - Sorter: %s (ID: %d)\n", sorterConfig.Name, sorterID)
+	fmt.Printf("   - Salida: %s (ID: %d)\n", salidaNombre, salidaID)
+	fmt.Printf("   - PhysicalID: %d\n", physicalID)
+	fmt.Printf("   - Método: %s\n", sorterConfig.PLC.MethodID)
+	fmt.Println(strings.Repeat("─", 50))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Llamar al método con el PhysicalID
+	variant := ua.MustVariant(physicalID)
+	inputArgs := []*ua.Variant{variant}
+
+	log.Printf("🚀 Llamando método PLC con PhysicalID %d...", physicalID)
+	outputValues, err := plcManager.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
+	if err != nil {
+		log.Printf("❌ Error al llamar el método: %v", err)
+		return
+	}
+
+	fmt.Println(strings.Repeat("═", 50))
+	fmt.Printf("✅ Señal enviada exitosamente a salida '%s'\n", salidaNombre)
+	if len(outputValues) > 0 {
+		fmt.Printf("📤 Respuesta del PLC: %v\n", outputValues)
+	}
+	fmt.Println(strings.Repeat("═", 50))
 }
