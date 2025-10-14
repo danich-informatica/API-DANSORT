@@ -74,6 +74,7 @@ func (s *Sorter) calcularFlowStatistics(windowDuration time.Duration) models.Flo
 	now := time.Now()
 	cutoff := now.Add(-windowDuration)
 
+	// Contar lecturas en la ventana
 	for _, record := range s.lecturaRecords {
 		if record.Timestamp.After(cutoff) {
 			skuCounts[record.SKU]++
@@ -81,9 +82,21 @@ func (s *Sorter) calcularFlowStatistics(windowDuration time.Duration) models.Flo
 		}
 	}
 
-	stats := make([]models.SKUFlowStat, 0, len(skuCounts))
+	// Crear mapa con todas las SKUs asignadas (inicializadas en 0)
+	allSKUs := make(map[string]int)
+	for _, skuAssignable := range s.assignedSKUs {
+		allSKUs[skuAssignable.SKU] = 0
+	}
 
+	// Actualizar con los conteos reales
 	for sku, count := range skuCounts {
+		allSKUs[sku] = count
+	}
+
+	// Generar estadísticas para TODAS las SKUs asignadas
+	stats := make([]models.SKUFlowStat, 0, len(allSKUs))
+
+	for sku, count := range allSKUs {
 		porcentaje := 0.0
 		if totalLecturas > 0 {
 			porcentajeRaw := float64(count) / float64(totalLecturas) * 100.0
@@ -111,8 +124,13 @@ func (s *Sorter) actualizarLastFlowStats(stats models.FlowStatistics) {
 	s.flowMutex.Lock()
 	defer s.flowMutex.Unlock()
 
-	s.lastFlowStats = make(map[string]float64, len(stats.Stats))
+	// Inicializar todas las SKUs asignadas en 0
+	s.lastFlowStats = make(map[string]float64)
+	for _, skuAssignable := range s.assignedSKUs {
+		s.lastFlowStats[skuAssignable.SKU] = 0.0
+	}
 
+	// Actualizar con los porcentajes reales
 	for _, stat := range stats.Stats {
 		s.lastFlowStats[stat.SKU] = stat.Porcentaje
 	}

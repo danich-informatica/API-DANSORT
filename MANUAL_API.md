@@ -646,6 +646,11 @@ Emitido cada **5 segundos** con estadísticas agregadas de flujo.
       "sku": "L-V022-CEMGKAM5",
       "lecturas": 15,
       "porcentaje": 33
+    },
+    {
+      "sku": "M-V024-CEMDSAM4",
+      "lecturas": 0,
+      "porcentaje": 0
     }
   ]
 }
@@ -657,12 +662,14 @@ Emitido cada **5 segundos** con estadísticas agregadas de flujo.
 - Solo considera lecturas dentro de la ventana
 - Porcentajes redondeados a entero
 - Se recalcula cada 5 segundos
+- **✅ INCLUYE TODAS las SKUs asignadas**, incluso las que tienen 0 lecturas en la ventana (porcentaje: 0)
 
 **Casos de Uso**:
 
 - Gráficos de barras/torta de distribución
 - Monitoreo de balance de línea
-- Detección de desequilibrios
+- Detección de desequilibrios (SKUs sin flujo)
+- Visualización de SKUs inactivas
 - KPIs en tiempo real
 
 ---
