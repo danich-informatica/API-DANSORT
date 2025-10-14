@@ -47,38 +47,35 @@ func NewHTTPFrontend(addr string) *HTTPFrontend {
 
 	// Manejador personalizado para rutas 404
 	router.NoRoute(func(c *gin.Context) {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":   "Ruta no encontrada",
-			"message": "🤔 La ruta que buscas no existe en este servidor",
-			"path":    c.Request.URL.Path,
-			"method":  c.Request.Method,
-			"hint":    "Revisa la documentación en /docs o contacta al equipo de desarrollo",
-			"available_endpoints": gin.H{
-				"frontend": []string{
-					"GET /visualizer",
-					"GET /simulator",
-				},
-				"sku_management": []string{
-					"GET /sku/assigned/:sorter_id",
-					"GET /sku/assignables/:sorter_id",
-				},
-				"assignments": []string{
-					"POST /assignment",
-					"DELETE /assignment/:sealer_id/:sku_id",
-					"DELETE /assignment/:sealer_id",
-				},
-				"websocket": []string{
-					"GET /ws/:room",
-					"GET /ws/stats",
-				},
-				"legacy_api": []string{
-					"GET /Mesa/Estado",
-					"POST /Mesa",
-					"POST /Mesa/Vaciar",
+		RespondWithError(c, http.StatusNotFound, ErrCodeNotFound,
+			"🤔 La ruta que buscas no existe en este servidor",
+			gin.H{
+				"available_endpoints": gin.H{
+					"frontend": []string{
+						"GET /visualizer",
+						"GET /simulator",
+					},
+					"sku_management": []string{
+						"GET /sku/assigned/:sorter_id",
+						"GET /sku/assignables/:sorter_id",
+					},
+					"assignments": []string{
+						"POST /assignment",
+						"DELETE /assignment/:sealer_id/:sku_id",
+						"DELETE /assignment/:sealer_id",
+					},
+					"websocket": []string{
+						"GET /ws/:room",
+						"GET /ws/stats",
+					},
+					"legacy_api": []string{
+						"GET /Mesa/Estado",
+						"POST /Mesa",
+						"POST /Mesa/Vaciar",
+					},
 				},
 			},
-			"timestamp": c.Request.Header.Get("Date"),
-		})
+			"Revisa la documentación en MANUAL_API.md o contacta al equipo de desarrollo")
 	})
 
 	// Crear e iniciar WebSocket Hub
@@ -134,9 +131,7 @@ func (h *HTTPFrontend) setupRoutes() {
 		sorterID := c.Param("sorter_id")
 		sorter, exists := h.sorters[sorterID]
 		if !exists {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": fmt.Sprintf("Sorter #%s no encontrado o no registrado", sorterID),
-			})
+			SorterNotFound(c, sorterID)
 			return
 		}
 		var result []map[string]interface{}
@@ -283,24 +278,20 @@ func (h *HTTPFrontend) setupRoutes() {
 		// Validar sorter_id
 		_, err := strconv.Atoi(sorterID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "sorter_id debe ser un número válido",
-			})
+			ValidationError(c, "sorter_id", "debe ser un número válido")
 			return
 		}
 
 		// Obtener sorter directamente desde el mapa
 		sorter, exists := h.sorters[sorterID]
 		if !exists {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": fmt.Sprintf("Sorter #%s no encontrado o no registrado", sorterID),
-			})
+			SorterNotFound(c, sorterID)
 			return
 		}
 
 		// Obtener SKUs directamente del sorter (inmediato, sin bloqueo)
 		skus := sorter.GetCurrentSKUs()
-		c.JSON(http.StatusOK, skus)
+		Success(c, skus, "✅ SKUs obtenidas exitosamente")
 	})
 
 	// Endpoint POST /assignment
@@ -313,16 +304,19 @@ func (h *HTTPFrontend) setupRoutes() {
 		}
 
 		if err := c.ShouldBindJSON(&request); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Formato de body inválido. Se requiere: {sku_id: number, sealer_id: number}",
-			})
+			BadRequest(c, "Formato de body inválido",
+				gin.H{
+					"required_format": gin.H{
+						"sku_id":    "number (uint32)",
+						"sealer_id": "number (int)",
+					},
+					"error": err.Error(),
+				})
 			return
 		}
 
 		if request.SKUID == nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "sku_id es requerido",
-			})
+			ValidationError(c, "sku_id", "es requerido")
 			return
 		}
 
@@ -350,18 +344,15 @@ func (h *HTTPFrontend) setupRoutes() {
 		if targetSorter == nil {
 			// Si hubo error específico (ej: REJECT en automática), mostrarlo
 			if assignError != nil {
-				c.JSON(http.StatusUnprocessableEntity, gin.H{
-					"error":     assignError.Error(),
-					"sku_id":    skuID,
-					"sealer_id": request.SealerID,
-				})
+				UnprocessableEntity(c, assignError.Error(),
+					gin.H{
+						"sku_id":    skuID,
+						"sealer_id": request.SealerID,
+					})
 				return
 			}
 
-			c.JSON(http.StatusNotFound, gin.H{
-				"error":     fmt.Sprintf("No se encontró salida con ID %d en ningún sorter", request.SealerID),
-				"sealer_id": request.SealerID,
-			})
+			SealerNotFound(c, request.SealerID)
 			return
 		}
 
@@ -381,13 +372,17 @@ func (h *HTTPFrontend) setupRoutes() {
 			fmt.Printf("ℹ️  SKU REJECT asignada solo en memoria (no se persiste en BD)\n")
 		}
 
-		// 🔔 Notificar a clientes WebSocket
-		c.JSON(http.StatusOK, gin.H{
-			"message":   "SKU asignada exitosamente",
+		// 🔔 Respuesta exitosa
+		Created(c, gin.H{
 			"sku_id":    skuID,
 			"sealer_id": request.SealerID,
 			"sorter_id": targetSorter.GetID(),
-		})
+			"sku_details": gin.H{
+				"calibre":  calibre,
+				"variedad": variedad,
+				"embalaje": embalaje,
+			},
+		}, fmt.Sprintf("✅ SKU asignada exitosamente a salida #%d", request.SealerID))
 	})
 
 	// Endpoint DELETE /assignment/:sealer_id/:sku_id
