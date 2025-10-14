@@ -77,7 +77,10 @@ func interactiveMenu(manager *plc.Manager, cfg *config.Config) {
 		fmt.Println("  6. Llamar método OPC UA")
 		fmt.Println("  7. Ver estadísticas de cache")
 		fmt.Println("  8. Monitorear nodo en tiempo real (Suscripción)")
-		fmt.Println("  9. Salir")
+		fmt.Println("  9. Asignar salida a caja (Plan A/B)")
+		fmt.Println(" 10. Escribir NodeID en InputArguments")
+		fmt.Println(" 11. Descubrir estructura completa del PLC")
+		fmt.Println(" 12. Salir")
 		fmt.Println(strings.Repeat("═", 40))
 		fmt.Print("Seleccione una opción: ")
 
@@ -100,12 +103,18 @@ func interactiveMenu(manager *plc.Manager, cfg *config.Config) {
 		case 5:
 			handleBrowseNode(manager, reader)
 		case 6:
-			handleCallMethod(manager, reader)
+			handleCallMethod(manager, reader, cfg)
 		case 7:
 			handleCacheStats(manager)
 		case 8:
 			handleMonitorNode(manager, reader, nodes)
 		case 9:
+			handleAssignLaneToBox(manager, reader)
+		case 10:
+			handleWriteNodeIDToInput(manager, reader, cfg)
+		case 11:
+			handleDiscoverPLCStructure(manager, reader)
+		case 12:
 			return
 		default:
 			log.Println("⚠️ Opción no válida.")
@@ -739,7 +748,7 @@ func truncate(s string, maxLen int) string {
 }
 
 // handleCallMethod invoca un método OPC UA
-func handleCallMethod(plcManager *plc.Manager, reader *bufio.Reader) {
+func handleCallMethod(plcManager *plc.Manager, reader *bufio.Reader, cfg *config.Config) {
 	// Seleccionar sorter
 	fmt.Println("\n" + strings.Repeat("─", 50))
 	fmt.Println("      LLAMAR MÉTODO OPC UA - SELECCIONE SORTER")
@@ -764,142 +773,76 @@ func handleCallMethod(plcManager *plc.Manager, reader *bufio.Reader) {
 
 	sorterID := choice
 
-	// Para simplificar, usar los valores de configuración conocidos
-	var objectID, methodID string
-	if sorterID == 1 {
-		objectID = "ns=4;i=1"
-		methodID = "ns=4;i=21"
-		fmt.Println("\n📌 Usando método DB_OPC_S7000 del Sorter Principal")
-		fmt.Printf("   ObjectID: %s\n", objectID)
-		fmt.Printf("   MethodID: %s\n", methodID)
-	} else {
-		log.Println("❌ El Sorter Secundario no tiene métodos configurados")
+	// Obtener configuración del sorter desde config.yaml
+	if sorterID > len(cfg.Sorters) {
+		log.Printf("❌ Sorter %d no existe en config.yaml", sorterID)
 		return
 	}
 
-	// Primero, leer los InputArguments para mostrar qué espera el método
+	sorterConfig := cfg.Sorters[sorterID-1]
+	objectID := sorterConfig.PLC.ObjectID
+	methodID := sorterConfig.PLC.MethodID
+	inputNodeID := sorterConfig.PLC.InputNodeID
+	outputNodeID := sorterConfig.PLC.OutputNodeID
+
+	fmt.Printf("\n📌 Usando método desde config.yaml para %s\n", sorterConfig.Name)
+	fmt.Printf("   ObjectID: %s\n", objectID)
+	fmt.Printf("   MethodID: %s\n", methodID)
+	fmt.Printf("   InputNodeID: %s\n", inputNodeID)
+	fmt.Printf("   OutputNodeID: %s\n", outputNodeID)
+	fmt.Println("\n💡 Este método requiere 1 argumento:")
+	fmt.Println("   IN1: NodeId (entrada)")
+	fmt.Println("   OUT1: NodeId (salida)")
+
+	// Pedir el NodeId de entrada
+	fmt.Print("\nIngrese el NÚMERO de salida (1-12): ")
+	nodeIDInput, _ := reader.ReadString('\n')
+	nodeIDStr := strings.TrimSpace(nodeIDInput)
+
+	if nodeIDStr == "" {
+		log.Println("❌ Número no puede estar vacío")
+		return
+	}
+
+	// Parsear como número, no como NodeID
+	salidaNum, err := strconv.ParseInt(nodeIDStr, 10, 16)
+	if err != nil {
+		log.Printf("❌ Error parseando número '%s': %v", nodeIDStr, err)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	log.Printf("🔄 Leyendo InputArguments del método...")
-	inputArgsNodeID := "ns=4;i=22"
-	nodeInfo, err := plcManager.ReadNode(ctx, sorterID, inputArgsNodeID)
+	// CRÍTICO: El método espera un INT16 (no int8, no NodeID)
+	// IN1 debe ser un número de salida (1-12), tipo int16
+	variantInt16 := ua.MustVariant(int16(salidaNum))
+
+	inputArgs := []*ua.Variant{variantInt16}
+
+	// Llamar el método CON el número como argumento
+	fmt.Printf("\n🚀 Llamando método con número %d como IN1...\n", salidaNum)
+
+	outputVariants, err := plcManager.CallMethod(ctx, sorterID, objectID, methodID, inputArgs)
 	if err != nil {
-		log.Printf("❌ Error al leer InputArguments: %v", err)
+		log.Printf("❌ Error al llamar el método: %v", err)
 		return
 	}
 
-	inputArgsArray, ok := nodeInfo.Value.([]*ua.ExtensionObject)
-	if !ok || len(inputArgsArray) == 0 {
-		log.Printf("❌ No se pudo obtener la definición de argumentos")
-		return
-	}
-
-	fmt.Println("\n📋 Argumentos de entrada requeridos:")
-	for i, extObj := range inputArgsArray {
-		if arg, ok := extObj.Value.(*ua.Argument); ok {
-			fmt.Printf("  %d. %s (Tipo: %s, ValueRank: %d)\n", i+1, arg.Name, arg.DataType.String(), arg.ValueRank)
-		}
-	}
-
-	// Solicitar valores para cada argumento
-	fmt.Println("\n📝 Ingrese los valores para los argumentos:")
-	var inputVariants []*ua.Variant
-
-	for i, extObj := range inputArgsArray {
-		arg, ok := extObj.Value.(*ua.Argument)
-		if !ok {
-			log.Printf("❌ Error: argumento %d no es válido", i+1)
-			return
-		}
-
-		fmt.Printf("\n  Argumento %d: %s\n", i+1, arg.Name)
-		fmt.Printf("  Tipo esperado: %s\n", arg.DataType.String())
-		fmt.Print("  Valor: ")
-
-		valueStr, _ := reader.ReadString('\n')
-		valueStr = strings.TrimSpace(valueStr)
-
-		// Intentar convertir según el tipo
-		var variant *ua.Variant
-		dataTypeStr := arg.DataType.String()
-
-		switch {
-		case strings.Contains(dataTypeStr, "i=4"): // Int32 (estándar OPC UA)
-			val, err := strconv.ParseInt(valueStr, 10, 32)
-			if err != nil {
-				log.Printf("❌ Valor inválido para Int32: %v", err)
-				return
-			}
-			variant, _ = ua.NewVariant(int32(val))
-
-		case strings.Contains(dataTypeStr, "i=5"): // UInt32 (estándar OPC UA)
-			val, err := strconv.ParseUint(valueStr, 10, 32)
-			if err != nil {
-				log.Printf("❌ Valor inválido para UInt32: %v", err)
-				return
-			}
-			variant, _ = ua.NewVariant(uint32(val))
-
-		case strings.Contains(dataTypeStr, "i=6"): // Int64 (estándar OPC UA)
-			val, err := strconv.ParseInt(valueStr, 10, 64)
-			if err != nil {
-				log.Printf("❌ Valor inválido para Int64: %v", err)
-				return
-			}
-			variant, _ = ua.NewVariant(int64(val))
-
-		case strings.Contains(dataTypeStr, "i=1"): // Boolean
-			val, err := strconv.ParseBool(valueStr)
-			if err != nil {
-				log.Printf("❌ Valor inválido para Boolean: %v", err)
-				return
-			}
-			variant, _ = ua.NewVariant(val)
-
-		case strings.Contains(dataTypeStr, "i=12"): // String
-			variant, _ = ua.NewVariant(valueStr)
-
-		default:
-			// Por defecto, intentar como string
-			log.Printf("⚠️ Tipo desconocido %s, usando como string", dataTypeStr)
-			variant, _ = ua.NewVariant(valueStr)
-		}
-
-		inputVariants = append(inputVariants, variant)
-	}
-
-	// Confirmar antes de ejecutar
-	fmt.Println("\n⚠️  ¿Está seguro de que desea ejecutar este método? (s/n): ")
-	confirm, _ := reader.ReadString('\n')
-	confirm = strings.TrimSpace(strings.ToLower(confirm))
-
-	if confirm != "s" && confirm != "y" {
-		log.Println("❌ Operación cancelada")
-		return
-	}
-
-	// Ejecutar el método
-	log.Printf("🚀 Llamando método %s...", methodID)
-
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel2()
-
-	outputValues, err := plcManager.CallMethod(ctx2, sorterID, objectID, methodID, inputVariants)
-	if err != nil {
-		log.Printf("❌ Error al llamar método: %v", err)
-		return
-	}
-
-	// Mostrar resultados
+	// Mostrar el resultado
 	fmt.Println("\n✅ Método ejecutado exitosamente")
-	if len(outputValues) > 0 {
-		fmt.Println("\n📤 Valores de salida:")
-		for i, outVal := range outputValues {
-			fmt.Printf("  %d. %v (tipo: %T)\n", i+1, outVal, outVal)
+	fmt.Printf("📤 Número de valores devueltos: %d\n", len(outputVariants))
+
+	if len(outputVariants) > 0 {
+		fmt.Println("\n� Valores devueltos:")
+		for i, variant := range outputVariants {
+			fmt.Printf("  %d. Tipo: %T, Valor: %v\n", i+1, variant, variant)
+
+			// Si es un NodeId, mostrarlo formateado
+			if nodeID, ok := variant.(*ua.NodeID); ok {
+				fmt.Printf("     NodeId formateado: %s\n", nodeID.String())
+			}
 		}
-	} else {
-		fmt.Println("  (Sin valores de retorno)")
 	}
 }
 
@@ -1001,5 +944,219 @@ func handleMonitorNode(plcManager *plc.Manager, reader *bufio.Reader, nodes []Me
 				return
 			}
 		}
+	}
+}
+
+// handleAssignLaneToBox gestiona la asignación de una caja a una salida usando el patrón Plan A/Plan B
+func handleAssignLaneToBox(plcManager *plc.Manager, reader *bufio.Reader) {
+	fmt.Println("\n" + strings.Repeat("═", 50))
+	fmt.Println("   ASIGNAR SALIDA A CAJA (MÉTODO + FALLBACK)")
+	fmt.Println(strings.Repeat("─", 50))
+
+	// Pedir Sorter ID
+	fmt.Print("Ingrese ID del Sorter (1, 2, etc.): ")
+	sorterInput, _ := reader.ReadString('\n')
+	sorterID, err := strconv.Atoi(strings.TrimSpace(sorterInput))
+	if err != nil {
+		log.Printf("❌ ID de sorter inválido: %v", err)
+		return
+	}
+
+	// Pedir número de salida
+	fmt.Print("Ingrese número de salida (1-12): ")
+	laneInput, _ := reader.ReadString('\n')
+	laneNumber, err := strconv.Atoi(strings.TrimSpace(laneInput))
+	if err != nil {
+		log.Printf("❌ Número de salida inválido: %v", err)
+		return
+	}
+
+	fmt.Println("\n🚀 Ejecutando AssignLaneToBox...")
+	fmt.Printf("   - Sorter: %d\n", sorterID)
+	fmt.Printf("   - Salida: %d\n", laneNumber)
+	fmt.Println("\n📋 Estrategia:")
+	fmt.Println("   1. Plan A: Intentar método OPC UA con NodeID")
+	fmt.Println("   2. Plan B: Escribir directamente en BLOQUEO si falla")
+	fmt.Println(strings.Repeat("─", 50))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = plcManager.AssignLaneToBox(ctx, sorterID, int16(laneNumber))
+	if err != nil {
+		log.Printf("❌ Error en AssignLaneToBox: %v", err)
+		return
+	}
+
+	fmt.Println(strings.Repeat("═", 50))
+	fmt.Println("✅ Operación completada exitosamente")
+	fmt.Println(strings.Repeat("═", 50))
+}
+
+// handleWriteNodeIDToInput permite escribir un NodeID directamente en InputArguments
+func handleWriteNodeIDToInput(plcManager *plc.Manager, reader *bufio.Reader, cfg *config.Config) {
+	fmt.Println("\n" + strings.Repeat("═", 50))
+	fmt.Println("   ESCRIBIR NODEID EN INPUTARGUMENTS")
+	fmt.Println(strings.Repeat("─", 50))
+
+	// Pedir Sorter ID
+	fmt.Print("Ingrese ID del Sorter (1, 2, etc.): ")
+	sorterInput, _ := reader.ReadString('\n')
+	sorterID, err := strconv.Atoi(strings.TrimSpace(sorterInput))
+	if err != nil {
+		log.Printf("❌ ID de sorter inválido: %v", err)
+		return
+	}
+
+	// Validar que el sorter existe en config
+	if sorterID > len(cfg.Sorters) || sorterID < 1 {
+		log.Printf("❌ Sorter %d no existe en config.yaml", sorterID)
+		return
+	}
+
+	// Obtener configuración del sorter desde config.yaml
+	sorterConfig := cfg.Sorters[sorterID-1]
+	inputNodeID := sorterConfig.PLC.InputNodeID
+
+	// Pedir el NodeID a escribir
+	fmt.Print("Ingrese el NodeID a escribir (ej: ns=4;i=47): ")
+	nodeIDInput, _ := reader.ReadString('\n')
+	nodeIDStr := strings.TrimSpace(nodeIDInput)
+
+	if nodeIDStr == "" {
+		log.Println("❌ NodeID no puede estar vacío")
+		return
+	}
+
+	fmt.Println("\n📋 Resumen:")
+	fmt.Printf("   - Sorter: %s (ID: %d)\n", sorterConfig.Name, sorterID)
+	fmt.Printf("   - NodeID a escribir: %s\n", nodeIDStr)
+	fmt.Printf("   - Nodo destino: InputArguments (%s) [desde config.yaml]\n", inputNodeID)
+	fmt.Println(strings.Repeat("─", 50))
+
+	// Parsear el NodeID
+	parsedNodeID, err := ua.ParseNodeID(nodeIDStr)
+	if err != nil {
+		log.Printf("❌ Error parseando NodeID '%s': %v", nodeIDStr, err)
+		return
+	}
+
+	// Crear array con el NodeID
+	nodeIDArray := []*ua.NodeID{parsedNodeID}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Escribir en InputArguments usando valor del config.yaml
+	log.Printf("🔄 Escribiendo NodeID en %s (desde config.yaml)...", inputNodeID)
+
+	err = plcManager.WriteNodeTyped(ctx, sorterID, inputNodeID, nodeIDArray, "nodeid_array")
+	if err != nil {
+		log.Printf("❌ Error escribiendo NodeID: %v", err)
+		return
+	}
+
+	fmt.Println(strings.Repeat("═", 50))
+	fmt.Printf("✅ NodeID '%s' escrito exitosamente en InputArguments\n", nodeIDStr)
+	fmt.Println(strings.Repeat("═", 50))
+}
+
+// handleDiscoverPLCStructure descubre recursivamente todos los nodos del PLC
+func handleDiscoverPLCStructure(plcManager *plc.Manager, reader *bufio.Reader) {
+	fmt.Println("\n" + strings.Repeat("═", 60))
+	fmt.Println("   DESCUBRIR ESTRUCTURA COMPLETA DEL PLC")
+	fmt.Println(strings.Repeat("─", 60))
+
+	// Pedir Sorter ID
+	fmt.Print("Ingrese ID del Sorter (1, 2, etc.): ")
+	sorterInput, _ := reader.ReadString('\n')
+	sorterID, err := strconv.Atoi(strings.TrimSpace(sorterInput))
+	if err != nil {
+		log.Printf("❌ ID de sorter inválido: %v", err)
+		return
+	}
+
+	// Pedir NodeID raíz (por defecto Objects folder)
+	fmt.Print("NodeID raíz para explorar (Enter para 'ns=4;i=1'): ")
+	rootInput, _ := reader.ReadString('\n')
+	rootNodeID := strings.TrimSpace(rootInput)
+	if rootNodeID == "" {
+		rootNodeID = "ns=4;i=1" // Default: Objects folder en namespace 4
+	}
+
+	fmt.Println("\n🔍 Explorando desde:", rootNodeID)
+	fmt.Println(strings.Repeat("─", 60))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Browse recursivo
+	discovered := make(map[string]bool) // Para evitar ciclos
+	discoverRecursive(ctx, plcManager, sorterID, rootNodeID, 0, discovered)
+
+	fmt.Println(strings.Repeat("═", 60))
+	fmt.Printf("✅ Exploración completa. Total de nodos: %d\n", len(discovered))
+	fmt.Println(strings.Repeat("═", 60))
+}
+
+// discoverRecursive hace un browse recursivo mostrando la estructura
+func discoverRecursive(ctx context.Context, plcManager *plc.Manager, sorterID int, nodeID string, depth int, visited map[string]bool) {
+	// Evitar ciclos
+	if visited[nodeID] {
+		return
+	}
+	visited[nodeID] = true
+
+	// Limitar profundidad para evitar explorar demasiado
+	if depth > 5 {
+		return
+	}
+
+	// Indent basado en profundidad
+	indent := strings.Repeat("  ", depth)
+
+	// Browse este nodo
+	results, err := plcManager.BrowseNode(ctx, sorterID, nodeID)
+	if err != nil {
+		fmt.Printf("%s❌ Error browsing %s: %v\n", indent, nodeID, err)
+		return
+	}
+
+	// Mostrar nodos encontrados
+	for _, result := range results {
+		nodeClass := nodeClassToString(result.NodeClass)
+		icon := getNodeIcon(result.NodeClass)
+
+		fmt.Printf("%s%s %s [%s] - %s\n",
+			indent,
+			icon,
+			result.DisplayName,
+			result.NodeID,
+			nodeClass)
+
+		// Solo recursión en Objects y carpetas (no en variables simples)
+		if result.NodeClass == ua.NodeClassObject || result.NodeClass == ua.NodeClassVariable {
+			// Limitar variables para no explorar valores simples
+			if result.NodeClass == ua.NodeClassVariable && depth >= 3 {
+				continue
+			}
+			discoverRecursive(ctx, plcManager, sorterID, result.NodeID, depth+1, visited)
+		}
+	}
+}
+
+// getNodeIcon retorna un emoji según el tipo de nodo
+func getNodeIcon(nc ua.NodeClass) string {
+	switch nc {
+	case ua.NodeClassVariable:
+		return "📊"
+	case ua.NodeClassMethod:
+		return "⚙️ "
+	case ua.NodeClassObject:
+		return "📁"
+	case ua.NodeClassObjectType:
+		return "📋"
+	default:
+		return "❓"
 	}
 }

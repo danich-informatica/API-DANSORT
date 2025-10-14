@@ -143,6 +143,10 @@ func ConvertValueForWrite(value interface{}, dataType string) (interface{}, erro
 	case "string":
 		return fmt.Sprintf("%v", value), nil
 
+	case "nodeid_array":
+		// Para arrays de NodeIDs - devolver tal cual
+		return value, nil
+
 	case "variant":
 		// Para valores que ya son del tipo correcto
 		return value, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gopcua/opcua"
@@ -27,7 +28,7 @@ func NewClient(config PLCConfig) *Client {
 	}
 }
 
-// Connect establece la conexión con el servidor OPC UA
+// Connect establece la conexión con el servidor OPC UA y activa la sesión
 func (c *Client) Connect(ctx context.Context) error {
 	opts := []opcua.Option{
 		opcua.SecurityMode(ua.MessageSecurityModeNone),
@@ -45,6 +46,20 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	c.client = client
+
+	// Activar la sesión haciendo una lectura dummy del nodo Server (garantiza sesión activa)
+	// Esto evita el error "StatusBadSessionNotActivated" en operaciones posteriores
+	dummyNodeID, _ := ua.ParseNodeID("i=2253") // Server.ServerStatus node
+	req := &ua.ReadRequest{
+		MaxAge:             2000,
+		NodesToRead:        []*ua.ReadValueID{{NodeID: dummyNodeID}},
+		TimestampsToReturn: ua.TimestampsToReturnBoth,
+	}
+	if _, err := client.Read(ctx, req); err != nil {
+		log.Printf("⚠️ Advertencia: no se pudo activar sesión con lectura dummy: %v", err)
+		// No retornamos error porque la conexión básica funciona
+	}
+
 	log.Printf("✅ Conexión establecida a %s", c.endpoint)
 	return nil
 }
@@ -88,7 +103,20 @@ func (c *Client) ReadNode(ctx context.Context, nodeID string) (*NodeInfo, error)
 	// Ejecutar lectura
 	resp, err := c.client.Read(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("error al leer nodo %s: %w", nodeID, err)
+		// Detectar error de sesión inválida y reconectar
+		if isSessionError(err) {
+			log.Printf("⚠️ Sesión inválida detectada, reconectando...")
+			if reconnectErr := c.reconnect(ctx); reconnectErr != nil {
+				return nil, fmt.Errorf("error al reconectar: %w", reconnectErr)
+			}
+			// Reintentar después de reconectar
+			resp, err = c.client.Read(ctx, req)
+			if err != nil {
+				return nil, fmt.Errorf("error al leer nodo %s después de reconexión: %w", nodeID, err)
+			}
+		} else {
+			return nil, fmt.Errorf("error al leer nodo %s: %w", nodeID, err)
+		}
 	}
 
 	// Validar respuesta
@@ -116,6 +144,66 @@ func (c *Client) ReadNode(ctx context.Context, nodeID string) (*NodeInfo, error)
 	log.Printf("💾 Cache MISS - guardado %s", nodeID)
 
 	return nodeInfo, nil
+}
+
+// isSessionError detecta si un error es por sesión inválida
+func isSessionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return contains(errStr, "StatusBadSessionIDInvalid") ||
+		contains(errStr, "StatusBadSessionClosed") ||
+		contains(errStr, "StatusBadSessionNotActivated")
+}
+
+// contains verifica si una cadena contiene un substring usando strings.Contains
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
+}
+
+// reconnect cierra la conexión actual y establece una nueva
+func (c *Client) reconnect(ctx context.Context) error {
+	log.Printf("🔄 Reconectando a %s...", c.endpoint)
+
+	// Cerrar conexión anterior si existe
+	if c.client != nil {
+		_ = c.client.Close(ctx)
+	}
+
+	// Crear nueva conexión
+	opts := []opcua.Option{
+		opcua.SecurityMode(ua.MessageSecurityModeNone),
+		opcua.SecurityPolicy(ua.SecurityPolicyURINone),
+		opcua.AutoReconnect(true),
+	}
+
+	client, err := opcua.NewClient(c.endpoint, opts...)
+	if err != nil {
+		return fmt.Errorf("error creando cliente: %w", err)
+	}
+
+	if err := client.Connect(ctx); err != nil {
+		return fmt.Errorf("error al conectar: %w", err)
+	}
+
+	c.client = client
+
+	// Activar la sesión con lectura dummy (igual que en Connect())
+	dummyNodeID, _ := ua.ParseNodeID("i=2253")
+	req := &ua.ReadRequest{
+		MaxAge:             2000,
+		NodesToRead:        []*ua.ReadValueID{{NodeID: dummyNodeID}},
+		TimestampsToReturn: ua.TimestampsToReturnBoth,
+	}
+	if _, err := client.Read(ctx, req); err != nil {
+		log.Printf("⚠️ Advertencia en reconexión: no se pudo activar sesión: %v", err)
+	}
+
+	c.cache.Clear() // Invalidar cache después de reconexión
+
+	log.Printf("✅ Reconexión exitosa a %s", c.endpoint)
+	return nil
 }
 
 // ReadNodes lee el valor de múltiples nodos en una sola petición
@@ -208,7 +296,20 @@ func (c *Client) WriteNode(ctx context.Context, nodeID string, value interface{}
 
 	resp, err := c.client.Write(ctx, req)
 	if err != nil {
-		return fmt.Errorf("error al escribir en el nodo %s: %w", nodeID, err)
+		// Detectar error de sesión y reconectar
+		if isSessionError(err) {
+			log.Printf("⚠️ Sesión inválida detectada en escritura, reconectando...")
+			if reconnectErr := c.reconnect(ctx); reconnectErr != nil {
+				return fmt.Errorf("error al reconectar: %w", reconnectErr)
+			}
+			// Reintentar después de reconectar
+			resp, err = c.client.Write(ctx, req)
+			if err != nil {
+				return fmt.Errorf("error al escribir en el nodo %s después de reconexión: %w", nodeID, err)
+			}
+		} else {
+			return fmt.Errorf("error al escribir en el nodo %s: %w", nodeID, err)
+		}
 	}
 
 	if len(resp.Results) == 0 {
