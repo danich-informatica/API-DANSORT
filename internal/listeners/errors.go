@@ -51,16 +51,16 @@ const (
 	ErrCodeGatewayTimeout = "GATEWAY_TIMEOUT"
 
 	// Business Logic Errors
-	ErrCodeSorterNotFound      = "SORTER_NOT_FOUND"
-	ErrCodeSealerNotFound      = "SEALER_NOT_FOUND"
-	ErrCodeSKUNotFound         = "SKU_NOT_FOUND"
-	ErrCodeSKUAlreadyAssigned  = "SKU_ALREADY_ASSIGNED"
-	ErrCodeInvalidSKU          = "INVALID_SKU"
-	ErrCodeSealerBlocked       = "SEALER_BLOCKED"
-	ErrCodeSealerOffline       = "SEALER_OFFLINE"
-	ErrCodeRejectNotAllowed    = "REJECT_SKU_NOT_ALLOWED"
-	ErrCodeDatabaseError       = "DATABASE_ERROR"
-	ErrCodeValidationError     = "VALIDATION_ERROR"
+	ErrCodeSorterNotFound     = "SORTER_NOT_FOUND"
+	ErrCodeSealerNotFound     = "SEALER_NOT_FOUND"
+	ErrCodeSKUNotFound        = "SKU_NOT_FOUND"
+	ErrCodeSKUAlreadyAssigned = "SKU_ALREADY_ASSIGNED"
+	ErrCodeInvalidSKU         = "INVALID_SKU"
+	ErrCodeSealerBlocked      = "SEALER_BLOCKED"
+	ErrCodeSealerOffline      = "SEALER_OFFLINE"
+	ErrCodeRejectNotAllowed   = "REJECT_SKU_NOT_ALLOWED"
+	ErrCodeDatabaseError      = "DATABASE_ERROR"
+	ErrCodeValidationError    = "VALIDATION_ERROR"
 )
 
 // RespondWithError envía una respuesta de error estandarizada
