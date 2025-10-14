@@ -638,16 +638,19 @@ Emitido cada **5 segundos** con estadísticas agregadas de flujo.
   "window_seconds": 20,
   "stats": [
     {
+      "id": 12345,
       "sku": "XL-V018-CECDCAM5",
       "lecturas": 30,
       "porcentaje": 67
     },
     {
+      "id": 12346,
       "sku": "L-V022-CEMGKAM5",
       "lecturas": 15,
       "porcentaje": 33
     },
     {
+      "id": 12347,
       "sku": "M-V024-CEMDSAM4",
       "lecturas": 0,
       "porcentaje": 0

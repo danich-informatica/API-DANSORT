@@ -83,9 +83,12 @@ func (s *Sorter) calcularFlowStatistics(windowDuration time.Duration) models.Flo
 	}
 
 	// Crear mapa con todas las SKUs asignadas (inicializadas en 0)
+	// También crear mapa de SKU -> ID para incluir el ID en las stats
 	allSKUs := make(map[string]int)
+	skuIDMap := make(map[string]int)
 	for _, skuAssignable := range s.assignedSKUs {
 		allSKUs[skuAssignable.SKU] = 0
+		skuIDMap[skuAssignable.SKU] = skuAssignable.ID
 	}
 
 	// Actualizar con los conteos reales
@@ -104,6 +107,7 @@ func (s *Sorter) calcularFlowStatistics(windowDuration time.Duration) models.Flo
 		}
 
 		stats = append(stats, models.SKUFlowStat{
+			ID:         skuIDMap[sku],
 			SKU:        sku,
 			Lecturas:   count,
 			Porcentaje: porcentaje,

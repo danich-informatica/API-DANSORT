@@ -4,6 +4,7 @@ import "time"
 
 // SKUFlowStat representa las estadísticas de flujo de un SKU específico
 type SKUFlowStat struct {
+	ID         int     `json:"id"`
 	SKU        string  `json:"sku"`
 	Lecturas   int     `json:"lecturas"`
 	Porcentaje float64 `json:"porcentaje"`
