@@ -1,1 +1,0 @@
-import{u as i}from"./Cp5xmdNl.js";const n=()=>{const e=i();return{getRejectionsByStationId:async t=>await e.getRejectionsByStationId(t),getRejectionStatistics:async t=>await e.getRejectionStatistics(t)}};export{n as u};

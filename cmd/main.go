@@ -398,6 +398,17 @@ func main() {
 	log.Println("   WS   /ws/:room (ej: ws://host/ws/assignment_1)")
 	log.Println("   GET  /ws/stats (estadísticas de conexiones)")
 
+	// 🌐 Iniciar servidor de frontend estático en puerto 3001
+	go func() {
+		frontendAddr := "0.0.0.0:3001"
+		log.Printf("🎨 Iniciando servidor de frontend en http://%s", frontendAddr)
+		log.Println("   📂 Sirviendo archivos desde: ./dist")
+
+		if err := listeners.StartStaticFileServer(frontendAddr, "./dist"); err != nil {
+			log.Printf("⚠️  Error al iniciar servidor de frontend: %v", err)
+		}
+	}()
+
 	// Iniciar servidor HTTP con las rutas configuradas
 	if err := httpService.Start(); err != nil {
 		log.Fatalf("❌ Error al iniciar servidor HTTP: %v", err)

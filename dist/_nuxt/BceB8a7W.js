@@ -1,1 +1,0 @@
-import{e as t,c as s,a as r,o as n}from"./C5fLaVeV.js";const a=["width"],l=t({__name:"ArrowDown",props:{size:{}},setup(p){return(o,e)=>(n(),s("svg",{xmlns:"http://www.w3.org/2000/svg",width:o.size,viewBox:"0 0 24 24"},e[0]||(e[0]=[r("path",{fill:"currentColor",d:"M9 4h6v8h4.84L12 19.84L4.16 12H9z"},null,-1)]),8,a))}});export{l as default};

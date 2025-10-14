@@ -49,6 +49,11 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 
 // RemoveSKUFromSalida elimina una SKU específica de una salida
 func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, err error) {
+	// ✅ PROTECCIÓN: NO permitir eliminar SKU REJECT (ID=0)
+	if skuID == 0 {
+		return "", "", "", fmt.Errorf("no se puede eliminar SKU REJECT (ID=0), está protegida")
+	}
+
 	var targetSalida *shared.Salida
 	var salidaIndex int
 
@@ -100,6 +105,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 }
 
 // RemoveAllSKUsFromSalida elimina TODAS las SKUs de una salida específica
+// y re-inserta automáticamente la SKU REJECT
 func (s *Sorter) RemoveAllSKUsFromSalida(salidaID int) ([]models.SKU, error) {
 	var targetSalida *shared.Salida
 	var salidaIndex int
@@ -116,35 +122,35 @@ func (s *Sorter) RemoveAllSKUsFromSalida(salidaID int) ([]models.SKU, error) {
 		return nil, fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
 	}
 
-	// Separar SKUs removibles de REJECT (ID=0)
-	var removedSKUs []models.SKU
-	var keepSKUs []models.SKU
+	// Guardar todas las SKUs actuales antes de borrar
+	removedSKUs := make([]models.SKU, len(targetSalida.SKUs_Actuales))
+	copy(removedSKUs, targetSalida.SKUs_Actuales)
 
-	for _, sku := range targetSalida.SKUs_Actuales {
+	// Marcar todas como no asignadas
+	for _, sku := range removedSKUs {
 		skuID := uint32(sku.GetNumericID())
-
-		// ✅ PROTECCIÓN: NO eliminar SKU REJECT (ID=0)
-		if skuID == 0 {
-			keepSKUs = append(keepSKUs, sku)
-			log.Printf("🛡️  Sorter #%d: SKU REJECT (ID=0) protegida, NO se eliminará de salida %d", s.ID, salidaID)
-			continue
-		}
-
-		// Marcar SKU como no asignada
 		for i := range s.assignedSKUs {
 			if uint32(s.assignedSKUs[i].ID) == skuID {
 				s.assignedSKUs[i].IsAssigned = false
 			}
 		}
-
-		removedSKUs = append(removedSKUs, sku)
 	}
 
-	// Mantener solo las SKUs protegidas (REJECT)
-	s.Salidas[salidaIndex].SKUs_Actuales = keepSKUs
+	// 🧹 BORRAR TODO
+	s.Salidas[salidaIndex].SKUs_Actuales = []models.SKU{}
 
-	log.Printf("🧹 Sorter #%d: Eliminadas %d SKUs de salida '%s' (ID=%d), %d SKUs protegidas",
-		s.ID, len(removedSKUs), targetSalida.Salida_Sorter, salidaID, len(keepSKUs))
+	// ♻️ RE-INSERTAR SKU REJECT automáticamente
+	rejectSKU := models.SKU{
+		SKU:      "REJECT",
+		Calibre:  "REJECT",
+		Variedad: "REJECT",
+		Embalaje: "REJECT",
+	}
+	s.Salidas[salidaIndex].SKUs_Actuales = append(s.Salidas[salidaIndex].SKUs_Actuales, rejectSKU)
+
+	log.Printf("🧹 Sorter #%d: Eliminadas %d SKUs de salida '%s' (ID=%d)",
+		s.ID, len(removedSKUs), targetSalida.Salida_Sorter, salidaID)
+	log.Printf("♻️  Sorter #%d: SKU REJECT re-insertada automáticamente en salida %d", s.ID, salidaID)
 
 	s.UpdateSKUs(s.assignedSKUs)
 

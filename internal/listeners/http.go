@@ -527,46 +527,44 @@ func (h *HTTPFrontend) setupRoutes() {
 			return
 		}
 
-		// Eliminar de la base de datos
+		// 🧹 Borrar TODAS las SKUs de la DB (incluyendo REJECT)
 		var rowsDeleted int64
 		if h.postgresMgr != nil {
 			if dbMgr, ok := h.postgresMgr.(interface {
 				DeleteAllSalidaSKUs(ctx context.Context, salidaID int) (int64, error)
+				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error
 			}); ok {
 				ctx := c.Request.Context()
+
+				// 1. Borrar TODO
 				rowsDeleted, err = dbMgr.DeleteAllSalidaSKUs(ctx, sealerID)
 				if err != nil {
-					// Log el error pero la eliminación en memoria ya está hecha
-					fmt.Printf("⚠️  Error al eliminar asignaciones de DB: %v\n", err)
+					fmt.Printf("⚠️  Error al eliminar SKUs de DB: %v\n", err)
 					c.JSON(http.StatusInternalServerError, gin.H{
 						"warning": "SKUs eliminadas de memoria pero falló eliminación en base de datos",
 						"error":   err.Error(),
 					})
 					return
 				}
-			}
-		}
 
-		// Contar SKUs no REJECT (removidas)
-		nonRejectRemoved := 0
-		for _, sku := range removedSKUs {
-			if uint32(sku.GetNumericID()) != 0 {
-				nonRejectRemoved++
+				// 2. ♻️ Re-insertar REJECT automáticamente
+				err = dbMgr.InsertSalidaSKU(ctx, sealerID, "REJECT", "REJECT", "REJECT")
+				if err != nil {
+					fmt.Printf("⚠️  Error al re-insertar REJECT en DB: %v\n", err)
+				} else {
+					fmt.Printf("♻️  [DB] SKU REJECT re-insertada en salida %d\n", sealerID)
+				}
 			}
 		}
 
 		response := gin.H{
-			"message":             fmt.Sprintf("Eliminadas %d SKUs de salida %d", nonRejectRemoved, sealerID),
+			"message":             fmt.Sprintf("Eliminadas %d SKUs de salida %d (REJECT re-insertada automáticamente)", len(removedSKUs), sealerID),
 			"sealer_id":           sealerID,
 			"sorter_id":           targetSorter.GetID(),
 			"skus_removed_memory": len(removedSKUs),
 			"skus_removed_db":     rowsDeleted,
 			"removed_skus":        removedSKUs,
-		}
-
-		// Agregar nota si SKU REJECT fue protegida
-		if nonRejectRemoved < len(removedSKUs) {
-			response["note"] = "SKU REJECT (ID=0) está protegida y NO fue eliminada"
+			"note":                "SKU REJECT re-insertada automáticamente en memoria y DB",
 		}
 
 		c.JSON(http.StatusOK, response)
