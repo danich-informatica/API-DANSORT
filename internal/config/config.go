@@ -101,28 +101,31 @@ type CognexDevice struct {
 }
 
 type Sorter struct {
-	ID            int      `yaml:"id"`
-	Name          string   `yaml:"name"`
-	Ubicacion     string   `yaml:"ubicacion"`
-	CognexID      int      `yaml:"cognex_id"`
-	ScanMethod    string   `yaml:"scan_method"`
-	PLCEndpoint   string   `yaml:"plc_endpoint"`    // Endpoint OPC UA (ej: "opc.tcp://192.168.120.100:4840")
-	PLCObjectID   string   `yaml:"plc_object_id"`   // NodeID del objeto para llamadas a métodos (ej: "ns=4;i=5001")
-	PLCMethodID   string   `yaml:"plc_method_id"`   // NodeID del método a llamar (ej: "ns=4;i=5002")
-	PLCInputNode  string   `yaml:"plc_input_node"`  // DEPRECADO: Ahora se usan métodos. Mantener por compatibilidad
-	PLCOutputNode string   `yaml:"plc_output_node"` // DEPRECADO: Ahora se usan métodos. Mantener por compatibilidad
-	Salidas       []Salida `yaml:"salidas"`
+	ID            int             `yaml:"id"`
+	Name          string          `yaml:"name"`
+	PLCEndpoint   string          `yaml:"plc_endpoint"` // Endpoint OPC UA (ej: "opc.tcp://192.168.120.100:4840")
+	PLC           SorterPLCConfig `yaml:"plc"`
+	Salidas       []Salida        `yaml:"salidas"`
+	DefaultSalida int             `yaml:"default_salida"`
+}
+
+type SorterPLCConfig struct {
+	InputNodeID  string `yaml:"input_node_id"`
+	OutputNodeID string `yaml:"output_node_id"`
+	ObjectID     string `yaml:"object_id"`
+	MethodID     string `yaml:"method_id"`
 }
 
 type Salida struct {
-	ID          int    `yaml:"id"`
-	PhysicalID  int    `yaml:"physical_id"` // ID físico relativo del sorter (1, 2, 3, etc.)
-	CognexID    int    `yaml:"cognex_id"`   // ID de Cognex asignado a esta salida (opcional, 0 = sin cognex)
-	Name        string `yaml:"name"`
-	Tipo        string `yaml:"tipo"`         // "automatico" o "manual"
-	BatchSize   int    `yaml:"batch_size"`   // Tamaño de lote para distribución
-	EstadoNode  string `yaml:"estado_node"`  // Nodo OPC UA para leer/escribir estado numérico
-	BloqueoNode string `yaml:"bloqueo_node"` // Nodo OPC UA para leer/escribir bloqueo (opcional, "" = no tiene)
+	ID         int             `yaml:"id"`
+	Nombre     string          `yaml:"nombre"`
+	PhysicalID int             `yaml:"physical_id"` // ID físico relativo del sorter (1, 2, 3, etc.)
+	PLC        SalidaPLCConfig `yaml:"plc"`
+}
+
+type SalidaPLCConfig struct {
+	EstadoNodeID  string `yaml:"estado_node_id"`  // Nodo OPC UA para leer/escribir estado numérico
+	BloqueoNodeID string `yaml:"bloqueo_node_id"` // Nodo OPC UA para leer/escribir bloqueo (opcional, "" = no tiene)
 }
 
 // LoadConfig carga la configuración desde el archivo YAML

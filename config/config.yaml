@@ -68,100 +68,110 @@ cognex_devices:
 sorters:
   - id: 1
     name: "Sorter Principal"
-    ubicacion: "Planta A - Línea 1"
-    cognex_id: 1
-    scan_method: "QR"
     plc_endpoint: "opc.tcp://192.168.120.100:4840"
-    plc_object_id: "ns=4;i=1" # NodeID del objeto (ServerInterface_1 en UaExpert)
-    plc_method_id: "ns=4;i=21" # NodeID del método DB_OPC_S7000 en UaExpert
-    plc_input_node: "ns=4;i=22" # DEPRECADO: Ahora son InputArguments del método
-    plc_output_node: "ns=4;i=23" # DEPRECADO: Ahora son OutputArguments del método
+    plc:
+      object_id: "ns=4;i=1"
+      method_id: "ns=4;i=21"
+      input_node_id: "ns=4;i=22"
+      output_node_id: "ns=4;i=23"
     salidas:
       - id: 1
-        physical_id: 1 # ← ID FÍSICO que se envía al PLC (1, 2, 3, 4...)
-        name: "Salida manual"
+        physical_id: 1
+        nombre: "Salida manual"
         tipo: "manual"
         batch_size: 3
         cognex_id: 3
-        estado_node: "ns=4;i=27"
-        bloqueo_node: "ns=4;i=28"
+        plc:
+          estado_node_id: "ns=4;i=27"
+          bloqueo_node_id: "ns=4;i=28"
       - id: 2
-        physical_id: 2 # ← ID FÍSICO que se envía al PLC
-        name: "Salida manual"
+        physical_id: 2
+        nombre: "Salida manual"
         tipo: "manual"
         batch_size: 3
-        estado_node: "ns=4;i=32"
-        bloqueo_node: "ns=4;i=33"
+        plc:
+          estado_node_id: "ns=4;i=32"
+          bloqueo_node_id: "ns=4;i=33"
       - id: 3
-        physical_id: 3 # ← ID FÍSICO que se envía al PLC
-        name: "Salida manual"
+        physical_id: 3
+        nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;i=37"
-        bloqueo_node: "ns=4;i=38"
+        plc:
+          estado_node_id: "ns=4;i=37"
+          bloqueo_node_id: "ns=4;i=38"
       - id: 4
-        physical_id: 4 # ← ID FÍSICO que se envía al PLC
-        name: "Salida manual"
+        physical_id: 4
+        nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;i=42"
-        bloqueo_node: "ns=4;i=43"
+        plc:
+          estado_node_id: "ns=4;i=42"
+          bloqueo_node_id: "ns=4;i=43"
       - id: 5
-        physical_id: 5 # ← ID FÍSICO que se envía al PLC
-        name: "Salida manual"
+        physical_id: 5
+        nombre: "Salida manual"
         tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
-        estado_node: "ns=4;i=47"
-        bloqueo_node: "ns=4;i=48"
+        batch_size: 1
+        plc:
+          estado_node_id: "ns=4;i=47"
+          bloqueo_node_id: "ns=4;i=48"
       - id: 6
-        physical_id: 6 # ← ID FÍSICO que se envía al PLC
-        name: "Salida automatica"
+        physical_id: 6
+        nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=52"
-        bloqueo_node: "ns=4;i=53"
+        plc:
+          estado_node_id: "ns=4;i=52"
+          bloqueo_node_id: "ns=4;i=53"
       - id: 7
-        physical_id: 7 # ← ID FÍSICO que se envía al PLC
-        name: "Salida automatica"
+        physical_id: 7
+        nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=57"
-        bloqueo_node: "ns=4;i=58"
+        plc:
+          estado_node_id: "ns=4;i=57"
+          bloqueo_node_id: "ns=4;i=58"
       - id: 8
-        physical_id: 8 # ← ID FÍSICO que se envía al PLC
-        name: "Salida automatica"
+        physical_id: 8
+        nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=62"
-        bloqueo_node: "ns=4;i=63"
+        plc:
+          estado_node_id: "ns=4;i=62"
+          bloqueo_node_id: "ns=4;i=63"
       - id: 9
-        physical_id: 9 # ← ID FÍSICO que se envía al PLC
-        name: "Salida automatica"
+        physical_id: 9
+        nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=67"
-        bloqueo_node: "ns=4;i=68"
+        plc:
+          estado_node_id: "ns=4;i=67"
+          bloqueo_node_id: "ns=4;i=68"
       - id: 10
-        physical_id: 10 # ← ID FÍSICO que se envía al PLC
-        name: "Salida automatica"
+        physical_id: 10
+        nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=72"
-        bloqueo_node: "ns=4;i=73"
+        plc:
+          estado_node_id: "ns=4;i=72"
+          bloqueo_node_id: "ns=4;i=73"
       - id: 11
-        physical_id: 11 # ← ID FÍSICO que se envía al PLC
-        name: "Salida automatica"
+        physical_id: 11
+        nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        estado_node: "ns=4;i=77"
-        bloqueo_node: "ns=4;i=78"
+        plc:
+          estado_node_id: "ns=4;i=77"
+          bloqueo_node_id: "ns=4;i=78"
       - id: 12
-        physical_id: 12 # ← ID FÍSICO que se envía al PLC
-        name: "Salida de descarte"
+        physical_id: 12
+        nombre: "Salida de descarte"
         tipo: "descarte"
         batch_size: 1
-        estado_node: "ns=4;i=83"
-        bloqueo_node: ""
+        plc:
+          estado_node_id: "ns=4;i=83"
+          bloqueo_node_id: ""
 
   - id: 2
     name: "Sorter Secundario"
@@ -169,48 +179,55 @@ sorters:
     cognex_id: 2
     scan_method: "QR"
     plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora
-    plc_input_node: "ns=4;s=|var|SORTER2.INPUT"
-    plc_output_node: "ns=4;s=|var|SORTER2.OUTPUT"
+    plc:
+      input_node_id: "ns=4;s=|var|SORTER2.INPUT"
+      output_node_id: "ns=4;s=|var|SORTER2.OUTPUT"
     salidas:
       - id: 8
         physical_id: 1 # ← ID FÍSICO del SORTER 2 (1, 2, 3...)
-        name: "Premium"
+        nombre: "Premium"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;s=|var|SORTER2.SALIDA1.ESTADO"
-        bloqueo_node: "ns=4;s=|var|SORTER2.SALIDA1.BLOQUEO"
+        plc:
+          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA1.ESTADO"
+          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA1.BLOQUEO"
       - id: 9
         physical_id: 2 # ← ID FÍSICO del SORTER 2
-        name: "Estándar"
+        nombre: "Estándar"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;s=|var|SORTER2.SALIDA2.ESTADO"
-        bloqueo_node: "ns=4;s=|var|SORTER2.SALIDA2.BLOQUEO"
+        plc:
+          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA2.ESTADO"
+          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA2.BLOQUEO"
       - id: 10
         physical_id: 3 # ← ID FÍSICO del SORTER 2
-        name: "Salida manual"
+        nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;s=|var|SORTER2.SALIDA3.ESTADO"
-        bloqueo_node: "ns=4;s=|var|SORTER2.SALIDA3.BLOQUEO"
+        plc:
+          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA3.ESTADO"
+          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA3.BLOQUEO"
       - id: 11
         physical_id: 4 # ← ID FÍSICO del SORTER 2
-        name: "Salida manual"
+        nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;s=|var|SORTER2.SALIDA4.ESTADO"
-        bloqueo_node: "ns=4;s=|var|SORTER2.SALIDA4.BLOQUEO"
+        plc:
+          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA4.ESTADO"
+          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA4.BLOQUEO"
       - id: 12
         physical_id: 5 # ← ID FÍSICO del SORTER 2
-        name: "Salida manual"
-        tipo: "manual"
-        batch_size: 1 # Manual siempre de 1 en 1
-        estado_node: "ns=4;s=|var|SORTER2.SALIDA5.ESTADO"
-        bloqueo_node: "ns=4;s=|var|SORTER2.SALIDA5.BLOQUEO"
-      - id: 13
-        physical_id: 6 # ← ID FÍSICO del SORTER 2
-        name: "Salida manual"
+        nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
-        estado_node: "ns=4;s=|var|SORTER2.SALIDA6.ESTADO"
-        bloqueo_node: "ns=4;s=|var|SORTER2.SALIDA6.BLOQUEO"
+        plc:
+          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA5.ESTADO"
+          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA5.BLOQUEO"
+      - id: 13
+        physical_id: 6 # ← ID FÍSICO del SORTER 2
+        nombre: "Salida manual"
+        tipo: "manual"
+        batch_size: 1
+        plc:
+          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA6.ESTADO"
+          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA6.BLOQUEO"

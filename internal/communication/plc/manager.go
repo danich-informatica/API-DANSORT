@@ -4,17 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"API-GREENEX/internal/config"
+
+	"github.com/gopcua/opcua/ua"
 )
 
-// Manager coordina las conexiones a múltiples PLCs y la lectura de nodos
+// Manager gestiona múltiples clientes OPC UA para diferentes sorters
 type Manager struct {
-	clients map[string]*Client // endpoint -> client
-	config  *config.Config
+	config       *config.Config
+	clients      map[string]*Client
+	clientsMutex sync.RWMutex
 }
 
-// NewManager crea un nuevo manager de PLCs
+// NewManager crea un nuevo gestor de clientes OPC UA
 func NewManager(cfg *config.Config) *Manager {
 	return &Manager{
 		clients: make(map[string]*Client),
@@ -24,7 +29,6 @@ func NewManager(cfg *config.Config) *Manager {
 
 // ConnectAll establece conexiones con todos los PLCs configurados
 func (m *Manager) ConnectAll(ctx context.Context) error {
-	// Identificar todos los endpoints únicos
 	endpoints := make(map[string]bool)
 	for _, sorter := range m.config.Sorters {
 		if sorter.PLCEndpoint != "" {
@@ -38,26 +42,45 @@ func (m *Manager) ConnectAll(ctx context.Context) error {
 
 	log.Printf("📡 Conectando a %d endpoint(s) OPC UA...", len(endpoints))
 
-	// Conectar a cada endpoint único
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(endpoints))
+
 	for endpoint := range endpoints {
-		plcConfig := PLCConfig{
-			Endpoint: endpoint,
-		}
-
-		client := NewClient(plcConfig)
-		if err := client.Connect(ctx); err != nil {
-			return fmt.Errorf("error conectando a %s: %w", endpoint, err)
-		}
-
-		m.clients[endpoint] = client
+		wg.Add(1)
+		go func(ep string) {
+			defer wg.Done()
+			client := NewClient(PLCConfig{Endpoint: ep})
+			if err := client.Connect(ctx); err != nil {
+				errChan <- fmt.Errorf("error conectando a %s: %w", ep, err)
+				return
+			}
+			m.clientsMutex.Lock()
+			m.clients[ep] = client
+			m.clientsMutex.Unlock()
+			log.Printf("✅ Conexión establecida con %s", ep)
+		}(endpoint)
 	}
 
-	log.Printf("✅ Todas las conexiones OPC UA establecidas")
+	wg.Wait()
+	close(errChan)
+
+	// Recoger el primer error que haya ocurrido, si lo hay.
+	for err := range errChan {
+		if err != nil {
+			// Devolvemos el primer error y cerramos las conexiones existentes
+			m.CloseAll(ctx)
+			return err
+		}
+	}
+
+	log.Printf("✅ Todas las conexiones OPC UA establecidas correctamente")
 	return nil
 }
 
 // CloseAll cierra todas las conexiones
 func (m *Manager) CloseAll(ctx context.Context) {
+	m.clientsMutex.Lock()
+	defer m.clientsMutex.Unlock()
 	for endpoint, client := range m.clients {
 		if err := client.Close(ctx); err != nil {
 			log.Printf("⚠️  Error cerrando conexión a %s: %v", endpoint, err)
@@ -68,198 +91,223 @@ func (m *Manager) CloseAll(ctx context.Context) {
 	m.clients = make(map[string]*Client)
 }
 
-// getClientForEndpoint obtiene el cliente correspondiente a un endpoint
-func (m *Manager) getClientForEndpoint(endpoint string) (*Client, error) {
-	client, exists := m.clients[endpoint]
-	if !exists {
-		return nil, fmt.Errorf("no hay cliente conectado para %s", endpoint)
+// getClientForSorter busca el cliente OPC UA para un sorter específico.
+func (m *Manager) getClientForSorter(sorterID int) (*Client, *config.Sorter, error) {
+	var sorterCfg *config.Sorter
+	for i := range m.config.Sorters {
+		if m.config.Sorters[i].ID == sorterID {
+			sorterCfg = &m.config.Sorters[i]
+			break
+		}
 	}
-	return client, nil
+	if sorterCfg == nil {
+		return nil, nil, fmt.Errorf("sorter %d no encontrado", sorterID)
+	}
+
+	m.clientsMutex.RLock()
+	defer m.clientsMutex.RUnlock()
+	client, exists := m.clients[sorterCfg.PLCEndpoint]
+	if !exists {
+		return nil, nil, fmt.Errorf("no hay cliente conectado para el endpoint %s del sorter %d", sorterCfg.PLCEndpoint, sorterID)
+	}
+	return client, sorterCfg, nil
 }
 
 // ReadNode lee un nodo específico de un sorter
 func (m *Manager) ReadNode(ctx context.Context, sorterID int, nodeID string) (*NodeInfo, error) {
-	// Buscar sorter por ID
-	var sorterCfg *config.Sorter
-	for _, s := range m.config.Sorters {
-		if s.ID == sorterID {
-			sorterCfg = &s
-			break
-		}
-	}
-	if sorterCfg == nil {
-		return nil, fmt.Errorf("sorter %d no encontrado", sorterID)
-	}
-
-	// Obtener cliente
-	client, err := m.getClientForEndpoint(sorterCfg.PLCEndpoint)
+	client, _, err := m.getClientForSorter(sorterID)
 	if err != nil {
 		return nil, err
 	}
-
-	// Leer nodo
 	return client.ReadNode(ctx, nodeID)
 }
 
-// ReadAllSorterNodes lee todos los nodos de todos los sorters configurados
+// WriteNode escribe en un nodo específico de un sorter
+func (m *Manager) WriteNode(ctx context.Context, sorterID int, nodeID string, value interface{}) error {
+	client, _, err := m.getClientForSorter(sorterID)
+	if err != nil {
+		return err
+	}
+	return client.WriteNode(ctx, nodeID, value)
+}
+
+// WriteNodeTyped escribe en un nodo con conversión de tipo explícita (como dantrack)
+func (m *Manager) WriteNodeTyped(ctx context.Context, sorterID int, nodeID string, value interface{}, dataType string) error {
+	client, _, err := m.getClientForSorter(sorterID)
+	if err != nil {
+		return err
+	}
+	return client.WriteNodeTyped(ctx, nodeID, value, dataType)
+}
+
+// AppendToArrayNode agrega un elemento a un array de ExtensionObject en un nodo de un sorter
+func (m *Manager) AppendToArrayNode(ctx context.Context, sorterID int, nodeID string, newElement interface{}) error {
+	client, _, err := m.getClientForSorter(sorterID)
+	if err != nil {
+		return err
+	}
+
+	// Convertir el elemento a ExtensionObject si es necesario
+	extObj, ok := newElement.(*ua.ExtensionObject)
+	if !ok {
+		return fmt.Errorf("el elemento debe ser un *ua.ExtensionObject")
+	}
+
+	return client.AppendToArrayNode(ctx, nodeID, extObj)
+}
+
+// AppendToUInt32Array agrega un elemento a un array de uint32 en un nodo de un sorter
+func (m *Manager) AppendToUInt32Array(ctx context.Context, sorterID int, nodeID string, newValue uint32) error {
+	client, _, err := m.getClientForSorter(sorterID)
+	if err != nil {
+		return err
+	}
+
+	return client.AppendToUInt32Array(ctx, nodeID, newValue)
+}
+
+// BrowseNode explora los nodos hijos de un nodo específico de un sorter
+func (m *Manager) BrowseNode(ctx context.Context, sorterID int, nodeID string) ([]BrowseResult, error) {
+	client, _, err := m.getClientForSorter(sorterID)
+	if err != nil {
+		return nil, err
+	}
+
+	return client.BrowseNode(ctx, nodeID)
+}
+
+// CallMethod invoca un método OPC UA en un sorter específico
+func (m *Manager) CallMethod(ctx context.Context, sorterID int, objectID string, methodID string, inputArgs []*ua.Variant) ([]interface{}, error) {
+	client, _, err := m.getClientForSorter(sorterID)
+	if err != nil {
+		return nil, err
+	}
+
+	return client.CallMethod(ctx, objectID, methodID, inputArgs)
+}
+
+// ReadAllSorterNodes lee todos los nodos de todos los sorters configurados de forma masiva.
 func (m *Manager) ReadAllSorterNodes(ctx context.Context) ([]SorterNodes, error) {
-	results := make([]SorterNodes, 0, len(m.config.Sorters))
+	var allSortersData []SorterNodes
+	m.clientsMutex.RLock()
+	defer m.clientsMutex.RUnlock()
+
+	type nodeMeta struct {
+		id        string
+		name      string
+		isPLCNode bool
+		salidaID  int // -1 si no es de una salida
+	}
 
 	for _, sorterCfg := range m.config.Sorters {
-		sorterNodes, err := m.ReadSorterNodes(ctx, sorterCfg.ID)
-		if err != nil {
-			log.Printf("⚠️  Error leyendo sorter %d: %v", sorterCfg.ID, err)
+		client, ok := m.clients[sorterCfg.PLCEndpoint]
+		if !ok {
+			log.Printf("Advertencia: No se encontró cliente para el endpoint %s del sorter %d", sorterCfg.PLCEndpoint, sorterCfg.ID)
 			continue
 		}
-		results = append(results, *sorterNodes)
+
+		// 1. Recopilar todos los NodeIDs y sus metadatos para este sorter
+		var metas []nodeMeta
+		if sorterCfg.PLC.InputNodeID != "" {
+			metas = append(metas, nodeMeta{sorterCfg.PLC.InputNodeID, "Input", true, -1})
+		}
+		if sorterCfg.PLC.OutputNodeID != "" {
+			metas = append(metas, nodeMeta{sorterCfg.PLC.OutputNodeID, "Output", true, -1})
+		}
+		for _, salidaCfg := range sorterCfg.Salidas {
+			if salidaCfg.PLC.EstadoNodeID != "" {
+				metas = append(metas, nodeMeta{salidaCfg.PLC.EstadoNodeID, "Estado", false, salidaCfg.ID})
+			}
+			if salidaCfg.PLC.BloqueoNodeID != "" {
+				metas = append(metas, nodeMeta{salidaCfg.PLC.BloqueoNodeID, "Bloqueo", false, salidaCfg.ID})
+			}
+		}
+
+		if len(metas) == 0 {
+			continue // No hay nodos que leer para este sorter
+		}
+
+		nodeIDs := make([]string, len(metas))
+		for i, meta := range metas {
+			nodeIDs[i] = meta.id
+		}
+
+		// 2. Leer todos los nodos en una sola llamada
+		nodeInfos, _ := client.ReadNodes(ctx, nodeIDs) // Ignoramos el error general para procesar resultados parciales
+
+		// 3. Construir la estructura de datos con los resultados
+		sorterData := SorterNodes{
+			SorterID:   sorterCfg.ID,
+			SorterName: sorterCfg.Name,
+			Endpoint:   sorterCfg.PLCEndpoint,
+			Nodes:      []NodeInfo{},
+			Salidas:    make([]SalidaNodes, len(sorterCfg.Salidas)),
+		}
+		salidaMap := make(map[int]*SalidaNodes)
+		for i, s := range sorterCfg.Salidas {
+			sorterData.Salidas[i] = SalidaNodes{
+				ID:         s.ID,
+				Name:       s.Nombre,
+				PhysicalID: s.PhysicalID,
+				Nodes:      []NodeInfo{},
+			}
+			salidaMap[s.ID] = &sorterData.Salidas[i]
+		}
+
+		for i, meta := range metas {
+			info := nodeInfos[i] // info es un puntero a NodeInfo
+			info.Name = meta.name
+			info.IsPLCNode = meta.isPLCNode
+
+			if meta.isPLCNode {
+				sorterData.Nodes = append(sorterData.Nodes, *info)
+			} else {
+				if salida, ok := salidaMap[meta.salidaID]; ok {
+					salida.Nodes = append(salida.Nodes, *info)
+				}
+			}
+		}
+		allSortersData = append(allSortersData, sorterData)
 	}
 
-	return results, nil
+	return allSortersData, nil
 }
 
-// ReadSorterNodes lee todos los nodos de un sorter específico
-func (m *Manager) ReadSorterNodes(ctx context.Context, sorterID int) (*SorterNodes, error) {
-	// Buscar configuración del sorter
-	var sorterCfg *config.Sorter
-	for i := range m.config.Sorters {
-		if m.config.Sorters[i].ID == sorterID {
-			sorterCfg = &m.config.Sorters[i]
+// GetCacheStats retorna estadísticas de la cache de cada cliente
+func (m *Manager) GetCacheStats() map[string]int {
+	m.clientsMutex.RLock()
+	defer m.clientsMutex.RUnlock()
+
+	stats := make(map[string]int)
+	for endpoint, client := range m.clients {
+		stats[endpoint] = client.cache.Len()
+	}
+
+	return stats
+}
+
+// MonitorNode crea una suscripción para monitorear cambios en un nodo de un sorter específico
+func (m *Manager) MonitorNode(ctx context.Context, sorterID int, nodeID string, interval time.Duration) (<-chan *NodeInfo, func(), error) {
+	// Buscar endpoint del sorter
+	var endpoint string
+	for _, sorter := range m.config.Sorters {
+		if sorter.ID == sorterID {
+			endpoint = sorter.PLCEndpoint
 			break
 		}
 	}
 
-	if sorterCfg == nil {
-		return nil, fmt.Errorf("sorter %d no encontrado en configuración", sorterID)
+	if endpoint == "" {
+		return nil, nil, fmt.Errorf("sorter ID %d no encontrado en configuración", sorterID)
 	}
 
-	if sorterCfg.PLCEndpoint == "" {
-		return nil, fmt.Errorf("sorter %d no tiene endpoint OPC UA configurado", sorterID)
+	m.clientsMutex.RLock()
+	client, exists := m.clients[endpoint]
+	m.clientsMutex.RUnlock()
+
+	if !exists {
+		return nil, nil, fmt.Errorf("cliente no conectado para endpoint %s", endpoint)
 	}
 
-	// Obtener cliente para este endpoint
-	client, err := m.getClientForEndpoint(sorterCfg.PLCEndpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	// Inicializar estructura de resultado
-	sorterNodes := &SorterNodes{
-		SorterID:   sorterCfg.ID,
-		SorterName: sorterCfg.Name,
-		Endpoint:   sorterCfg.PLCEndpoint,
-	}
-
-	// Leer nodo de entrada del PLC
-	if sorterCfg.PLCInputNode != "" {
-		inputNode, err := client.ReadNode(ctx, sorterCfg.PLCInputNode)
-		if err != nil {
-			log.Printf("⚠️  Error leyendo input node: %v", err)
-			inputNode = &NodeInfo{
-				NodeID:      sorterCfg.PLCInputNode,
-				Description: "PLC Input",
-				Error:       err,
-			}
-		} else {
-			inputNode.Description = "PLC Input"
-		}
-		sorterNodes.InputNode = inputNode
-	}
-
-	// Leer nodo de salida del PLC
-	if sorterCfg.PLCOutputNode != "" {
-		outputNode, err := client.ReadNode(ctx, sorterCfg.PLCOutputNode)
-		if err != nil {
-			log.Printf("⚠️  Error leyendo output node: %v", err)
-			outputNode = &NodeInfo{
-				NodeID:      sorterCfg.PLCOutputNode,
-				Description: "PLC Output",
-				Error:       err,
-			}
-		} else {
-			outputNode.Description = "PLC Output"
-		}
-		sorterNodes.OutputNode = outputNode
-	}
-
-	// Leer nodos de cada salida
-	sorterNodes.SalidaNodes = make([]SalidaNodes, 0, len(sorterCfg.Salidas))
-	for _, salidaCfg := range sorterCfg.Salidas {
-		salidaNodes := m.readSalidaNodes(ctx, client, &salidaCfg)
-		sorterNodes.SalidaNodes = append(sorterNodes.SalidaNodes, *salidaNodes)
-	}
-
-	return sorterNodes, nil
-}
-
-// readSalidaNodes lee los nodos de una salida específica
-func (m *Manager) readSalidaNodes(ctx context.Context, client *Client, salidaCfg *config.Salida) *SalidaNodes {
-	salidaNodes := &SalidaNodes{
-		SalidaID:   salidaCfg.ID,
-		SalidaName: salidaCfg.Name,
-		PhysicalID: salidaCfg.PhysicalID,
-	}
-
-	// Leer nodo de estado
-	if salidaCfg.EstadoNode != "" {
-		estadoNode, err := client.ReadNode(ctx, salidaCfg.EstadoNode)
-		if err != nil {
-			log.Printf("⚠️  Error leyendo estado node de salida %d: %v", salidaCfg.ID, err)
-			estadoNode = &NodeInfo{
-				NodeID:      salidaCfg.EstadoNode,
-				Description: fmt.Sprintf("Salida %d - Estado", salidaCfg.ID),
-				Error:       err,
-			}
-		} else {
-			estadoNode.Description = fmt.Sprintf("Salida %d - Estado", salidaCfg.ID)
-		}
-		salidaNodes.EstadoNode = estadoNode
-	}
-
-	// Leer nodo de bloqueo (si existe)
-	if salidaCfg.BloqueoNode != "" {
-		bloqueoNode, err := client.ReadNode(ctx, salidaCfg.BloqueoNode)
-		if err != nil {
-			log.Printf("⚠️  Error leyendo bloqueo node de salida %d: %v", salidaCfg.ID, err)
-			bloqueoNode = &NodeInfo{
-				NodeID:      salidaCfg.BloqueoNode,
-				Description: fmt.Sprintf("Salida %d - Bloqueo", salidaCfg.ID),
-				Error:       err,
-			}
-		} else {
-			bloqueoNode.Description = fmt.Sprintf("Salida %d - Bloqueo", salidaCfg.ID)
-		}
-		salidaNodes.BloqueoNode = bloqueoNode
-	}
-
-	return salidaNodes
-}
-
-// CallSorterMethod llama al método OPC UA configurado para un sorter
-// Útil para enviar comandos al PLC (ej: enviar physical_id de salida seleccionada)
-func (m *Manager) CallSorterMethod(ctx context.Context, sorterID int, inputArgs ...interface{}) (*MethodCallResult, error) {
-	// Buscar configuración del sorter
-	var sorterCfg *config.Sorter
-	for i := range m.config.Sorters {
-		if m.config.Sorters[i].ID == sorterID {
-			sorterCfg = &m.config.Sorters[i]
-			break
-		}
-	}
-
-	if sorterCfg == nil {
-		return nil, fmt.Errorf("sorter %d no encontrado", sorterID)
-	}
-
-	if sorterCfg.PLCObjectID == "" || sorterCfg.PLCMethodID == "" {
-		return nil, fmt.Errorf("sorter %d no tiene método OPC UA configurado (plc_object_id o plc_method_id vacíos)", sorterID)
-	}
-
-	// Obtener cliente
-	client, err := m.getClientForEndpoint(sorterCfg.PLCEndpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	// Llamar al método
-	return client.CallMethod(ctx, sorterCfg.PLCObjectID, sorterCfg.PLCMethodID, inputArgs...)
+	return client.MonitorNode(ctx, nodeID, interval)
 }

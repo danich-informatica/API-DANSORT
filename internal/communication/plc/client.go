@@ -15,6 +15,7 @@ type Client struct {
 	endpoint string
 	client   *opcua.Client
 	config   PLCConfig
+	cache    *LRUCache // Cache LRU para lecturas frecuentes
 }
 
 // NewClient crea un nuevo cliente OPC UA sin conectar
@@ -22,6 +23,7 @@ func NewClient(config PLCConfig) *Client {
 	return &Client{
 		endpoint: config.Endpoint,
 		config:   config,
+		cache:    NewLRUCache(1000, 100*time.Millisecond), // Cache de 1000 entradas, TTL 100ms
 	}
 }
 
@@ -59,6 +61,12 @@ func (c *Client) Close(ctx context.Context) error {
 func (c *Client) ReadNode(ctx context.Context, nodeID string) (*NodeInfo, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cliente no conectado")
+	}
+
+	// Intentar obtener de cache primero
+	if cached, found := c.cache.Get(nodeID); found {
+		log.Printf("💾 Cache HIT para %s", nodeID)
+		return cached.Value.(*NodeInfo), nil
 	}
 
 	// Parsear el NodeID
@@ -101,128 +109,305 @@ func (c *Client) ReadNode(ctx context.Context, nodeID string) (*NodeInfo, error)
 		NodeID:    nodeID,
 		Value:     value,
 		ValueType: valueType,
-		ReadTime:  time.Now(),
-		Error:     nil,
 	}
+
+	// Guardar en cache
+	c.cache.Set(nodeID, nodeInfo)
+	log.Printf("💾 Cache MISS - guardado %s", nodeID)
 
 	return nodeInfo, nil
 }
 
-// ReadMultipleNodes lee múltiples nodos en una sola operación (más eficiente)
-func (c *Client) ReadMultipleNodes(ctx context.Context, nodeIDs []string) ([]*NodeInfo, error) {
+// ReadNodes lee el valor de múltiples nodos en una sola petición
+func (c *Client) ReadNodes(ctx context.Context, nodeIDs []string) ([]*NodeInfo, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cliente no conectado")
 	}
 
-	if len(nodeIDs) == 0 {
-		return []*NodeInfo{}, nil
-	}
+	results := make([]*NodeInfo, len(nodeIDs))
+	validNodesToRead := make([]*ua.ReadValueID, 0, len(nodeIDs))
+	// indexMap mapea el índice en validNodesToRead al índice original en nodeIDs
+	indexMap := make(map[int]int)
 
-	// Parsear todos los NodeIDs
-	nodesToRead := make([]*ua.ReadValueID, 0, len(nodeIDs))
-	for _, nodeID := range nodeIDs {
+	for i, nodeID := range nodeIDs {
 		id, err := ua.ParseNodeID(nodeID)
 		if err != nil {
-			log.Printf("⚠️  NodeID inválido '%s': %v", nodeID, err)
-			continue
+			results[i] = &NodeInfo{NodeID: nodeID, Error: fmt.Errorf("nodeID inválido")}
+		} else {
+			indexMap[len(validNodesToRead)] = i
+			validNodesToRead = append(validNodesToRead, &ua.ReadValueID{NodeID: id, AttributeID: ua.AttributeIDValue})
 		}
-		nodesToRead = append(nodesToRead, &ua.ReadValueID{
-			NodeID:      id,
-			AttributeID: ua.AttributeIDValue,
-		})
 	}
 
-	// Ejecutar lectura batch
-	req := &ua.ReadRequest{NodesToRead: nodesToRead}
+	// Si no hay nodos válidos para leer, devolvemos los resultados con los errores de parseo
+	if len(validNodesToRead) == 0 {
+		return results, nil
+	}
+
+	req := &ua.ReadRequest{NodesToRead: validNodesToRead}
 	resp, err := c.client.Read(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("error en lectura múltiple: %w", err)
+		// Si toda la petición falla, propagamos el error a todos los nodos que intentamos leer
+		for i := range validNodesToRead {
+			originalIndex := indexMap[i]
+			if results[originalIndex] == nil {
+				results[originalIndex] = &NodeInfo{NodeID: nodeIDs[originalIndex], Error: err}
+			}
+		}
+		return results, nil
 	}
 
-	// Procesar resultados
-	results := make([]*NodeInfo, 0, len(resp.Results))
+	if len(resp.Results) != len(validNodesToRead) {
+		return nil, fmt.Errorf("la respuesta de lectura múltiple no coincide con la petición (%d vs %d)", len(resp.Results), len(validNodesToRead))
+	}
+
+	// Procesar resultados individuales
 	for i, result := range resp.Results {
-		nodeID := nodeIDs[i]
-
-		nodeInfo := &NodeInfo{
-			NodeID:   nodeID,
-			ReadTime: time.Now(),
-		}
-
+		originalIndex := indexMap[i]
+		nodeInfo := &NodeInfo{NodeID: nodeIDs[originalIndex]}
 		if result.Status != ua.StatusOK {
 			nodeInfo.Error = fmt.Errorf("status: %s", result.Status)
 		} else {
 			nodeInfo.Value = result.Value.Value()
 			nodeInfo.ValueType = fmt.Sprintf("%T", nodeInfo.Value)
 		}
-
-		results = append(results, nodeInfo)
+		results[originalIndex] = nodeInfo
 	}
 
 	return results, nil
 }
 
-// WriteNode escribe un valor a un nodo específico
+// WriteNode escribe un valor en un nodo específico
 func (c *Client) WriteNode(ctx context.Context, nodeID string, value interface{}) error {
 	if c.client == nil {
 		return fmt.Errorf("cliente no conectado")
 	}
 
-	// Parsear el NodeID
 	id, err := ua.ParseNodeID(nodeID)
 	if err != nil {
 		return fmt.Errorf("nodeID inválido '%s': %w", nodeID, err)
 	}
 
-	// Crear variante con el valor
-	variant, err := ua.NewVariant(value)
+	v, err := ua.NewVariant(value)
 	if err != nil {
-		return fmt.Errorf("error creando variante para %v: %w", value, err)
+		return fmt.Errorf("valor de escritura inválido '%v': %w", value, err)
 	}
 
-	// Crear request de escritura
 	req := &ua.WriteRequest{
 		NodesToWrite: []*ua.WriteValue{
 			{
 				NodeID:      id,
 				AttributeID: ua.AttributeIDValue,
 				Value: &ua.DataValue{
-					EncodingMask: ua.DataValueValue,
-					Value:        variant,
+					EncodingMask: ua.DataValueValue, // Crucial para que el PLC acepte la escritura
+					Value:        v,
 				},
 			},
 		},
 	}
 
-	// Ejecutar escritura
 	resp, err := c.client.Write(ctx, req)
 	if err != nil {
-		return fmt.Errorf("error al escribir nodo %s: %w", nodeID, err)
+		return fmt.Errorf("error al escribir en el nodo %s: %w", nodeID, err)
 	}
 
-	// Validar respuesta
 	if len(resp.Results) == 0 {
-		return fmt.Errorf("escritura de %s sin resultados", nodeID)
+		return fmt.Errorf("escritura en %s sin resultados", nodeID)
 	}
 
 	if resp.Results[0] != ua.StatusOK {
-		return fmt.Errorf("escritura de %s con status: %s", nodeID, resp.Results[0])
+		return fmt.Errorf("escritura en %s con status: %s", nodeID, resp.Results[0])
 	}
 
-	log.Printf("✅ Escritura exitosa en %s: %v (%T)", nodeID, value, value)
+	// Invalidar cache después de escritura exitosa
+	c.cache.Clear()
+
 	return nil
 }
 
-// CallMethod ejecuta un método OPC UA en el PLC
-// objectID: NodeID del objeto que contiene el método
-// methodID: NodeID del método a ejecutar
-// inputArgs: Argumentos de entrada para el método (pueden ser vacíos)
-func (c *Client) CallMethod(ctx context.Context, objectID string, methodID string, inputArgs ...interface{}) (*MethodCallResult, error) {
+// WriteNodeTyped escribe un valor con conversión de tipo explícita (como dantrack)
+func (c *Client) WriteNodeTyped(ctx context.Context, nodeID string, value interface{}, dataType string) error {
+	if c.client == nil {
+		return fmt.Errorf("cliente no conectado")
+	}
+
+	id, err := ua.ParseNodeID(nodeID)
+	if err != nil {
+		return fmt.Errorf("nodeID inválido '%s': %w", nodeID, err)
+	}
+
+	// Convertir el valor al tipo correcto antes de escribir (crítico para WAGO/Codesys)
+	convertedValue, err := ConvertValueForWrite(value, dataType)
+	if err != nil {
+		return fmt.Errorf("error convirtiendo valor para escritura: %w", err)
+	}
+
+	v, err := ua.NewVariant(convertedValue)
+	if err != nil {
+		return fmt.Errorf("valor de escritura inválido '%v': %w", convertedValue, err)
+	}
+
+	req := &ua.WriteRequest{
+		NodesToWrite: []*ua.WriteValue{
+			{
+				NodeID:      id,
+				AttributeID: ua.AttributeIDValue,
+				Value: &ua.DataValue{
+					EncodingMask: ua.DataValueValue, // Importante para WAGO/Codesys
+					Value:        v,
+				},
+			},
+		},
+	}
+
+	resp, err := c.client.Write(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error al escribir en el nodo %s: %w", nodeID, err)
+	}
+
+	if len(resp.Results) == 0 {
+		return fmt.Errorf("escritura en %s sin resultados", nodeID)
+	}
+
+	if resp.Results[0] != ua.StatusOK {
+		return fmt.Errorf("escritura en %s con status: %s", nodeID, resp.Results[0])
+	}
+
+	// Invalidar cache después de escritura exitosa
+	c.cache.Clear()
+
+	return nil
+}
+
+// AppendToArrayNode lee un array de ExtensionObject, agrega un nuevo elemento y lo escribe de vuelta
+func (c *Client) AppendToArrayNode(ctx context.Context, nodeID string, newElement *ua.ExtensionObject) error {
+	if c.client == nil {
+		return fmt.Errorf("cliente no conectado")
+	}
+
+	// 1. Leer el array actual
+	nodeInfo, err := c.ReadNode(ctx, nodeID)
+	if err != nil {
+		return fmt.Errorf("error al leer el array actual: %w", err)
+	}
+
+	// 2. Verificar que es un array de ExtensionObject
+	currentArray, ok := nodeInfo.Value.([]*ua.ExtensionObject)
+	if !ok {
+		return fmt.Errorf("el nodo no contiene un array de ExtensionObject, tipo actual: %T", nodeInfo.Value)
+	}
+
+	log.Printf("📋 Array actual tiene %d elemento(s)", len(currentArray))
+
+	// 3. Crear nuevo array con el elemento adicional
+	newArray := make([]*ua.ExtensionObject, len(currentArray)+1)
+	copy(newArray, currentArray)
+	newArray[len(currentArray)] = newElement
+
+	log.Printf("➕ Agregando elemento. Nuevo tamaño del array: %d", len(newArray))
+
+	// 4. Escribir el array completo de vuelta
+	return c.WriteNode(ctx, nodeID, newArray)
+}
+
+// AppendToUInt32Array lee un array de uint32, agrega un nuevo elemento y lo escribe de vuelta
+func (c *Client) AppendToUInt32Array(ctx context.Context, nodeID string, newValue uint32) error {
+	if c.client == nil {
+		return fmt.Errorf("cliente no conectado")
+	}
+
+	// 1. Leer el array actual
+	nodeInfo, err := c.ReadNode(ctx, nodeID)
+	if err != nil {
+		return fmt.Errorf("error al leer el array actual: %w", err)
+	}
+
+	// 2. Verificar que es un array de uint32
+	currentArray, ok := nodeInfo.Value.([]uint32)
+	if !ok {
+		return fmt.Errorf("el nodo no contiene un array de uint32, tipo actual: %T", nodeInfo.Value)
+	}
+
+	log.Printf("📋 Array actual tiene %d elemento(s)", len(currentArray))
+
+	// 3. Crear nuevo array con el elemento adicional
+	newArray := make([]uint32, len(currentArray)+1)
+	copy(newArray, currentArray)
+	newArray[len(currentArray)] = newValue
+
+	log.Printf("➕ Agregando elemento uint32: %d. Nuevo tamaño del array: %d", newValue, len(newArray))
+
+	// 4. Escribir el array completo de vuelta (WriteNode ya tiene EncodingMask)
+	return c.WriteNode(ctx, nodeID, newArray)
+}
+
+// BrowseNode explora los nodos hijos de un nodo específico
+func (c *Client) BrowseNode(ctx context.Context, nodeID string) ([]BrowseResult, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("cliente no conectado")
 	}
 
-	// Parsear NodeIDs
+	id, err := ua.ParseNodeID(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("nodeID inválido '%s': %w", nodeID, err)
+	}
+
+	// Crear request de browse
+	req := &ua.BrowseRequest{
+		NodesToBrowse: []*ua.BrowseDescription{
+			{
+				NodeID:          id,
+				BrowseDirection: ua.BrowseDirectionForward,
+				ReferenceTypeID: ua.NewNumericNodeID(0, 0), // Todas las referencias
+				IncludeSubtypes: true,
+				NodeClassMask:   uint32(ua.NodeClassAll),
+				ResultMask:      uint32(ua.BrowseResultMaskAll),
+			},
+		},
+	}
+
+	resp, err := c.client.Browse(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("error al explorar nodo %s: %w", nodeID, err)
+	}
+
+	if len(resp.Results) == 0 {
+		return nil, fmt.Errorf("exploración de %s sin resultados", nodeID)
+	}
+
+	result := resp.Results[0]
+	if result.StatusCode != ua.StatusOK {
+		return nil, fmt.Errorf("exploración de %s con status: %s", nodeID, result.StatusCode)
+	}
+
+	// Convertir referencias a resultados
+	var browseResults []BrowseResult
+	for _, ref := range result.References {
+		browseName := ref.BrowseName.Name
+		if ref.BrowseName.NamespaceIndex > 0 {
+			browseName = fmt.Sprintf("%d:%s", ref.BrowseName.NamespaceIndex, ref.BrowseName.Name)
+		}
+
+		browseResults = append(browseResults, BrowseResult{
+			NodeID:        ref.NodeID.NodeID.String(),
+			BrowseName:    browseName,
+			DisplayName:   ref.DisplayName.Text,
+			NodeClass:     ref.NodeClass,
+			IsForward:     ref.IsForward,
+			ReferenceType: ref.ReferenceTypeID.String(),
+		})
+	}
+
+	return browseResults, nil
+}
+
+// CallMethod invoca un método OPC UA en el servidor
+func (c *Client) CallMethod(ctx context.Context, objectID string, methodID string, inputArgs []*ua.Variant) ([]interface{}, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("cliente no conectado")
+	}
+
+	// Parsear IDs
 	objID, err := ua.ParseNodeID(objectID)
 	if err != nil {
 		return nil, fmt.Errorf("objectID inválido '%s': %w", objectID, err)
@@ -233,48 +418,116 @@ func (c *Client) CallMethod(ctx context.Context, objectID string, methodID strin
 		return nil, fmt.Errorf("methodID inválido '%s': %w", methodID, err)
 	}
 
-	// Convertir argumentos de entrada a Variants
-	variants := make([]*ua.Variant, len(inputArgs))
-	for i, arg := range inputArgs {
-		v, err := ua.NewVariant(arg)
-		if err != nil {
-			return nil, fmt.Errorf("argumento de entrada #%d inválido: %w", i, err)
-		}
-		variants[i] = v
-	}
-
-	log.Printf("📞 Llamando método %s (objeto: %s) con %d argumento(s)", methodID, objectID, len(variants))
-
 	// Crear request de llamada a método
 	req := &ua.CallMethodRequest{
 		ObjectID:       objID,
 		MethodID:       methID,
-		InputArguments: variants,
+		InputArguments: inputArgs,
 	}
 
-	// Ejecutar llamada
-	result, err := c.client.Call(ctx, req)
+	resp, err := c.client.Call(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("error en llamada a método: %w", err)
+		return nil, fmt.Errorf("error al llamar método %s: %w", methodID, err)
 	}
 
-	// Preparar resultado
-	methodResult := &MethodCallResult{
-		StatusCode: result.StatusCode.Error(),
+	if resp.StatusCode != ua.StatusOK {
+		return nil, fmt.Errorf("llamada a método %s con status: %s", methodID, resp.StatusCode)
 	}
 
-	if result.StatusCode != ua.StatusOK {
-		methodResult.Error = fmt.Errorf("método retornó status: %s", result.StatusCode)
-		return methodResult, methodResult.Error
+	// Extraer valores de salida
+	var outputValues []interface{}
+	for _, outArg := range resp.OutputArguments {
+		outputValues = append(outputValues, outArg.Value())
 	}
 
-	// Extraer argumentos de salida
-	methodResult.OutputArguments = make([]interface{}, len(result.OutputArguments))
-	for i, outArg := range result.OutputArguments {
-		methodResult.OutputArguments[i] = outArg.Value()
+	return outputValues, nil
+}
+
+// MonitorNode crea una suscripción para monitorear cambios en un nodo
+// Devuelve un canal que emite los nuevos valores y una función para cancelar la suscripción
+func (c *Client) MonitorNode(ctx context.Context, nodeID string, interval time.Duration) (<-chan *NodeInfo, func(), error) {
+	if c.client == nil {
+		return nil, nil, fmt.Errorf("cliente no conectado")
 	}
 
-	log.Printf("✅ Método ejecutado exitosamente. %d valor(es) retornado(s)", len(methodResult.OutputArguments))
+	id, err := ua.ParseNodeID(nodeID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("nodeID inválido '%s': %w", nodeID, err)
+	}
 
-	return methodResult, nil
+	// Canal para recibir notificaciones del servidor
+	notifsChan := make(chan *opcua.PublishNotificationData, 10)
+
+	// Crear suscripción
+	sub, err := c.client.Subscribe(ctx, &opcua.SubscriptionParameters{
+		Interval: interval,
+	}, notifsChan)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error al crear suscripción: %w", err)
+	}
+
+	// Canal para enviar notificaciones al usuario
+	userChan := make(chan *NodeInfo, 10)
+
+	// Configurar monitoreo del nodo
+	miRequest := opcua.NewMonitoredItemCreateRequestWithDefaults(id, ua.AttributeIDValue, 0)
+	res, err := sub.Monitor(ctx, ua.TimestampsToReturnBoth, miRequest)
+	if err != nil {
+		sub.Cancel(ctx)
+		close(notifsChan)
+		return nil, nil, fmt.Errorf("error al monitorear nodo: %w", err)
+	}
+
+	if res.Results[0].StatusCode != ua.StatusOK {
+		sub.Cancel(ctx)
+		close(notifsChan)
+		return nil, nil, fmt.Errorf("monitoreo con status: %s", res.Results[0].StatusCode)
+	}
+
+	log.Printf("✅ Suscripción creada para %s (intervalo: %v)", nodeID, interval)
+
+	// Goroutine para procesar notificaciones
+	go func() {
+		defer close(userChan)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-notifsChan:
+				if !ok {
+					return
+				}
+				if msg.Error != nil {
+					log.Printf("⚠️ Error en notificación: %v", msg.Error)
+					continue
+				}
+
+				switch notification := msg.Value.(type) {
+				case *ua.DataChangeNotification:
+					for _, item := range notification.MonitoredItems {
+						if item.Value.Status == ua.StatusOK {
+							nodeInfo := &NodeInfo{
+								NodeID:    nodeID,
+								Value:     item.Value.Value.Value(),
+								ValueType: fmt.Sprintf("%T", item.Value.Value.Value()),
+							}
+							select {
+							case userChan <- nodeInfo:
+							default:
+								// Canal lleno, descartar valor antiguo
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	// Función para cancelar suscripción
+	cancelFunc := func() {
+		sub.Cancel(context.Background())
+		close(notifsChan)
+	}
+
+	return userChan, cancelFunc, nil
 }
