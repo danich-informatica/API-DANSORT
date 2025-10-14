@@ -45,6 +45,42 @@ func NewHTTPFrontend(addr string) *HTTPFrontend {
 		c.Next()
 	})
 
+	// Manejador personalizado para rutas 404
+	router.NoRoute(func(c *gin.Context) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "Ruta no encontrada",
+			"message": "🤔 La ruta que buscas no existe en este servidor",
+			"path":    c.Request.URL.Path,
+			"method":  c.Request.Method,
+			"hint":    "Revisa la documentación en /docs o contacta al equipo de desarrollo",
+			"available_endpoints": gin.H{
+				"frontend": []string{
+					"GET /visualizer",
+					"GET /simulator",
+				},
+				"sku_management": []string{
+					"GET /sku/assigned/:sorter_id",
+					"GET /sku/assignables/:sorter_id",
+				},
+				"assignments": []string{
+					"POST /assignment",
+					"DELETE /assignment/:sealer_id/:sku_id",
+					"DELETE /assignment/:sealer_id",
+				},
+				"websocket": []string{
+					"GET /ws/:room",
+					"GET /ws/stats",
+				},
+				"legacy_api": []string{
+					"GET /Mesa/Estado",
+					"POST /Mesa",
+					"POST /Mesa/Vaciar",
+				},
+			},
+			"timestamp": c.Request.Header.Get("Date"),
+		})
+	})
+
 	// Crear e iniciar WebSocket Hub
 	wsHub := NewWebSocketHub()
 	go wsHub.Run()
