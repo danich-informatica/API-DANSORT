@@ -44,7 +44,7 @@ cognex_devices:
     port: 8085 # Puerto ÚNICO donde escuchará (0.0.0.0:8085)
     scan_method: "QR" # Método por defecto: QR o DATAMATRIX
     ubicacion: "Línea Principal"
-    interval_ms: 1000 # Para simulador: 1 segundo entre lecturas
+    interval_ms: 1000 # Para simulador: 5 segundos entre lecturas
     no_read_percent: 5 # Para simulador: 5% de errores
 
   - id: 2

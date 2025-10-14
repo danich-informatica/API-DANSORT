@@ -312,6 +312,33 @@ func (m *Manager) MonitorNode(ctx context.Context, sorterID int, nodeID string, 
 	return client.MonitorNode(ctx, nodeID, interval)
 }
 
+// MonitorMultipleNodes crea UNA suscripción para monitorear MÚLTIPLES nodos de un sorter
+// Esto evita el error "StatusBadTooManySubscriptions"
+func (m *Manager) MonitorMultipleNodes(ctx context.Context, sorterID int, nodeIDs []string, interval time.Duration) (<-chan *NodeInfo, func(), error) {
+	// Buscar endpoint del sorter
+	var endpoint string
+	for _, sorter := range m.config.Sorters {
+		if sorter.ID == sorterID {
+			endpoint = sorter.PLCEndpoint
+			break
+		}
+	}
+
+	if endpoint == "" {
+		return nil, nil, fmt.Errorf("sorter ID %d no encontrado en configuración", sorterID)
+	}
+
+	m.clientsMutex.RLock()
+	client, exists := m.clients[endpoint]
+	m.clientsMutex.RUnlock()
+
+	if !exists {
+		return nil, nil, fmt.Errorf("cliente no conectado para endpoint %s", endpoint)
+	}
+
+	return client.MonitorMultipleNodes(ctx, nodeIDs, interval)
+}
+
 // AssignLaneToBox replica el comportamiento del código Rust:
 // 1. Intenta llamar al método del PLC para asignar una caja a una salida
 // 2. Si falla (método bloqueado), escribe directamente en el nodo ESTADO como Plan B

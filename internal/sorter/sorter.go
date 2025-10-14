@@ -2,6 +2,7 @@
 package sorter
 
 import (
+	"API-GREENEX/internal/communication/plc"
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/listeners"
 	"API-GREENEX/internal/models"
@@ -23,6 +24,13 @@ type Sorter struct {
 	Cognex        *listeners.CognexListener `json:"cognex"`
 	ctx           context.Context
 	cancel        context.CancelFunc
+
+	// PLC Manager para comunicación OPC UA
+	plcManager *plc.Manager
+
+	// Funciones para cancelar suscripciones OPC UA
+	cancelSubscriptions []func()
+	subscriptionMutex   sync.Mutex
 
 	// Canal de SKUs assignables para este sorter
 	skuChannel chan []models.SKUAssignable
@@ -138,7 +146,7 @@ func (s *Sorter) updateBatchDistributor(skuName string) {
 	}
 }
 
-func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}) *Sorter {
+func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}, plcManager *plc.Manager) *Sorter {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Registrar canales para este sorter
@@ -148,31 +156,33 @@ func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode s
 	flowStatsChannel := channelMgr.RegisterSorterFlowStatsChannel(sorterID, 5) // Buffer de 5
 
 	return &Sorter{
-		ID:               ID,
-		Ubicacion:        ubicacion,
-		PLCInputNode:     plcInputNode,
-		PLCOutputNode:    plcOutputNode,
-		Salidas:          salidas,
-		Cognex:           cognex,
-		ctx:              ctx,
-		cancel:           cancel,
-		skuChannel:       skuChannel,
-		flowStatsChannel: flowStatsChannel,
-		assignedSKUs:     make([]models.SKUAssignable, 0),
-		lecturaRecords:   make([]models.LecturaRecord, 0, 1000), // Capacidad inicial 1000
-		lastFlowStats:    make(map[string]float64),              // Inicializar mapa de porcentajes
-		batchCounters:    make(map[string]*BatchDistributor),    // Inicializar distribuidores de lote
-		wsHub:            wsHub,                                 // Asignar WebSocket Hub
-		dbManager:        dbManager,                             // Asignar DB Manager
+		ID:                  ID,
+		Ubicacion:           ubicacion,
+		PLCInputNode:        plcInputNode,
+		PLCOutputNode:       plcOutputNode,
+		Salidas:             salidas,
+		Cognex:              cognex,
+		ctx:                 ctx,
+		cancel:              cancel,
+		plcManager:          plcManager,
+		cancelSubscriptions: make([]func(), 0),
+		skuChannel:          skuChannel,
+		flowStatsChannel:    flowStatsChannel,
+		assignedSKUs:        make([]models.SKUAssignable, 0),
+		lecturaRecords:      make([]models.LecturaRecord, 0, 1000), // Capacidad inicial 1000
+		lastFlowStats:       make(map[string]float64),              // Inicializar mapa de porcentajes
+		batchCounters:       make(map[string]*BatchDistributor),    // Inicializar distribuidores de lote
+		wsHub:               wsHub,                                 // Asignar WebSocket Hub
+		dbManager:           dbManager,                             // Asignar DB Manager
 	}
 }
 
 func (s *Sorter) Start() error {
-	log.Printf("🚀 Iniciando Sorter #%d en %s", s.ID, s.Ubicacion)
-	log.Printf("📍 Salidas configuradas: %d", len(s.Salidas))
+	log.Printf("🚀 Sorter #%d: Iniciando en %s", s.ID, s.Ubicacion)
+	log.Printf("📍 Sorter #%d: Salidas configuradas: %d", s.ID, len(s.Salidas))
 
 	for _, salida := range s.Salidas {
-		log.Printf("  ↳ Salida %d: %s", salida.ID, salida.Salida_Sorter)
+		log.Printf("  ↳ Sorter #%d: Salida %d: %s", s.ID, salida.ID, salida.Salida_Sorter)
 	}
 
 	// Iniciar el listener de Cognex
@@ -186,16 +196,185 @@ func (s *Sorter) Start() error {
 	// 🆕 Iniciar goroutine para procesar eventos de lectura
 	go s.procesarEventosCognex()
 
-	log.Printf("✅ Sorter iniciado y escuchando eventos de Cognex")
+	// 🆕 Iniciar suscripciones OPC UA para ESTADO y BLOQUEO de cada salida
+	if s.plcManager != nil {
+		s.startPLCSubscriptions()
+	}
+
+	log.Printf("✅ Sorter #%d: Iniciado y escuchando eventos de Cognex", s.ID)
 
 	return nil
+}
+
+// startPLCSubscriptions inicia UNA suscripción OPC UA para monitorear TODOS los nodos (ESTADO y BLOQUEO)
+func (s *Sorter) startPLCSubscriptions() {
+	log.Printf("🔔 Sorter #%d: Iniciando suscripción OPC UA compartida para Estado y Bloqueo...", s.ID)
+
+	// Recolectar todos los nodeIDs a monitorear
+	nodeIDs := make([]string, 0, len(s.Salidas)*2)
+	nodeToSalidaMap := make(map[string]*shared.Salida) // nodeID -> salida
+	nodeToTypeMap := make(map[string]string)           // nodeID -> "estado" o "bloqueo"
+
+	for i := range s.Salidas {
+		salida := &s.Salidas[i]
+
+		if salida.EstadoNode != "" {
+			nodeIDs = append(nodeIDs, salida.EstadoNode)
+			nodeToSalidaMap[salida.EstadoNode] = salida
+			nodeToTypeMap[salida.EstadoNode] = "estado"
+		}
+
+		if salida.BloqueoNode != "" {
+			nodeIDs = append(nodeIDs, salida.BloqueoNode)
+			nodeToSalidaMap[salida.BloqueoNode] = salida
+			nodeToTypeMap[salida.BloqueoNode] = "bloqueo"
+		}
+	}
+
+	if len(nodeIDs) == 0 {
+		log.Printf("⚠️  Sorter #%d: No hay nodos OPC UA configurados para monitorear", s.ID)
+		return
+	}
+
+	log.Printf("📊 Sorter #%d: Monitoreando %d nodos en una sola suscripción", s.ID, len(nodeIDs))
+
+	// Crear UNA suscripción para TODOS los nodos
+	ctx := s.ctx
+	interval := 100 * time.Millisecond
+
+	dataChan, cancelFunc, err := s.plcManager.MonitorMultipleNodes(ctx, s.ID, nodeIDs, interval)
+	if err != nil {
+		log.Printf("❌ Sorter #%d: Error creando suscripción compartida: %v", s.ID, err)
+		return
+	}
+
+	// Guardar función de cancelación
+	s.subscriptionMutex.Lock()
+	s.cancelSubscriptions = append(s.cancelSubscriptions, cancelFunc)
+	s.subscriptionMutex.Unlock()
+
+	// Goroutine para procesar TODAS las notificaciones
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case nodeInfo, ok := <-dataChan:
+				if !ok {
+					log.Printf("⚠️  Sorter #%d: Canal de suscripción OPC UA cerrado", s.ID)
+					return
+				}
+
+				// Obtener la salida y el tipo asociado a este nodeID
+				salida, exists := nodeToSalidaMap[nodeInfo.NodeID]
+				if !exists {
+					continue
+				}
+
+				nodeType := nodeToTypeMap[nodeInfo.NodeID]
+
+				// Procesar según el tipo de nodo
+				if nodeType == "estado" {
+					// Convertir valor a int16
+					var estadoValor int16
+					switch v := nodeInfo.Value.(type) {
+					case int16:
+						estadoValor = v
+					case int32:
+						estadoValor = int16(v)
+					case int64:
+						estadoValor = int16(v)
+					case int:
+						estadoValor = int16(v)
+					default:
+						log.Printf("⚠️ Sorter #%d: Tipo de valor inesperado para ESTADO de salida %d: %T",
+							s.ID, salida.ID, nodeInfo.Value)
+						continue
+					}
+
+					// Obtener valor anterior
+					estadoAnterior := salida.GetEstado()
+
+					// Actualizar estado
+					salida.SetEstado(estadoValor)
+
+					// Log solo si cambió
+					if estadoAnterior != estadoValor {
+						estadoNombre := "DESCONOCIDO"
+						switch estadoValor {
+						case 0:
+							estadoNombre = "APAGADO"
+						case 1:
+							estadoNombre = "ANDANDO"
+						case 2:
+							estadoNombre = "FALLA"
+						}
+						log.Printf("🔄 Sorter #%d: Salida %d (%s) - ESTADO cambió: %d→%d (%s)",
+							s.ID, salida.ID, salida.Salida_Sorter, estadoAnterior, estadoValor, estadoNombre)
+					}
+
+				} else if nodeType == "bloqueo" {
+					// Convertir valor a bool
+					var bloqueoValor bool
+					switch v := nodeInfo.Value.(type) {
+					case bool:
+						bloqueoValor = v
+					case int16:
+						bloqueoValor = v != 0
+					case int32:
+						bloqueoValor = v != 0
+					case int64:
+						bloqueoValor = v != 0
+					case int:
+						bloqueoValor = v != 0
+					default:
+						log.Printf("⚠️ Sorter #%d: Tipo de valor inesperado para BLOQUEO de salida %d: %T",
+							s.ID, salida.ID, nodeInfo.Value)
+						continue
+					}
+
+					// Obtener valor anterior
+					bloqueoAnterior := salida.GetBloqueo()
+
+					// Actualizar bloqueo
+					salida.SetBloqueo(bloqueoValor)
+
+					// Log solo si cambió
+					if bloqueoAnterior != bloqueoValor {
+						estadoTexto := "DESBLOQUEADA"
+						if bloqueoValor {
+							estadoTexto = "BLOQUEADA"
+						}
+						log.Printf("🔒 Sorter #%d: Salida %d (%s) - BLOQUEO cambió: %t→%t (%s)",
+							s.ID, salida.ID, salida.Salida_Sorter, bloqueoAnterior, bloqueoValor, estadoTexto)
+					}
+				}
+			}
+		}
+	}()
+
+	log.Printf("✅ Sorter #%d: Suscripción compartida iniciada para %d nodos", s.ID, len(nodeIDs))
+}
+
+// stopPLCSubscriptions detiene todas las suscripciones OPC UA
+func (s *Sorter) stopPLCSubscriptions() {
+	s.subscriptionMutex.Lock()
+	defer s.subscriptionMutex.Unlock()
+
+	log.Printf("🔕 Sorter #%d: Deteniendo %d suscripciones OPC UA...", s.ID, len(s.cancelSubscriptions))
+
+	for _, cancelFunc := range s.cancelSubscriptions {
+		cancelFunc()
+	}
+
+	s.cancelSubscriptions = nil
 }
 
 // StartFlowStatistics inicia el cálculo periódico de estadísticas de flujo
 func (s *Sorter) StartFlowStatistics(calculationInterval, windowDuration time.Duration) {
 	log.Printf("📊 Sorter #%d: Iniciando sistema de estadísticas de flujo", s.ID)
-	log.Printf("   ⏱️  Intervalo de cálculo: %v", calculationInterval)
-	log.Printf("   🪟  Ventana de tiempo: %v", windowDuration)
+	log.Printf("   ⏱️  Sorter #%d: Intervalo de cálculo: %v", s.ID, calculationInterval)
+	log.Printf("   🪟  Sorter #%d: Ventana de tiempo: %v", s.ID, windowDuration)
 
 	ticker := time.NewTicker(calculationInterval)
 	defer ticker.Stop()
@@ -251,18 +430,28 @@ func (s *Sorter) procesarEventosCognex() {
 				s.registrarLectura(evento.SKU)
 
 				salida := s.determinarSalida(evento.SKU, evento.Calibre)
-				log.Printf("✅ [Sorter] Lectura #%d | SKU: %s | Salida: %s (ID: %d) | Razón: sort por SKU",
-					s.LecturasExitosas, evento.SKU, salida.Salida_Sorter, salida.ID)
+				log.Printf("✅ Sorter #%d: Lectura #%d | SKU: %s | Salida: %s (ID: %d) | Razón: sort por SKU",
+					s.ID, s.LecturasExitosas, evento.SKU, salida.Salida_Sorter, salida.ID) // � Enviar señal al PLC para activar la salida
+				if s.plcManager != nil && salida.SealerPhysicalID > 0 {
 
-				// 📤 Enviar evento WebSocket de lectura procesada
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					if err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(salida.SealerPhysicalID)); err != nil {
+						log.Printf("⚠️  [Sorter #%d] Error al enviar señal PLC para salida %d (PhysicalID=%d): %v",
+							s.ID, salida.ID, salida.SealerPhysicalID, err)
+					} else {
+						log.Printf("📤 [Sorter #%d] Señal PLC enviada → Salida %d (PhysicalID=%d)",
+							s.ID, salida.ID, salida.SealerPhysicalID)
+					}
+					cancel()
+				}
+
+				// �📤 Enviar evento WebSocket de lectura procesada
 				s.PublishLecturaEvent(evento, &salida, true)
 
 				// 💾 Registrar en base de datos la salida de la caja
 				if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida); err != nil {
-					log.Printf("⚠️  [Sorter] Error al registrar salida de caja %s: %v", evento.Correlativo, err)
+					log.Printf("⚠️  Sorter #%d: Error al registrar salida de caja %s: %v", s.ID, evento.Correlativo, err)
 				}
-
-				// TODO: Activar actuadores/PLC para enviar a la salida
 			} else {
 				s.LecturasFallidas++
 				var salida shared.Salida
@@ -283,15 +472,26 @@ func (s *Sorter) procesarEventosCognex() {
 				case models.LecturaDB:
 					razon = "error de base de datos"
 				}
-				log.Printf("❌ [Sorter] Fallo #%d | SKU: %s | Salida: %s (ID: %d) | Razón: %s | %s",
-					s.LecturasFallidas, evento.SKU, salida.Salida_Sorter, salida.ID, razon, evento.String())
+				log.Printf("❌ Sorter #%d: Fallo #%d | SKU: %s | Salida: %s (ID: %d) | Razón: %s | %s",
+					s.ID, s.LecturasFallidas, evento.SKU, salida.Salida_Sorter, salida.ID, razon, evento.String()) // � Enviar señal al PLC para activar la salida de descarte
+				if s.plcManager != nil && salida.SealerPhysicalID > 0 {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					if err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(salida.SealerPhysicalID)); err != nil {
+						log.Printf("⚠️  [Sorter #%d] Error al enviar señal PLC para descarte (PhysicalID=%d): %v",
+							s.ID, salida.SealerPhysicalID, err)
+					} else {
+						log.Printf("📤 [Sorter #%d] Señal PLC enviada a DESCARTE → Salida %d (PhysicalID=%d)",
+							s.ID, salida.ID, salida.SealerPhysicalID)
+					}
+					cancel()
+				}
 
-				// 📤 Enviar evento WebSocket de lectura fallida
+				// �📤 Enviar evento WebSocket de lectura fallida
 				s.PublishLecturaEvent(evento, &salida, false)
 
 				// 💾 Registrar en base de datos la salida de la caja (también para fallidas)
 				if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida); err != nil {
-					log.Printf("⚠️  [Sorter] Error al registrar salida de caja fallida %s: %v", evento.Correlativo, err)
+					log.Printf("⚠️  Sorter #%d: Error al registrar salida de caja fallida %s: %v", s.ID, evento.Correlativo, err)
 				}
 			}
 
@@ -299,7 +499,7 @@ func (s *Sorter) procesarEventosCognex() {
 			total := s.LecturasExitosas + s.LecturasFallidas
 			if total%10 == 0 && total > 0 {
 				tasaExito := float64(s.LecturasExitosas) / float64(total) * 100
-				log.Printf("📊 [Sorter] Stats: Total=%d | Exitosas=%d | Fallidas=%d | Tasa=%.1f%%",
+				log.Printf("📊 Sorter #%d: Stats: Total=%d | Exitosas=%d | Fallidas=%d | Tasa=%.1f%%",
 					total, s.LecturasExitosas, s.LecturasFallidas, tasaExito)
 			}
 		}
@@ -311,12 +511,20 @@ func (s *Sorter) determinarSalida(sku, calibre string) shared.Salida {
 	// Si el SKU es REJECT (id=0 o texto 'REJECT'), buscar salida manual o de descarte
 	if sku == "REJECT" || sku == "0" {
 		for _, salida := range s.Salidas {
-			if salida.Tipo == "manual" {
+			if salida.Tipo == "manual" && salida.IsAvailable() {
 				return salida
 			}
 		}
-		// Si no hay salida manual, usar la última
+		// Si no hay salida manual disponible, buscar cualquier salida disponible
+		for _, salida := range s.Salidas {
+			if salida.IsAvailable() {
+				log.Printf("⚠️ Sorter #%d: No hay salida manual disponible, usando salida %d", s.ID, salida.ID)
+				return salida
+			}
+		}
+		// Último recurso: usar la última salida (ignorar disponibilidad)
 		if len(s.Salidas) > 0 {
+			log.Printf("🚨 Sorter #%d: ADVERTENCIA - Todas las salidas bloqueadas/en falla, usando última salida", s.ID)
 			return s.Salidas[len(s.Salidas)-1]
 		}
 	}
@@ -329,35 +537,66 @@ func (s *Sorter) determinarSalida(sku, calibre string) shared.Salida {
 		salidaID := bd.NextSalida()
 		s.batchMutex.Unlock()
 
-		// Buscar objeto Salida por ID
+		// Buscar objeto Salida por ID y verificar disponibilidad
 		for _, salida := range s.Salidas {
 			if salida.ID == salidaID {
-				log.Printf("🔄 Sorter #%d: SKU '%s' → Salida %d '%s' (lote %d/%d)",
-					s.ID, sku, salida.ID, salida.Salida_Sorter,
-					bd.CurrentCount, bd.BatchSizes[salidaID])
-				return salida
+				if salida.IsAvailable() {
+					log.Printf("🔄 Sorter #%d: SKU '%s' → Salida %d '%s' (lote %d/%d)",
+						s.ID, sku, salida.ID, salida.Salida_Sorter,
+						bd.CurrentCount, bd.BatchSizes[salidaID])
+					return salida
+				} else {
+					estado := salida.GetEstado()
+					bloqueo := salida.GetBloqueo()
+					log.Printf("⚠️ Sorter #%d: Salida %d no disponible (Estado=%d, Bloqueo=%t), buscando alternativa...",
+						s.ID, salida.ID, estado, bloqueo)
+					// Continuar buscando alternativas
+					break
+				}
 			}
 		}
+	} else {
+		s.batchMutex.Unlock()
 	}
-	s.batchMutex.Unlock()
 
 	// Buscar la salida que tenga configurado ese SKU (fallback sin distribución)
+	// 🆕 FILTRAR salidas que NO estén disponibles (ESTADO==2 o BLOQUEO==true)
 	for _, salida := range s.Salidas {
 		for _, skuConfig := range salida.SKUs_Actuales {
 			if skuConfig.SKU == sku {
-				return salida
+				if salida.IsAvailable() {
+					return salida
+				} else {
+					estado := salida.GetEstado()
+					bloqueo := salida.GetBloqueo()
+					log.Printf("⚠️ Sorter #%d: Salida %d configurada para SKU '%s' pero NO disponible (Estado=%d, Bloqueo=%t)",
+						s.ID, salida.ID, sku, estado, bloqueo)
+				}
 			}
 		}
 	}
 
-	// Si no está configurado en ninguna salida, enviar a descarte
+	// Si no hay salida configurada y disponible, enviar a descarte
 	for _, salida := range s.Salidas {
-		if salida.Tipo == "manual" {
+		if salida.Tipo == "manual" && salida.IsAvailable() {
+			log.Printf("⚠️ Sorter #%d: SKU '%s' sin salida disponible configurada, enviando a descarte (salida %d)",
+				s.ID, sku, salida.ID)
 			return salida
 		}
 	}
-	// Si no hay salida manual, usar la última
+
+	// Último recurso: cualquier salida disponible
+	for _, salida := range s.Salidas {
+		if salida.IsAvailable() {
+			log.Printf("🚨 Sorter #%d: SKU '%s' sin salida manual disponible, usando salida %d",
+				s.ID, sku, salida.ID)
+			return salida
+		}
+	}
+
+	// Si TODAS las salidas están bloqueadas/en falla, usar la última
 	if len(s.Salidas) > 0 {
+		log.Printf("🚨 Sorter #%d: ADVERTENCIA CRÍTICA - Todas las salidas bloqueadas/en falla, usando última salida", s.ID)
 		return s.Salidas[len(s.Salidas)-1]
 	}
 
@@ -367,6 +606,11 @@ func (s *Sorter) determinarSalida(sku, calibre string) shared.Salida {
 
 func (s *Sorter) Stop() error {
 	log.Printf("🛑 Deteniendo Sorter #%d", s.ID)
+
+	// Detener suscripciones OPC UA primero
+	s.stopPLCSubscriptions()
+
+	// Cancelar contexto
 	s.cancel()
 
 	if s.Cognex != nil {

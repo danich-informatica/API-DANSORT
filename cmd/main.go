@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"API-GREENEX/internal/communication/plc"
 	"API-GREENEX/internal/config"
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/flow"
@@ -134,7 +135,24 @@ func main() {
 	log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Println("")
 
-	// Inicializar Sorters (si hay configurados)
+	// 5. Crear y conectar PLC Manager
+	log.Println("🔌 Inicializando PLC Manager...")
+	plcManager := plc.NewManager(cfg)
+
+	plcCtx, plcCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer plcCancel()
+
+	if err := plcManager.ConnectAll(plcCtx); err != nil {
+		log.Printf("❌ Error conectando a PLCs: %v", err)
+		log.Println("⚠️  Continuando sin conexión PLC (funcionalidad limitada)")
+		plcManager = nil
+	} else {
+		log.Println("✅ PLC Manager conectado exitosamente")
+		defer plcManager.CloseAll(context.Background())
+	}
+	log.Println("")
+
+	// 6. Inicializar Sorters (si hay configurados)
 	var sorters []*sorter.Sorter
 	if len(cfg.Sorters) > 0 {
 		log.Printf("🔀 Inicializando %d Sorter(s)...", len(cfg.Sorters))
@@ -143,69 +161,55 @@ func main() {
 		for _, sorterCfg := range cfg.Sorters {
 			log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 			log.Printf("  📦 Sorter #%d: %s", sorterCfg.ID, sorterCfg.Name)
-			log.Printf("     Ubicación: %s", sorterCfg.Ubicacion)
-			log.Printf("     Cognex ID: %d", sorterCfg.CognexID)
+			log.Printf("     PLC Endpoint: %s", sorterCfg.PLCEndpoint)
 
 			// Insertar sorter en la base de datos si no existe
-			if err := dbManager.InsertSorterIfNotExists(ctx, sorterCfg.ID, sorterCfg.Ubicacion); err != nil {
+			if err := dbManager.InsertSorterIfNotExists(ctx, sorterCfg.ID, sorterCfg.Name); err != nil {
 				log.Printf("     ⚠️  Error al insertar sorter en DB: %v", err)
 			} else {
 				log.Printf("     ✅ Sorter #%d insertado en DB (o ya existía)", sorterCfg.ID)
 			}
 
-			// Buscar el CognexListener correspondiente por índice (CognexID - 1)
+			// Buscar el CognexListener correspondiente (asumiendo 1 Cognex por sorter)
 			var cognexListener *listeners.CognexListener
-			if sorterCfg.CognexID > 0 && sorterCfg.CognexID <= len(cognexListeners) {
-				cognexListener = cognexListeners[sorterCfg.CognexID-1]
+			if sorterCfg.ID > 0 && sorterCfg.ID <= len(cognexListeners) {
+				cognexListener = cognexListeners[sorterCfg.ID-1]
 			}
 
-			if cognexListener == nil {
-				log.Printf("     ⚠️  No se encontró Cognex Listener para Cognex ID %d, usando el primero disponible", sorterCfg.CognexID)
-				if len(cognexListeners) > 0 {
-					cognexListener = cognexListeners[0]
-				}
+			if cognexListener == nil && len(cognexListeners) > 0 {
+				log.Printf("     ⚠️  Usando primer Cognex disponible para Sorter #%d", sorterCfg.ID)
+				cognexListener = cognexListeners[0]
 			}
 
 			// Crear salidas desde config YAML e insertarlas en la base de datos
 			var salidas []shared.Salida
-			salida_counter := 1
 			for _, salidaCfg := range sorterCfg.Salidas {
-				tipo := salidaCfg.Tipo
-				if tipo == "" {
-					tipo = "manual" // Default si no está especificado
-				}
-				batchSize := salidaCfg.BatchSize
-				if batchSize <= 0 {
-					batchSize = 1 // Default: lote de 1
-				}
-
-				// Determinar PhysicalID (si no está configurado, usar salida_counter)
 				physicalID := salidaCfg.PhysicalID
 				if physicalID <= 0 {
-					physicalID = salida_counter
+					physicalID = salidaCfg.ID // Usar ID como PhysicalID si no está configurado
 				}
 
-				// Obtener CognexID (opcional, 0 = sin cognex)
-				cognexID := salidaCfg.CognexID
+				// Crear salida con nodos PLC
+				salida := shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, "automatico", 1)
+				salida.EstadoNode = salidaCfg.PLC.EstadoNodeID
+				salida.BloqueoNode = salidaCfg.PLC.BloqueoNodeID
 
-				salida := shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, cognexID, salidaCfg.Name, tipo, batchSize)
 				salidas = append(salidas, salida)
-				// Log con o sin cognex
-				if cognexID > 0 {
-					log.Printf("       ↳ Salida %d: %s (%s, lote=%d, physical_id=%d, cognex_id=%d)",
-						salidaCfg.ID, salidaCfg.Name, tipo, batchSize, physicalID, cognexID)
-				} else {
-					log.Printf("       ↳ Salida %d: %s (%s, lote=%d, physical_id=%d)",
-						salidaCfg.ID, salidaCfg.Name, tipo, batchSize, physicalID)
+
+				log.Printf("       ↳ Salida %d: %s (physical_id=%d)", salidaCfg.ID, salidaCfg.Nombre, physicalID)
+				if salidaCfg.PLC.EstadoNodeID != "" {
+					log.Printf("           EstadoNode: %s", salidaCfg.PLC.EstadoNodeID)
 				}
+				if salidaCfg.PLC.BloqueoNodeID != "" {
+					log.Printf("           BloqueoNode: %s", salidaCfg.PLC.BloqueoNodeID)
+				}
+
 				// Insertar salida en la base de datos si no existe
 				if err := dbManager.InsertSalidaIfNotExists(ctx, salidaCfg.ID, sorterCfg.ID, physicalID, true); err != nil {
 					log.Printf("         ⚠️  Error al sincronizar salida en DB: %v", err)
 				} else {
 					log.Printf("         ✅ Salida %d sincronizada en DB (physical_id=%d)", salidaCfg.ID, physicalID)
 				}
-
-				salida_counter++
 			}
 
 			// Cargar SKUs asignadas desde la base de datos
@@ -230,13 +234,13 @@ func main() {
 			}
 
 			// Información de nodos PLC
-			if sorterCfg.PLCInputNode != "" && sorterCfg.PLCOutputNode != "" {
+			if sorterCfg.PLC.InputNodeID != "" && sorterCfg.PLC.OutputNodeID != "" {
 				log.Printf("     🔌 PLC Configurado:")
-				log.Printf("        ↳ Input Node:  %s", sorterCfg.PLCInputNode)
-				log.Printf("        ↳ Output Node: %s", sorterCfg.PLCOutputNode)
+				log.Printf("        ↳ Input Node:  %s", sorterCfg.PLC.InputNodeID)
+				log.Printf("        ↳ Output Node: %s", sorterCfg.PLC.OutputNodeID)
 			}
 
-			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Ubicacion, sorterCfg.PLCInputNode, sorterCfg.PLCOutputNode, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager)
+			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Name, sorterCfg.PLC.InputNodeID, sorterCfg.PLC.OutputNodeID, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager, plcManager)
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)

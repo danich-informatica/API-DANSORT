@@ -632,3 +632,126 @@ func (c *Client) MonitorNode(ctx context.Context, nodeID string, interval time.D
 
 	return userChan, cancelFunc, nil
 }
+
+// MonitorMultipleNodes crea UNA suscripción para monitorear MÚLTIPLES nodos
+// Esto evita el error "StatusBadTooManySubscriptions"
+func (c *Client) MonitorMultipleNodes(ctx context.Context, nodeIDs []string, interval time.Duration) (<-chan *NodeInfo, func(), error) {
+	if c.client == nil {
+		return nil, nil, fmt.Errorf("cliente no conectado")
+	}
+
+	if len(nodeIDs) == 0 {
+		return nil, nil, fmt.Errorf("no se proporcionaron nodeIDs")
+	}
+
+	// Parsear todos los nodeIDs
+	parsedNodes := make([]*ua.NodeID, 0, len(nodeIDs))
+	nodeIDMap := make(map[uint32]string) // clientHandle -> nodeID original
+
+	for _, nodeID := range nodeIDs {
+		id, err := ua.ParseNodeID(nodeID)
+		if err != nil {
+			log.Printf("⚠️ NodeID inválido '%s', se omitirá: %v", nodeID, err)
+			continue
+		}
+		parsedNodes = append(parsedNodes, id)
+	}
+
+	if len(parsedNodes) == 0 {
+		return nil, nil, fmt.Errorf("ningún nodeID válido")
+	}
+
+	// Canal para recibir notificaciones del servidor
+	notifsChan := make(chan *opcua.PublishNotificationData, 10)
+
+	// Crear UNA suscripción para todos los nodos
+	sub, err := c.client.Subscribe(ctx, &opcua.SubscriptionParameters{
+		Interval: interval,
+	}, notifsChan)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error al crear suscripción: %w", err)
+	}
+
+	// Crear monitored items para todos los nodos
+	monitorRequests := make([]*ua.MonitoredItemCreateRequest, 0, len(parsedNodes))
+	for i, id := range parsedNodes {
+		req := opcua.NewMonitoredItemCreateRequestWithDefaults(id, ua.AttributeIDValue, uint32(i))
+		monitorRequests = append(monitorRequests, req)
+		nodeIDMap[uint32(i)] = nodeIDs[i]
+	}
+
+	res, err := sub.Monitor(ctx, ua.TimestampsToReturnBoth, monitorRequests...)
+	if err != nil {
+		sub.Cancel(ctx)
+		close(notifsChan)
+		return nil, nil, fmt.Errorf("error al monitorear nodos: %w", err)
+	}
+
+	// Verificar resultados
+	successCount := 0
+	for i, result := range res.Results {
+		if result.StatusCode == ua.StatusOK {
+			successCount++
+		} else {
+			log.Printf("⚠️ Error al monitorear nodo %s: %s", nodeIDs[i], result.StatusCode)
+		}
+	}
+
+	if successCount == 0 {
+		sub.Cancel(ctx)
+		close(notifsChan)
+		return nil, nil, fmt.Errorf("no se pudo monitorear ningún nodo")
+	}
+
+	log.Printf("✅ Suscripción creada para %d nodos (intervalo: %v)", successCount, interval)
+
+	// Canal para enviar notificaciones al usuario
+	userChan := make(chan *NodeInfo, 50) // Buffer más grande para múltiples nodos
+
+	// Goroutine para procesar notificaciones
+	go func() {
+		defer close(userChan)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-notifsChan:
+				if !ok {
+					return
+				}
+				if msg.Error != nil {
+					log.Printf("⚠️ Error en notificación: %v", msg.Error)
+					continue
+				}
+
+				switch notification := msg.Value.(type) {
+				case *ua.DataChangeNotification:
+					for _, item := range notification.MonitoredItems {
+						if item.Value.Status == ua.StatusOK {
+							// Obtener el nodeID original usando el clientHandle
+							originalNodeID := nodeIDMap[item.ClientHandle]
+							nodeInfo := &NodeInfo{
+								NodeID:    originalNodeID,
+								Value:     item.Value.Value.Value(),
+								ValueType: fmt.Sprintf("%T", item.Value.Value.Value()),
+							}
+							select {
+							case userChan <- nodeInfo:
+							default:
+								// Canal lleno, descartar valor antiguo
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	// Función para cancelar suscripción
+	cancelFunc := func() {
+		sub.Cancel(context.Background())
+		close(notifsChan)
+	}
+
+	return userChan, cancelFunc, nil
+}

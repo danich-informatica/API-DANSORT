@@ -16,7 +16,24 @@
             --card-bg: #ffffff;
             --text-color: #333333;
             --text-muted: #6c757d;
-            --border-color: #dee2e6;
+            -                            <div class="button-group">
+                                <button 
+                                    class="btn btn-start" 
+                                    id="start-btn-${device.id}"
+                                    onclick="startDevice(${device.id})" 
+                                    ${device.is_running ? 'disabled' : ''}
+                                >
+                                    ▶️ Iniciar
+                                </button>
+                                <button 
+                                    class="btn btn-stop" 
+                                    id="stop-btn-${device.id}"
+                                    onclick="stopDevice(${device.id})" 
+                                    ${!device.is_running ? 'disabled' : ''}
+                                >
+                                    ⏸️ Detener
+                                </button>
+                            </div>dee2e6;
         }
 
         * {
@@ -260,6 +277,58 @@
             background: var(--primary-dark);
         }
 
+        .btn-burst {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+        }
+
+        .btn-burst:hover {
+            background: linear-gradient(135deg, #ee5a6f 0%, #c44569 100%);
+        }
+
+        .btn-burst:disabled {
+            background: #ccc;
+        }
+
+        .burst-section {
+            background: linear-gradient(135deg, rgba(255, 107, 107, 0.1) 0%, rgba(238, 90, 111, 0.05) 100%);
+            border: 2px solid rgba(255, 107, 107, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .burst-section h4 {
+            color: #c44569;
+            margin-bottom: 12px;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .burst-section h4::before {
+            content: "🔫";
+            font-size: 1.2rem;
+        }
+
+        .burst-indicator {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #ff6b6b;
+            color: white;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-left: 10px;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -363,6 +432,7 @@
     <script>
         const API_URL = 'http://localhost:9091/api';
         let refreshInterval;
+        let devicesRendered = false; // Flag para saber si ya se renderizó
 
         async function loadStatus() {
             try {
@@ -370,7 +440,15 @@
                 if (!response.ok) throw new Error('Error al cargar estado');
                 
                 const data = await response.json();
-                renderDevices(data.cognex_devices);
+                
+                // Primera carga: renderizar todo
+                if (!devicesRendered) {
+                    renderDevices(data.cognex_devices);
+                    devicesRendered = true;
+                } else {
+                    // Actualizaciones siguientes: solo actualizar estados
+                    updateDeviceStatuses(data.cognex_devices);
+                }
             } catch (error) {
                 document.getElementById('app').innerHTML = `
                     <div class="error">
@@ -382,11 +460,52 @@
             }
         }
 
+        function updateDeviceStatuses(devices) {
+            devices.forEach(device => {
+                // Actualizar badge de estado
+                const statusBadge = document.querySelector(`#status-badge-${device.id}`);
+                if (statusBadge) {
+                    statusBadge.className = `status-badge ${device.is_running ? 'running' : 'stopped'}`;
+                    statusBadge.textContent = device.is_running ? '🟢 Activo' : '⚪ Detenido';
+                }
+
+                // Actualizar clase de la tarjeta
+                const deviceCard = document.querySelector(`#device-card-${device.id}`);
+                if (deviceCard) {
+                    deviceCard.className = `device-card ${device.is_running ? 'running' : 'stopped'}`;
+                }
+
+                // Actualizar indicador de burst
+                const burstIndicator = document.querySelector(`#burst-indicator-${device.id}`);
+                if (burstIndicator) {
+                    burstIndicator.style.display = device.is_burst_mode ? 'inline-block' : 'none';
+                }
+
+                // Actualizar botones de Start/Stop
+                const startBtn = document.querySelector(`#start-btn-${device.id}`);
+                const stopBtn = document.querySelector(`#stop-btn-${device.id}`);
+                if (startBtn) startBtn.disabled = device.is_running;
+                if (stopBtn) stopBtn.disabled = !device.is_running;
+
+                // Actualizar botones de Burst
+                const burstBtn = document.querySelector(`#burst-btn-${device.id}`);
+                const stopBurstBtn = document.querySelector(`#stop-burst-btn-${device.id}`);
+                if (burstBtn) burstBtn.disabled = device.is_burst_mode || !device.is_running;
+                if (stopBurstBtn) stopBurstBtn.disabled = !device.is_burst_mode;
+
+                // Actualizar inputs de burst (deshabilitarlos si hay burst activo)
+                const burstInputs = document.querySelectorAll(`[id^="burst-"][id$="-${device.id}"]`);
+                burstInputs.forEach(input => {
+                    input.disabled = device.is_burst_mode;
+                });
+            });
+        }
+
         function renderDevices(devices) {
             const html = `
                 <div class="devices-grid">
                     ${devices.map(device => `
-                        <div class="device-card ${device.is_running ? 'running' : 'stopped'}">
+                        <div class="device-card ${device.is_running ? 'running' : 'stopped'}" id="device-card-${device.id}">
                             <div class="device-header">
                                 <div class="device-title">
                                     ${device.name}
@@ -394,7 +513,7 @@
                                         ID: ${device.id}
                                     </div>
                                 </div>
-                                <span class="status-badge ${device.is_running ? 'running' : 'stopped'}">
+                                <span class="status-badge ${device.is_running ? 'running' : 'stopped'}" id="status-badge-${device.id}">
                                     ${device.is_running ? '🟢 Activo' : '⚪ Detenido'}
                                 </span>
                             </div>
@@ -436,16 +555,74 @@
                                 </div>
                             </div>
 
+                            <div class="burst-section">
+                                <h4>Modo Disparador <span class="burst-indicator" id="burst-indicator-${device.id}" style="display: ${device.is_burst_mode ? 'inline-block' : 'none'}">ACTIVO</span></h4>
+                                <div class="input-group">
+                                    <label>Cantidad de cajas:</label>
+                                    <input 
+                                        type="number" 
+                                        id="burst-cantidad-${device.id}" 
+                                        value="50"
+                                        min="1"
+                                        max="1000"
+                                        ${device.is_burst_mode ? 'disabled' : ''}
+                                    >
+                                </div>
+                                <div class="input-group">
+                                    <label>Intervalo entre cajas (ms):</label>
+                                    <input 
+                                        type="number" 
+                                        id="burst-intervalo-${device.id}" 
+                                        value="100"
+                                        min="10"
+                                        max="60000"
+                                        step="10"
+                                        ${device.is_burst_mode ? 'disabled' : ''}
+                                    >
+                                </div>
+                                <div class="input-group">
+                                    <label>Pausa después de ráfaga (segundos):</label>
+                                    <input 
+                                        type="number" 
+                                        id="burst-pausa-${device.id}" 
+                                        value="5"
+                                        min="0"
+                                        max="300"
+                                        ${device.is_burst_mode ? 'disabled' : ''}
+                                    >
+                                </div>
+                                <div class="button-group">
+                                    <button 
+                                        class="btn btn-burst"
+                                        id="burst-btn-${device.id}"
+                                        onclick="dispararRafaga(${device.id})"
+                                        ${device.is_burst_mode || !device.is_running ? 'disabled' : ''}
+                                    >
+                                        🔫 Disparar Ráfaga
+                                    </button>
+                                    <button 
+                                        class="btn btn-stop"
+                                        id="stop-burst-btn-${device.id}"
+                                        onclick="detenerRafaga(${device.id})"
+                                        ${!device.is_burst_mode ? 'disabled' : ''}
+                                    >
+                                        ⏹️ Detener Ráfaga
+                                    </button>
+                                </div>
+                            </div>
+
                             <div class="button-group">
                                 <button 
-                                    class="btn btn-start" 
+                                    class="btn btn-start"
+                                    id="start-btn-${device.id}"
                                     onclick="startDevice(${device.id})"
                                     ${device.is_running ? 'disabled' : ''}
                                 >
                                     ▶️ Iniciar
                                 </button>
                                 <button 
-                                    class="btn btn-stop" 
+                                    class="btn btn-stop"
+                                    id="stop-btn-${device.id}"
                                     onclick="stopDevice(${device.id})"
                                     ${!device.is_running ? 'disabled' : ''}
                                 >
@@ -537,6 +714,70 @@
                 }
                 
                 showNotification('💾 Configuración actualizada', 'success');
+                await loadStatus();
+            } catch (error) {
+                showNotification('❌ ' + error.message, 'error');
+            }
+        }
+
+        async function dispararRafaga(id) {
+            const cantidad = parseInt(document.getElementById(`burst-cantidad-${id}`).value);
+            const intervalo = parseInt(document.getElementById(`burst-intervalo-${id}`).value);
+            const pausa = parseInt(document.getElementById(`burst-pausa-${id}`).value);
+
+            // Validaciones
+            if (cantidad < 1 || cantidad > 1000) {
+                showNotification('❌ Cantidad debe estar entre 1 y 1000', 'error');
+                return;
+            }
+            if (intervalo < 10 || intervalo > 60000) {
+                showNotification('❌ Intervalo debe estar entre 10 y 60000 ms', 'error');
+                return;
+            }
+            if (pausa < 0 || pausa > 300) {
+                showNotification('❌ Pausa debe estar entre 0 y 300 segundos', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/burst`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        id,
+                        cantidad: cantidad,
+                        intervalo_ms: intervalo,
+                        pausa_segundos: pausa
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al disparar ráfaga');
+                }
+                
+                const data = await response.json();
+                showNotification(`🔫 ${data.message}`, 'success');
+                await loadStatus();
+            } catch (error) {
+                showNotification('❌ ' + error.message, 'error');
+            }
+        }
+
+        async function detenerRafaga(id) {
+            try {
+                const response = await fetch(`${API_URL}/burst/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al detener ráfaga');
+                }
+                
+                showNotification('⏹️ Ráfaga detenida', 'success');
                 await loadStatus();
             } catch (error) {
                 showNotification('❌ ' + error.message, 'error');

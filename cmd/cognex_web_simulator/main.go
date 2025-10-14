@@ -56,6 +56,10 @@ type CognexSimulator struct {
 	conn          net.Conn
 	stopChan      chan bool
 	mu            sync.RWMutex
+
+	// Modo burst/disparador
+	isBurstMode   bool
+	burstStopChan chan bool
 }
 
 // SimulatorManager gestiona todos los simuladores
@@ -74,6 +78,7 @@ type CognexStatus struct {
 	Port          int    `json:"port"`
 	Ubicacion     string `json:"ubicacion"`
 	IsRunning     bool   `json:"is_running"`
+	IsBurstMode   bool   `json:"is_burst_mode"`
 	IntervalMs    int    `json:"interval_ms"`
 	NoReadPercent int    `json:"no_read_percent"`
 }
@@ -209,6 +214,118 @@ func (cs *CognexSimulator) sendLoop() {
 	}
 }
 
+// SendBurst envía una ráfaga de N cajas con intervalo específico y luego pausa
+func (cs *CognexSimulator) SendBurst(cantidad int, intervaloMs int, pausaSegundos int) error {
+	cs.mu.Lock()
+	if cs.isBurstMode {
+		cs.mu.Unlock()
+		return fmt.Errorf("ya hay una ráfaga en curso")
+	}
+
+	// Verificar que esté conectado Y corriendo
+	if cs.conn == nil || !cs.IsRunning {
+		cs.mu.Unlock()
+		return fmt.Errorf("simulador no está activo - debe estar conectado y corriendo")
+	}
+
+	cs.isBurstMode = true
+	cs.burstStopChan = make(chan bool)
+	cs.mu.Unlock()
+
+	log.Printf("🔫 [Cognex #%d] Iniciando RÁFAGA: %d cajas, intervalo=%dms, pausa=%ds",
+		cs.ID, cantidad, intervaloMs, pausaSegundos)
+
+	go func() {
+		defer func() {
+			cs.mu.Lock()
+			cs.isBurstMode = false
+			close(cs.burstStopChan)
+			cs.mu.Unlock()
+			log.Printf("✅ [Cognex #%d] Ráfaga completada", cs.ID)
+		}()
+
+		// Enviar N cajas
+		for i := 0; i < cantidad; i++ {
+			select {
+			case <-cs.burstStopChan:
+				log.Printf("⚠️ [Cognex #%d] Ráfaga cancelada en caja %d/%d", cs.ID, i+1, cantidad)
+				return
+			default:
+				// Verificar que siga corriendo
+				cs.mu.RLock()
+				isRunning := cs.IsRunning
+				noReadChance := cs.NoReadPercent
+				cs.mu.RUnlock()
+
+				if !isRunning {
+					log.Printf("⚠️ [Cognex #%d] Ráfaga interrumpida: dispositivo detenido en caja %d/%d", cs.ID, i+1, cantidad)
+					return
+				}
+
+				var codigo string
+				if rand.Intn(100) < noReadChance {
+					codigo = NO_READ_CODE
+				} else {
+					codigo = cs.generarCodigo()
+				}
+
+				mensaje := codigo + "\r\n"
+
+				cs.mu.RLock()
+				conn := cs.conn
+				cs.mu.RUnlock()
+
+				if conn == nil {
+					log.Printf("⚠️ [Cognex #%d] Ráfaga interrumpida: conexión cerrada en caja %d/%d", cs.ID, i+1, cantidad)
+					return
+				}
+
+				_, err := conn.Write([]byte(mensaje))
+				if err != nil {
+					log.Printf("❌ [Cognex #%d] Error al enviar en ráfaga: %v", cs.ID, err)
+					return
+				}
+
+				log.Printf("📤 [Cognex #%d] Ráfaga %d/%d: %s", cs.ID, i+1, cantidad, codigo)
+
+				// Esperar intervalo (excepto en la última caja)
+				if i < cantidad-1 {
+					time.Sleep(time.Duration(intervaloMs) * time.Millisecond)
+				}
+			}
+		}
+
+		// Pausa después de la ráfaga
+		if pausaSegundos > 0 {
+			log.Printf("⏸️  [Cognex #%d] Pausa de %d segundos después de ráfaga...", cs.ID, pausaSegundos)
+			select {
+			case <-cs.burstStopChan:
+				return
+			case <-time.After(time.Duration(pausaSegundos) * time.Second):
+				log.Printf("▶️  [Cognex #%d] Pausa completada", cs.ID)
+			}
+		}
+	}()
+
+	return nil
+}
+
+// StopBurst detiene una ráfaga en curso
+func (cs *CognexSimulator) StopBurst() error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	if !cs.isBurstMode {
+		return fmt.Errorf("no hay ráfaga en curso")
+	}
+
+	close(cs.burstStopChan)
+	cs.isBurstMode = false
+
+	log.Printf("🛑 [Cognex #%d] Ráfaga detenida manualmente", cs.ID)
+	return nil
+}
+
 // UpdateConfig actualiza la configuración sin detener
 func (cs *CognexSimulator) UpdateConfig(intervalMs, noReadPercent int) {
 	cs.mu.Lock()
@@ -233,6 +350,7 @@ func (cs *CognexSimulator) GetStatus() CognexStatus {
 		Port:          cs.Port,
 		Ubicacion:     cs.Ubicacion,
 		IsRunning:     cs.IsRunning,
+		IsBurstMode:   cs.isBurstMode,
 		IntervalMs:    cs.IntervalMs,
 		NoReadPercent: cs.NoReadPercent,
 	}
@@ -343,8 +461,85 @@ func updateConfig(c *gin.Context) {
 	})
 }
 
+func sendBurst(c *gin.Context) {
+	var req struct {
+		ID            int `json:"id" binding:"required"`
+		Cantidad      int `json:"cantidad" binding:"required"`
+		IntervaloMs   int `json:"intervalo_ms" binding:"required"`
+		PausaSegundos int `json:"pausa_segundos"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validaciones
+	if req.Cantidad <= 0 || req.Cantidad > 1000 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cantidad debe estar entre 1 y 1000"})
+		return
+	}
+	if req.IntervaloMs < 10 || req.IntervaloMs > 60000 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "intervalo_ms debe estar entre 10 y 60000"})
+		return
+	}
+	if req.PausaSegundos < 0 || req.PausaSegundos > 300 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pausa_segundos debe estar entre 0 y 300"})
+		return
+	}
+
+	manager.mu.RLock()
+	sim, exists := manager.simulators[req.ID]
+	manager.mu.RUnlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Cognex no encontrado"})
+		return
+	}
+
+	if err := sim.SendBurst(req.Cantidad, req.IntervaloMs, req.PausaSegundos); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("Ráfaga iniciada: %d cajas con intervalo de %dms", req.Cantidad, req.IntervaloMs),
+		"status":  sim.GetStatus(),
+	})
+}
+
+func stopBurst(c *gin.Context) {
+	var req struct {
+		ID int `json:"id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	manager.mu.RLock()
+	sim, exists := manager.simulators[req.ID]
+	manager.mu.RUnlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Cognex no encontrado"})
+		return
+	}
+
+	if err := sim.StopBurst(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Ráfaga detenida",
+		"status":  sim.GetStatus(),
+	})
+}
+
 func main() {
-	rand.Seed(time.Now().UnixNano())
+	// No necesitamos rand.Seed() en Go 1.20+
 
 	// Cargar configuración
 	cfg, err := config.LoadConfig("config/config.yaml")
@@ -406,6 +601,8 @@ func main() {
 		api.POST("/start", startCognex)
 		api.POST("/stop", stopCognex)
 		api.POST("/config", updateConfig)
+		api.POST("/burst", sendBurst)
+		api.POST("/burst/stop", stopBurst)
 	}
 
 	// Servir interfaz web
