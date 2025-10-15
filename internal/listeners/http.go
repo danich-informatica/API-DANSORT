@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -19,12 +20,13 @@ type SKUStreamer interface {
 }
 
 type HTTPFrontend struct {
-	router      *gin.Engine
-	addr        string // Dirección completa host:port
-	postgresMgr interface{}
-	skuManager  interface{}                       // Para usar SKUManager sin import cycle
-	sorters     map[string]shared.SorterInterface // Mapa de sorters por ID
-	wsHub       *WebSocketHub                     // Hub de WebSocket
+	router        *gin.Engine
+	addr          string // Dirección completa host:port
+	postgresMgr   interface{}
+	skuManager    interface{}                       // Para usar SKUManager sin import cycle
+	sorters       map[string]shared.SorterInterface // Mapa de sorters por ID
+	wsHub         *WebSocketHub                     // Hub de WebSocket
+	deviceMonitor interface{}                       // Para monitoreo de dispositivos
 }
 
 func NewHTTPFrontend(addr string) *HTTPFrontend {
@@ -100,6 +102,11 @@ func (h *HTTPFrontend) SetSKUManager(mgr interface{}) {
 	h.skuManager = mgr
 }
 
+// SetDeviceMonitor vincula el device monitor al frontend HTTP
+func (h *HTTPFrontend) SetDeviceMonitor(monitor interface{}) {
+	h.deviceMonitor = monitor
+}
+
 // RegisterSorter registra un sorter para acceso desde HTTP
 func (h *HTTPFrontend) RegisterSorter(sorter shared.SorterInterface) {
 	sorterID := fmt.Sprintf("%d", sorter.GetID())
@@ -112,6 +119,12 @@ func (h *HTTPFrontend) GetWebSocketHub() *WebSocketHub {
 }
 
 func (h *HTTPFrontend) setupRoutes() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ PANIC en setupRoutes: %v", r)
+		}
+	}()
+
 	// Servir archivos estáticos (visualizador) sin caché
 	h.router.GET("/visualizer", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -611,6 +624,78 @@ func (h *HTTPFrontend) setupRoutes() {
 
 		c.JSON(http.StatusOK, historial)
 	})
+
+	// ========================================
+	// 📡 Endpoints de Monitoreo de Dispositivos
+	// ========================================
+
+	log.Println("🔧 DEBUG: Registrando endpoints de monitoreo...")
+	log.Printf("🔧 DEBUG: h.router = %v", h.router)
+	log.Printf("🔧 DEBUG: h.deviceMonitor = %v", h.deviceMonitor)
+
+	// TEST: Endpoint simple para verificar que funciona
+	h.router.GET("/test-monitoring", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "Monitoring routes working!"})
+	})
+	log.Println("🔧 DEBUG: Ruta /test-monitoring registrada")
+
+	// Endpoint GET /monitoring/devices/sections
+	// Retorna el estado de todas las secciones (sorters)
+	h.router.GET("/monitoring/devices/sections", func(c *gin.Context) {
+		type SectionStatusGetter interface {
+			GetSectionStatuses() []models.SectionStatus
+		}
+
+		monitor, ok := h.deviceMonitor.(SectionStatusGetter)
+		if !ok || h.deviceMonitor == nil {
+			InternalServerError(c, "Monitor de dispositivos no disponible", nil)
+			return
+		}
+
+		sections := monitor.GetSectionStatuses()
+		c.JSON(http.StatusOK, sections)
+	})
+
+	// Endpoint GET /monitoring/devices/:section_id
+	// Retorna todos los dispositivos de una sección específica
+	h.router.GET("/monitoring/devices/:section_id", func(c *gin.Context) {
+		sectionIDStr := c.Param("section_id")
+		sectionID, err := strconv.Atoi(sectionIDStr)
+		if err != nil {
+			BadRequest(c, "section_id debe ser un número entero válido", gin.H{"section_id": sectionIDStr})
+			return
+		}
+
+		type DevicesBySection interface {
+			GetDevicesBySection(sectionID int) []models.DeviceStatus
+		}
+
+		monitor, ok := h.deviceMonitor.(DevicesBySection)
+		if !ok || h.deviceMonitor == nil {
+			InternalServerError(c, "Monitor de dispositivos no disponible", nil)
+			return
+		}
+
+		devices := monitor.GetDevicesBySection(sectionID)
+		c.JSON(http.StatusOK, devices)
+	})
+
+	// Endpoint GET /monitoring/devices (extra - todos los dispositivos)
+	// Retorna todos los dispositivos monitoreados
+	h.router.GET("/monitoring/devices", func(c *gin.Context) {
+		type AllDevicesGetter interface {
+			GetAllDevices() []models.DeviceStatus
+		}
+
+		monitor, ok := h.deviceMonitor.(AllDevicesGetter)
+		if !ok || h.deviceMonitor == nil {
+			InternalServerError(c, "Monitor de dispositivos no disponible", nil)
+			return
+		}
+
+		devices := monitor.GetAllDevices()
+		c.JSON(http.StatusOK, devices)
+	})
 }
 
 func (h *HTTPFrontend) Start() error {
@@ -618,6 +703,12 @@ func (h *HTTPFrontend) Start() error {
 
 	// Configurar rutas de WebSocket
 	SetupWebSocketRoutes(h.router, h.wsHub)
+
+	// DEBUG: Imprimir TODAS las rutas registradas
+	log.Println("🔍 DEBUG: Todas las rutas registradas en Gin:")
+	for _, route := range h.router.Routes() {
+		log.Printf("   %s %s", route.Method, route.Path)
+	}
 
 	return h.router.Run(h.addr)
 }

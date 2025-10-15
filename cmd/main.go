@@ -14,6 +14,7 @@ import (
 	"API-GREENEX/internal/flow"
 	"API-GREENEX/internal/listeners"
 	"API-GREENEX/internal/models"
+	"API-GREENEX/internal/monitoring"
 	"API-GREENEX/internal/shared"
 	"API-GREENEX/internal/sorter"
 
@@ -108,6 +109,12 @@ func main() {
 	}
 
 	log.Printf("✅ Servidor HTTP creado en %s", httpAddr)
+	log.Println("")
+
+	// 3.7. Crear Device Monitor para monitoreo de dispositivos con heartbeat
+	deviceMonitor := monitoring.NewDeviceMonitor(5*time.Second, 3*time.Second)
+	httpService.SetDeviceMonitor(deviceMonitor)
+	log.Println("📡 Device Monitor creado (heartbeat: 5s, timeout: 3s)")
 	log.Println("")
 
 	// 4. Crear listeners de Cognex (NO iniciarlos aún, los sorters lo harán)
@@ -254,6 +261,59 @@ func main() {
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)
+
+			// Registrar dispositivos del sorter en el monitor
+			// 1. Registrar PLC
+			if sorterCfg.PLCEndpoint != "" {
+				// Extraer host y puerto del endpoint OPC UA
+				// Formato: opc.tcp://host:port
+				plcHost, plcPort := "", 4840
+				if len(sorterCfg.PLCEndpoint) > 10 {
+					endpoint := sorterCfg.PLCEndpoint[10:] // Quitar "opc.tcp://"
+					if colonIdx := 0; colonIdx < len(endpoint) {
+						for i, c := range endpoint {
+							if c == ':' {
+								colonIdx = i
+								break
+							}
+						}
+						if colonIdx > 0 {
+							plcHost = endpoint[:colonIdx]
+							fmt.Sscanf(endpoint[colonIdx+1:], "%d", &plcPort)
+						} else {
+							plcHost = endpoint
+						}
+					}
+				}
+
+				if plcHost != "" {
+					plcDevice := &models.DeviceStatus{
+						ID:             sorterCfg.ID*100 + 1, // ID único: sorterID * 100 + 1 para PLC
+						DeviceName:     fmt.Sprintf("PLC Sorter #%d", sorterCfg.ID),
+						DeviceType:     models.DeviceTypePLC,
+						IP:             plcHost,
+						Port:           plcPort,
+						SectionID:      sorterCfg.ID,
+						IsDisconnected: false,
+					}
+					deviceMonitor.RegisterDevice(plcDevice)
+				}
+			}
+
+			// 2. Registrar Cognex del sorter
+			if cognexListener != nil {
+				cognexCfg := cfg.CognexDevices[sorterCfg.ID-1] // Asumiendo relación 1:1
+				cognexDevice := &models.DeviceStatus{
+					ID:             sorterCfg.ID*100 + 2, // ID único: sorterID * 100 + 2 para Cognex
+					DeviceName:     cognexCfg.Name,
+					DeviceType:     models.DeviceTypeCognex,
+					IP:             cognexCfg.Host,
+					Port:           cognexCfg.Port,
+					SectionID:      sorterCfg.ID,
+					IsDisconnected: false,
+				}
+				deviceMonitor.RegisterDevice(cognexDevice)
+			}
 		}
 
 		log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -341,6 +401,12 @@ func main() {
 			go s.StartFlowStatistics(calculationInterval, windowDuration)
 			log.Printf("   ✅ Sorter #%d: Sistema de flow stats iniciado", s.ID)
 		}
+		log.Println("")
+
+		// 🆕 Iniciar monitor de dispositivos
+		log.Println("📡 Iniciando monitoreo de dispositivos...")
+		go deviceMonitor.Start()
+		log.Println("   ✅ Device Monitor iniciado (heartbeat continuo)")
 		log.Println("")
 	}
 
@@ -430,6 +496,11 @@ func main() {
 	log.Printf("   GET  /skus/assignables/:sorter_id (acceso directo sin bloqueo, %d sorters registrados)", len(sorters))
 	log.Printf("   GET  /sku/assigned/:sorter_id")
 	log.Printf("   GET  /assignment/sorter/:sorter_id/history")
+	log.Println("")
+	log.Println("📡 Monitoring endpoints:")
+	log.Println("   GET  /monitoring/devices/sections")
+	log.Println("   GET  /monitoring/devices/:section_id")
+	log.Println("   GET  /monitoring/devices")
 	log.Println("")
 	log.Println("🔌 WebSocket endpoints:")
 	log.Println("   WS   /ws/:room (ej: ws://host/ws/assignment_1)")
