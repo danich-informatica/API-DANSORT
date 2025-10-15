@@ -393,10 +393,23 @@ func main() {
 	log.Println("   DELETE /assignment/:sealer_id")
 	log.Printf("   GET  /skus/assignables/:sorter_id (acceso directo sin bloqueo, %d sorters registrados)", len(sorters))
 	log.Printf("   GET  /sku/assigned/:sorter_id")
+	log.Printf("   GET  /assignment/sorter/:sorter_id/history")
 	log.Println("")
 	log.Println("🔌 WebSocket endpoints:")
 	log.Println("   WS   /ws/:room (ej: ws://host/ws/assignment_1)")
 	log.Println("   GET  /ws/stats (estadísticas de conexiones)")
+	log.Println("")
+
+	// 🌐 Iniciar servidor estático para frontend (dist/) en puerto 3001
+	staticPort := 3001
+	staticAddr := fmt.Sprintf("%s:%d", httpHost, staticPort)
+
+	go func() {
+		log.Printf("🎨 Servidor estático iniciando en %s (sirviendo carpeta dist/)...", staticAddr)
+		if err := listeners.StartStaticFileServer(staticAddr, "dist"); err != nil {
+			log.Printf("❌ Error al iniciar servidor estático: %v", err)
+		}
+	}()
 
 	// Iniciar servidor HTTP con las rutas configuradas
 	if err := httpService.Start(); err != nil {
