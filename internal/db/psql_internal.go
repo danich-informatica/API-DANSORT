@@ -409,6 +409,7 @@ func (m *PostgresManager) DeleteAllSalidaSKUs(ctx context.Context, salidaID int)
 //   - correlativo: Correlativo de la caja (ej: "10888")
 //   - salidaID: ID de la salida física en la tabla salida (ej: 8)
 //   - salidaRelativa: Número relativo de salida del sorter (1, 2, 3, etc.)
+//
 // InsertSalidaCaja registra que una caja fue enviada a una salida específica
 // Parámetros:
 //   - correlativo: Correlativo de la caja (ej: "10888")
