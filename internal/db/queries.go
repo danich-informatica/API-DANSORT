@@ -66,18 +66,21 @@ const INSERT_SALIDA_CAJA_INTERNAL_DB = `
 		correlativo_caja,
 		id_salida,
 		salida_enviada,
+		llena,
 		fecha_salida,
 		id_fabricacion
 	) VALUES (
 		$1,
 		$2,
 		$3,
+		$4,
 		CURRENT_TIMESTAMP,
 		NULL
 	)
 	ON CONFLICT (correlativo_caja, id_salida) DO UPDATE
 	SET 
 		salida_enviada = EXCLUDED.salida_enviada,
+		llena = EXCLUDED.llena,
 		fecha_salida = EXCLUDED.fecha_salida;
 `
 const SELECT_RECENT_BOXES_INTERNAL_DB = `
@@ -184,6 +187,7 @@ const SELECT_HISTORIAL_DESVIOS_INTERNAL_DB = `
 		CONCAT(c.calibre, '-', c.variedad, '-', c.embalaje) AS sku,
 		c.calibre,
 		sc.salida_enviada AS sealer,
+		sc.llena AS is_sealer_full_type,
 		sc.fecha_salida AS created_at,
 		s.sorter AS sorter_id
 	FROM salida_caja sc

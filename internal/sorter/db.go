@@ -58,19 +58,70 @@ func (s *Sorter) RegistrarSalidaCaja(correlativo string, salida *shared.Salida, 
 	}
 
 	ctx := context.Background()
-	err := pgManager.InsertSalidaCaja(ctx, correlativo, salida.ID, salida.SealerPhysicalID)
+
+	// Determinar si la salida final estaba realmente disponible. Si la salida destino
+	// (salida) no está disponible porque las otras asignadas estaban llenas, debemos
+	// marcar la salida "intended" como llena y registrar la caja apuntando a la salida
+	// donde terminó (p.ej. salida de rechazo).
+
+	// Por defecto asumimos que no estuvo llena la salida original.
+	llena := false
+
+	// Si la salida actual no está disponible, intentamos encontrar la salida configurada
+	// para el SKU (la que originalmente debería haberla recibido). Si existe y es distinta
+	// de la salida final, marcaremos esa intendedSalida como llena.
+	intendedSalidaID := -1
+	if !salida.IsAvailable() {
+		// Buscar la salida configurada para el SKU
+		for _, so := range s.Salidas {
+			for _, skuCfg := range so.SKUs_Actuales {
+				if skuCfg.SKU == sku {
+					intendedSalidaID = so.ID
+					break
+				}
+			}
+			if intendedSalidaID != -1 {
+				break
+			}
+		}
+
+		if intendedSalidaID != -1 && intendedSalidaID != salida.ID {
+			// La caja terminó en 'salida' (p.ej. REJECT) pero originalmente correspondía a intendedSalidaID
+			llena = true
+			// Buscar el SealerPhysicalID de la intendedSalida
+			sealerPhysical := 0
+			for _, so := range s.Salidas {
+				if so.ID == intendedSalidaID {
+					sealerPhysical = so.SealerPhysicalID
+					break
+				}
+			}
+
+			// Registrar un record indicando que la intended salida estuvo llena y la caja fue redirigida
+			// InsertSalidaCaja guarda el campo 'llena' y el id_salida que representa dónde debería haber ido
+			if sealerPhysical == 0 {
+				log.Printf("⚠️  No se encontró SealerPhysicalID para intendedSalida %d (caja %s)", intendedSalidaID, correlativo)
+			}
+			if err := pgManager.InsertSalidaCaja(ctx, correlativo, intendedSalidaID, sealerPhysical, true); err != nil {
+				log.Printf("⚠️  Error al marcar intended salida como llena para caja %s: %v", correlativo, err)
+			}
+		}
+	}
+
+	// Finalmente insertar el registro real donde la caja fue enviada
+	err := pgManager.InsertSalidaCaja(ctx, correlativo, salida.ID, salida.SealerPhysicalID, llena)
 	if err != nil {
 		return fmt.Errorf("error al registrar salida de caja %s: %w", correlativo, err)
 	}
 
-	// 📡 Broadcast a WebSocket de historial
-	s.PublishHistorialEvent(correlativo, sku, calibre, salida)
+	// 📡 Broadcast a WebSocket de historial (pasamos el flag 'llena')
+	s.PublishHistorialEvent(correlativo, sku, calibre, salida, llena)
 
 	return nil
 }
 
 // PublishHistorialEvent publica un evento de historial al WebSocket
-func (s *Sorter) PublishHistorialEvent(correlativo, sku, calibre string, salida *shared.Salida) {
+func (s *Sorter) PublishHistorialEvent(correlativo, sku, calibre string, salida *shared.Salida, isFull bool) {
 	if s.wsHub == nil {
 		return
 	}
@@ -81,7 +132,7 @@ func (s *Sorter) PublishHistorialEvent(correlativo, sku, calibre string, salida 
 		"sku":                 sku,
 		"caliber":             calibre,
 		"sealer":              salida.SealerPhysicalID,
-		"is_sealer_full_type": nil,
+		"is_sealer_full_type": isFull,
 		"created_at":          time.Now().UTC().Format(time.RFC3339),
 		"sorter_id":           s.ID,
 	}

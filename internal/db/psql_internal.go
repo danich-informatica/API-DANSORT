@@ -409,7 +409,13 @@ func (m *PostgresManager) DeleteAllSalidaSKUs(ctx context.Context, salidaID int)
 //   - correlativo: Correlativo de la caja (ej: "10888")
 //   - salidaID: ID de la salida física en la tabla salida (ej: 8)
 //   - salidaRelativa: Número relativo de salida del sorter (1, 2, 3, etc.)
-func (m *PostgresManager) InsertSalidaCaja(ctx context.Context, correlativo string, salidaID int, salidaRelativa int) error {
+// InsertSalidaCaja registra que una caja fue enviada a una salida específica
+// Parámetros:
+//   - correlativo: Correlativo de la caja (ej: "10888")
+//   - salidaID: ID de la salida física en la tabla salida (ej: 8)
+//   - salidaRelativa: Número relativo de salida del sorter (1, 2, 3, etc.)
+//   - llena: si la salida original estaba llena (true) o no (false)
+func (m *PostgresManager) InsertSalidaCaja(ctx context.Context, correlativo string, salidaID int, salidaRelativa int, llena bool) error {
 	if m == nil || m.pool == nil {
 		return fmt.Errorf("manager no inicializado")
 	}
@@ -425,7 +431,7 @@ func (m *PostgresManager) InsertSalidaCaja(ctx context.Context, correlativo stri
 		return fmt.Errorf("salidaRelativa inválido: %d", salidaRelativa)
 	}
 
-	commandTag, err := m.pool.Exec(ctx, INSERT_SALIDA_CAJA_INTERNAL_DB, correlativo, salidaID, salidaRelativa)
+	commandTag, err := m.pool.Exec(ctx, INSERT_SALIDA_CAJA_INTERNAL_DB, correlativo, salidaID, salidaRelativa, llena)
 	if err != nil {
 		return fmt.Errorf("error al insertar salida_caja: %w", err)
 	}
@@ -454,9 +460,10 @@ func (m *PostgresManager) GetHistorialDesvios(ctx context.Context, sorterID int)
 	for rows.Next() {
 		var boxID, sku, caliber string
 		var sealer, sorterIDResult int
+		var isFull bool
 		var createdAt interface{}
 
-		err := rows.Scan(&boxID, &sku, &caliber, &sealer, &createdAt, &sorterIDResult)
+		err := rows.Scan(&boxID, &sku, &caliber, &sealer, &isFull, &createdAt, &sorterIDResult)
 		if err != nil {
 			log.Printf("⚠️  Error al escanear fila: %v", err)
 			continue
@@ -467,7 +474,7 @@ func (m *PostgresManager) GetHistorialDesvios(ctx context.Context, sorterID int)
 			"sku":                 sku,
 			"caliber":             caliber,
 			"sealer":              sealer,
-			"is_sealer_full_type": nil,
+			"is_sealer_full_type": isFull,
 			"created_at":          createdAt,
 			"sorter_id":           sorterIDResult,
 		})

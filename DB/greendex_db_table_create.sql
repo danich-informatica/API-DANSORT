@@ -134,6 +134,7 @@ CREATE TABLE salida_caja (
     correlativo_caja VARCHAR(50) NOT NULL,
     id_salida        INT NOT NULL,
     salida_enviada   INT NOT NULL,
+    llena           BOOLEAN NOT NULL DEFAULT FALSE,
     fecha_salida     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     id_fabricacion   INT,
     CONSTRAINT pk_salida_caja PRIMARY KEY (correlativo_caja, id_salida),
