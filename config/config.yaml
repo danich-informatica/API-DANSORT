@@ -12,7 +12,7 @@ database:
     port: 1433
     user: "Danich"
     password: "yb*;NC&5r9U2"
-    database: ""
+    database: "UNITEC_DB"
     encrypt: "disable"
     trust_cert: true
     app_name: "API-Greenex"
@@ -21,6 +21,7 @@ database:
     min_conns: 5
     max_conn_lifetime: "30m"
     max_conn_idle_time: "5m"
+    sku_sync_interval: "10s" # Intervalo de sincronización de SKUs desde vista
 
 # Servidor HTTP
 http:

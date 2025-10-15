@@ -66,6 +66,16 @@ type SQLServerConfig struct {
 	MinConns        int    `yaml:"min_conns"`
 	MaxConnLifetime string `yaml:"max_conn_lifetime"`
 	MaxConnIdleTime string `yaml:"max_conn_idle_time"`
+	SKUSyncInterval string `yaml:"sku_sync_interval"` // Intervalo de sincronización de SKUs
+}
+
+// GetSKUSyncInterval retorna la duración del intervalo de sincronización de SKUs
+func (s *SQLServerConfig) GetSKUSyncInterval() time.Duration {
+	duration, err := time.ParseDuration(s.SKUSyncInterval)
+	if err != nil || duration <= 0 {
+		return 5 * time.Minute // default 5 minutos
+	}
+	return duration
 }
 
 type OPCUAConfig struct {

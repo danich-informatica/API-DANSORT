@@ -354,6 +354,42 @@ func main() {
 		}
 	}()
 
+	// 🔄 Iniciar SKU Sync Worker si está disponible
+	if skuManager != nil && len(sorters) > 0 {
+		log.Println("🔄 Inicializando SKU Sync Worker...")
+
+		// Pasar directamente la configuración del YAML
+		sqlServerMgr, err := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
+		if err != nil {
+			log.Printf("   ⚠️  No se pudo conectar a SQL Server: %v", err)
+			log.Println("   ⚠️  Sync Worker deshabilitado")
+		} else {
+			syncInterval := cfg.Database.SQLServer.GetSKUSyncInterval()
+
+			// Convertir []*sorter.Sorter a []shared.SorterInterface
+			sorterInterfaces := make([]shared.SorterInterface, len(sorters))
+			for i, s := range sorters {
+				sorterInterfaces[i] = s
+			}
+
+			syncWorker := flow.NewSKUSyncWorker(
+				context.Background(),
+				sqlServerMgr,
+				dbManager,
+				skuManager,
+				sorterInterfaces,
+				syncInterval,
+			)
+
+			syncWorker.Start()
+			defer syncWorker.Stop()
+
+			log.Printf("   ✅ Sync Worker iniciado (intervalo: %v)", syncInterval)
+			log.Println("   📋 Sincronizará SKUs desde vista VW_INT_DANICH_ENVIVO")
+		}
+		log.Println("")
+	}
+
 	// 5. Registrar todos los sorters para acceso directo desde HTTP
 	for _, s := range sorters {
 		httpService.RegisterSorter(s)

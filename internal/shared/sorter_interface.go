@@ -1,6 +1,10 @@
 package shared
 
-import "API-GREENEX/internal/models"
+import (
+	"context"
+
+	"API-GREENEX/internal/models"
+)
 
 type SorterInterface interface {
 	GetCurrentSKUs() []models.SKUAssignable
@@ -12,4 +16,6 @@ type SorterInterface interface {
 	RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, err error)
 	RemoveAllSKUsFromSalida(salidaID int) ([]models.SKU, error)
 	GetSalidas() []Salida
+	UpdateSKUs(skus []models.SKUAssignable)        // Para sincronización de SKUs
+	ReloadSalidasFromDB(ctx context.Context) error // Para recargar asignaciones desde PostgreSQL
 }

@@ -483,3 +483,57 @@ func (m *PostgresManager) GetHistorialDesvios(ctx context.Context, sorterID int)
 
 	return historial, nil
 }
+
+// SetAllSKUsToFalse marca todas las SKUs como inactivas (estado = false)
+// Se ejecuta ANTES de sincronizar para que solo las de la vista queden activas
+func (m *PostgresManager) SetAllSKUsToFalse(ctx context.Context) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+
+	commandTag, err := m.pool.Exec(ctx, UPDATE_TO_FALSE_SKU_STATE_INTERNAL_DB)
+	if err != nil {
+		return fmt.Errorf("error al marcar SKUs como false: %w", err)
+	}
+
+	rowsAffected := commandTag.RowsAffected()
+	log.Printf("🔄 [DB] %d SKUs marcadas como inactivas (estado=false)", rowsAffected)
+	return nil
+}
+
+// UpsertSKU inserta o actualiza una SKU con estado = true
+// Si existe (conflicto), actualiza estado a true
+func (m *PostgresManager) UpsertSKU(ctx context.Context, calibre, variedad, embalaje string, estado bool) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+
+	// Validar que no sea nulo o vacío
+	if isNullOrEmpty(calibre, variedad, embalaje) {
+		return fmt.Errorf("SKU inválida: componentes nulos o vacíos")
+	}
+
+	commandTag, err := m.pool.Exec(ctx, INSERT_SKU_INTERNAL_DB,
+		strings.TrimSpace(calibre),
+		strings.TrimSpace(variedad),
+		strings.TrimSpace(embalaje),
+		estado)
+
+	if err != nil {
+		return fmt.Errorf("error al upsert SKU: %w", err)
+	}
+
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("no se insertó/actualizó la SKU")
+	}
+
+	return nil
+}
+
+// BeginTx inicia una transacción PostgreSQL
+func (m *PostgresManager) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	if m == nil || m.pool == nil {
+		return nil, fmt.Errorf("manager no inicializado")
+	}
+	return m.pool.Begin(ctx)
+}

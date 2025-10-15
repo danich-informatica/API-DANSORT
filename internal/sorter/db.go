@@ -149,3 +149,38 @@ func (s *Sorter) PublishHistorialEvent(correlativo, sku, calibre string, salida 
 		Message:  jsonBytes,
 	}
 }
+
+// ReloadSalidasFromDB recarga las asignaciones de SKUs desde PostgreSQL
+// para mantener sincronizadas las salidas después de un sync de SKUs
+func (s *Sorter) ReloadSalidasFromDB(ctx context.Context) error {
+	if s.dbManager == nil {
+		return fmt.Errorf("dbManager no inicializado")
+	}
+
+	pgManager, ok := s.dbManager.(*db.PostgresManager)
+	if !ok {
+		return fmt.Errorf("dbManager no es un PostgresManager válido")
+	}
+
+	// Cargar SKUs asignadas desde la base de datos
+	skusBySalida, err := pgManager.LoadAssignedSKUsForSorter(ctx, s.ID)
+	if err != nil {
+		return fmt.Errorf("error al cargar SKUs desde BD: %w", err)
+	}
+
+	// Actualizar solo las SKUs en cada salida (sin recrear las salidas)
+	updatedCount := 0
+	for i := range s.Salidas {
+		salidaID := s.Salidas[i].ID
+		if skus, existe := skusBySalida[salidaID]; existe {
+			s.Salidas[i].SKUs_Actuales = skus
+			updatedCount += len(skus)
+		} else {
+			// Si no hay SKUs asignadas para esta salida, vaciar la lista
+			s.Salidas[i].SKUs_Actuales = []models.SKU{}
+		}
+	}
+
+	log.Printf("🔄 Sorter #%d: Salidas recargadas desde BD (%d SKUs totales)", s.ID, updatedCount)
+	return nil
+}

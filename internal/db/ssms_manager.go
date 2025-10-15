@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"API-GREENEX/internal/config"
+
 	"github.com/joho/godotenv"
 	_ "github.com/microsoft/go-mssqldb"
 )
@@ -44,6 +46,63 @@ func GetManager(ctx context.Context) (*Manager, error) {
 		return nil, managerErr
 	}
 	return managerInstance, nil
+}
+
+// GetManagerWithConfig devuelve una instancia del gestor usando configuración YAML
+// No usa singleton, crea una nueva instancia cada vez
+func GetManagerWithConfig(ctx context.Context, cfg config.SQLServerConfig) (*Manager, error) {
+	// Construir URL con encoding apropiado para caracteres especiales
+	query := url.Values{}
+	if cfg.Database != "" {
+		query.Add("database", cfg.Database)
+	}
+	query.Add("encrypt", cfg.Encrypt)
+	query.Add("TrustServerCertificate", fmt.Sprintf("%t", cfg.TrustCert))
+	query.Add("app name", cfg.AppName)
+	query.Add("connection timeout", fmt.Sprintf("%d", cfg.ConnectTimeout))
+
+	u := &url.URL{
+		Scheme:   "sqlserver",
+		User:     url.UserPassword(cfg.User, cfg.Password),
+		Host:     fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		RawQuery: query.Encode(),
+	}
+
+	connString := u.String()
+
+	db, err := sql.Open("sqlserver", connString)
+	if err != nil {
+		return nil, fmt.Errorf("db: no fue posible crear el pool de conexiones: %w", err)
+	}
+
+	// Configurar pool
+	db.SetMaxOpenConns(cfg.MaxConns)
+	db.SetMaxIdleConns(cfg.MinConns)
+
+	if cfg.MaxConnLifetime != "" {
+		duration, _ := time.ParseDuration(cfg.MaxConnLifetime)
+		db.SetConnMaxLifetime(duration)
+	}
+	if cfg.MaxConnIdleTime != "" {
+		duration, _ := time.ParseDuration(cfg.MaxConnIdleTime)
+		db.SetConnMaxIdleTime(duration)
+	}
+
+	// Validar conexión
+	pingCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.ConnectTimeout)*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(pingCtx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("db: no fue posible conectarse a SQL Server: %w", err)
+	}
+
+	log.Printf(
+		"db: pool SQL Server YAML inicializado (host=%s:%d user=%s encrypt=%s database=%s)",
+		cfg.Host, cfg.Port, cfg.User, cfg.Encrypt, visibleDatabase(cfg.Database),
+	)
+
+	return &Manager{db: db}, nil
 }
 
 // GetDB devuelve el *sql.DB subyacente para quien necesite acceso directo.

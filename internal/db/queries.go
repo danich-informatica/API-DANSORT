@@ -2,16 +2,19 @@ package db
 
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 	SELECT 
-		SEP_Varieta AS variedad,
-		SEP_Calibro AS calibre,
-		SEP_Confezione AS embalaje
-	FROM dbo.SEGREGAZIONE_PROGRAMMA;
+		VIE_CodVarieta AS variedad,
+		VIE_CodClasse AS calibre,
+		VIE_CodConfezione AS embalaje
+	FROM dbo.VW_INT_DANICH_ENVIVO
+	WHERE VIE_CodVarieta IS NOT NULL 
+	  AND VIE_CodClasse IS NOT NULL 
+	  AND VIE_CodConfezione IS NOT NULL;
 `
 const INSERT_SKU_INTERNAL_DB = `
 	INSERT INTO SKU (calibre, variedad, embalaje, estado)
 	VALUES ($1, $2, $3, $4)
 	ON CONFLICT (calibre, variedad, embalaje) 
-	DO UPDATE SET estado = true
+	DO UPDATE SET estado = EXCLUDED.estado
 `
 
 const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `

@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 
@@ -135,4 +136,35 @@ func (m *SKUManager) StreamActiveSKUsWithLimit(ctx context.Context, skuChan mode
 			}
 		}
 	}
+}
+
+// ReloadFromDB recarga todos los SKUs desde PostgreSQL (thread-safe)
+// Se usa después de sincronizar con SQL Server para actualizar el cache
+func (m *SKUManager) ReloadFromDB(ctx context.Context) error {
+	if m.dbManager == nil {
+		return fmt.Errorf("dbManager no inicializado")
+	}
+
+	// Obtener SKUs desde DB
+	skus, err := m.dbManager.GetAllSKUs(ctx)
+	if err != nil {
+		return fmt.Errorf("error al obtener SKUs: %w", err)
+	}
+
+	// Actualizar mapa de forma thread-safe
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Limpiar mapa actual
+	m.skus = make(map[string]models.SKU)
+
+	// Recargar con los nuevos datos
+	for _, sku := range skus {
+		key := sku.Calibre + "-" + sku.Variedad + "-" + sku.Embalaje
+		m.skus[key] = sku
+	}
+
+	log.Printf("♻️  SKUManager recargado: %d SKUs totales (%d activos)",
+		len(skus), len(m.GetActiveSKUs()))
+	return nil
 }
