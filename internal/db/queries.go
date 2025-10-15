@@ -195,5 +195,5 @@ const SELECT_HISTORIAL_DESVIOS_INTERNAL_DB = `
 	INNER JOIN salida s ON sc.id_salida = s.id
 	WHERE s.sorter = $1
 	ORDER BY sc.fecha_salida DESC
-	LIMIT 100
+	LIMIT 12
 `

@@ -357,13 +357,18 @@ func HandleWebSocketConnection(hub *WebSocketHub) gin.HandlerFunc {
 			return
 		}
 
-		// Validar formato de room (assignment_N)
+		// Validar formato de room. Aceptamos dos formatos:
+		//  - assignment_{id}
+		//  - history_sorter_{id}
 		var sorterID int
 		if _, err := fmt.Sscanf(roomName, "assignment_%d", &sorterID); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid room format, expected: assignment_N",
-			})
-			return
+			// intentar historial
+			if _, err2 := fmt.Sscanf(roomName, "history_sorter_%d", &sorterID); err2 != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "invalid room format, expected: assignment_N or history_sorter_N",
+				})
+				return
+			}
 		}
 
 		// Upgrade HTTP a WebSocket
