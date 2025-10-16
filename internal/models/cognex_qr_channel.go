@@ -9,13 +9,13 @@ import (
 type LecturaEvent struct {
 	Timestamp   time.Time `json:"timestamp"`
 	Exitoso     bool      `json:"exitoso"`
-	SKU         string    `json:"sku"` // Vacío si fue NO_READ o error
+	SKU         string    `json:"sku"` // Para DataMatrix, contiene "DATAMATRIX"
 	Especie     string    `json:"especie"`
 	Calibre     string    `json:"calibre"`
 	Variedad    string    `json:"variedad"`
 	Embalaje    string    `json:"embalaje"`
 	Correlativo string    `json:"correlativo"` // ID de la caja insertada en DB
-	Mensaje     string    `json:"mensaje"`     // Mensaje original recibido
+	Mensaje     string    `json:"mensaje"`     // Mensaje original o código DataMatrix
 	Error       error     `json:"error"`       // Error si hubo fallo
 	Dispositivo string    `json:"dispositivo"` // Identificador del dispositivo (ej: "Cognex-01")
 }
@@ -25,6 +25,7 @@ type TipoLectura string
 
 const (
 	LecturaExitosa     TipoLectura = "EXITOSA"
+	LecturaDataMatrix  TipoLectura = "DATAMATRIX"
 	LecturaNoRead      TipoLectura = "NO_READ"
 	LecturaFormato     TipoLectura = "ERROR_FORMATO"
 	LecturaSKU         TipoLectura = "ERROR_SKU"
@@ -35,6 +36,9 @@ const (
 // GetTipo devuelve el tipo de lectura basado en el estado del evento
 func (e *LecturaEvent) GetTipo() TipoLectura {
 	if e.Exitoso {
+		if e.SKU == "DATAMATRIX" {
+			return LecturaDataMatrix
+		}
 		return LecturaExitosa
 	}
 
@@ -60,6 +64,10 @@ func (e *LecturaEvent) GetTipo() TipoLectura {
 // String implementa fmt.Stringer
 func (e *LecturaEvent) String() string {
 	if e.Exitoso {
+		if e.SKU == "DATAMATRIX" {
+			return fmt.Sprintf("[%s] ✅ DataMatrix: %s | Dispositivo: %s",
+				e.Timestamp.Format("15:04:05"), e.Mensaje, e.Dispositivo)
+		}
 		return fmt.Sprintf("[%s] ✅ SKU: %s | Correlativo: %s",
 			e.Timestamp.Format("15:04:05"), e.SKU, e.Correlativo)
 	}
@@ -67,7 +75,7 @@ func (e *LecturaEvent) String() string {
 		e.Timestamp.Format("15:04:05"), e.Error, e.Mensaje)
 }
 
-// NewLecturaExitosa crea un evento de lectura exitosa
+// NewLecturaExitosa crea un evento de lectura exitosa de un SKU
 func NewLecturaExitosa(sku, especie, calibre, variedad, embalaje, correlativo, mensaje, dispositivo string) LecturaEvent {
 	return LecturaEvent{
 		Timestamp:   time.Now(),
@@ -79,6 +87,18 @@ func NewLecturaExitosa(sku, especie, calibre, variedad, embalaje, correlativo, m
 		Embalaje:    embalaje,
 		Correlativo: correlativo,
 		Mensaje:     mensaje,
+		Dispositivo: dispositivo,
+		Error:       nil,
+	}
+}
+
+// NewLecturaDataMatrix crea un evento para una lectura de código DataMatrix
+func NewLecturaDataMatrix(dispositivo, codigo string) LecturaEvent {
+	return LecturaEvent{
+		Timestamp:   time.Now(),
+		Exitoso:     true,
+		SKU:         "DATAMATRIX", // SKU especial para identificar este tipo de evento
+		Mensaje:     codigo,
 		Dispositivo: dispositivo,
 		Error:       nil,
 	}

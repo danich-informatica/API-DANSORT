@@ -340,7 +340,32 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		}
 	case "DATAMATRIX":
 		log.Printf("📊 DataMatrix detectado: %s", strings.TrimSpace(message))
-		// TODO: Implementar procesamiento de DataMatrix en el futuro
+		message = strings.TrimSpace(message)
+
+		if message == "" {
+			log.Printf("❌ Mensaje DataMatrix vacío recibido")
+			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("mensaje datamatrix vacío"), message, c.dispositivo)
+			if _, err := conn.Write([]byte(response)); err != nil {
+				log.Printf("Error al enviar respuesta NACK: %v\n", err)
+			}
+			return
+		}
+
+		// Crear y enviar un evento específico para DataMatrix.
+		// Este evento será recogido por el Sorter, que buscará la salida asociada
+		// al dispositivo y ejecutará la lógica correspondiente con el código leído.
+		// NOTA: Se asume la existencia de 'NewLecturaDataMatrix(dispositivo, codigo)' en el paquete 'models'.
+		log.Printf("✅ Enviando evento DataMatrix para dispositivo '%s' con código '%s'", c.dispositivo, message)
+		c.EventChan <- models.NewLecturaDataMatrix(c.dispositivo, message)
+
+		// Enviar confirmación inmediata a la cámara
+		response := "ACK\r\n"
+		if _, err := conn.Write([]byte(response)); err != nil {
+			log.Printf("Error al enviar respuesta ACK: %v\n", err)
+		}
+		return
+
 	default:
 		log.Printf("❌ Método de escaneo desconocido: %s", c.scan_method)
 		response := "NACK\r\n"
