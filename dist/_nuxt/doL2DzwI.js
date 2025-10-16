@@ -1,0 +1,1 @@
+const r=(t,e)=>{const i=new Date(e?`${t}Z`:`${t}`);if(isNaN(i.getTime()))return"N/A";const o={timeZone:"America/Santiago",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:!1};return i.toLocaleString("es-CL",o)};export{r as _};

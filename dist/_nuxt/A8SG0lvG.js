@@ -1,0 +1,1 @@
+import{p as a,q as o,s as r}from"#entry";const e={EDITION:{LITE:"lite"},PLUS_ONLY_ROUTES:["/management","/reassignment","/monitoring","/etiquette-generator"]},p=a(t=>{const n=o().public.appEdition,i=e.PLUS_ONLY_ROUTES.some(s=>t.path.startsWith(s));if(n===e.EDITION.LITE&&i)return r("/denied-access",{replace:!0})});export{p as default};

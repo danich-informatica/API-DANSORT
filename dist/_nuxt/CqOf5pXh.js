@@ -1,0 +1,1 @@
+import{_ as t}from"./DlAUqK2U.js";import{c as o,o as n,a as r}from"#entry";const s={},c={class:"w-full h-full flex justify-center items-center title-2 text-dgray"};function l(_,e){return n(),o("div",c,[...e[0]||(e[0]=[r("h1",null,"ESCANEAR CAJA PARA CONTINUAR",-1)])])}const i=t(s,[["render",l]]);export{i as default};
