@@ -2,6 +2,7 @@ package shared
 
 import (
 	"API-GREENEX/internal/models"
+	"log"
 	"sync"
 )
 
@@ -13,6 +14,7 @@ type Salida struct {
 	Tipo             string       `json:"tipo"`       // "automatico" o "manual"
 	BatchSize        int          `json:"batch_size"` // Tamaño de lote para distribución
 	SKUs_Actuales    []models.SKU `json:"skus_actuales"`
+	EventChannel     chan interface{} `json:"-"`
 
 	// Valores en tiempo real desde PLC (protegidos por mutex)
 	estadoMutex sync.RWMutex
@@ -25,6 +27,17 @@ type Salida struct {
 	IsEnabled   bool   `json:"is_enabled"`
 	EstadoNode  string `json:"estado_node"`  // Nodo OPC UA para estado
 	BloqueoNode string `json:"bloqueo_node"` // Nodo OPC UA para bloqueo
+}
+
+// Start inicia la gorutina para escuchar eventos de la salida
+func (s *Salida) Start() {
+	go func() {
+		log.Printf("[Salida %d] Gorutina iniciada, escuchando eventos...", s.ID)
+		for event := range s.EventChannel {
+			log.Printf("[Salida %d] Evento recibido: %+v", s.ID, event)
+		}
+		log.Printf("[Salida %d] Canal de eventos cerrado. Gorutina terminada.", s.ID)
+	}()
 }
 
 // GetEstado retorna el estado actual de forma thread-safe
@@ -81,6 +94,7 @@ func GetNewSalida(ID int, salida_sorter string, tipo string, batchSize int) Sali
 		Estado:           0,
 		Ingreso:          false,
 		IsEnabled:        true,
+		EventChannel:     make(chan interface{}, 100),
 	}
 }
 

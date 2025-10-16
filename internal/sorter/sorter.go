@@ -120,6 +120,14 @@ func (s *Sorter) Start() error {
 		log.Printf("  ↳ Sorter #%d: Salida %d: %s", s.ID, salida.ID, salida.Salida_Sorter)
 	}
 
+	// Iniciar gorutinas para salidas automáticas
+	for i := range s.Salidas {
+		if s.Salidas[i].Tipo == "automatico" {
+			log.Printf("  ↳ Sorter #%d: Iniciando gorutina para salida automática %d", s.ID, s.Salidas[i].ID)
+			s.Salidas[i].Start()
+		}
+	}
+
 	if s.Cognex != nil {
 		err := s.Cognex.Start()
 		if err != nil {
