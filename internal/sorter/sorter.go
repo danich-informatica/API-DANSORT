@@ -116,8 +116,8 @@ func (s *Sorter) Start() error {
 	log.Printf("🚀 Sorter #%d: Iniciando en %s", s.ID, s.Ubicacion)
 	log.Printf("📍 Sorter #%d: Salidas configuradas: %d", s.ID, len(s.Salidas))
 
-	for _, salida := range s.Salidas {
-		log.Printf("  ↳ Sorter #%d: Salida %d: %s", s.ID, salida.ID, salida.Salida_Sorter)
+	for i := range s.Salidas {
+		log.Printf("  ↳ Sorter #%d: Salida %d: %s", s.ID, s.Salidas[i].ID, s.Salidas[i].Salida_Sorter)
 	}
 
 	// Iniciar gorutinas para salidas automáticas
@@ -135,13 +135,17 @@ func (s *Sorter) Start() error {
 		}
 	}
 
+	// Iniciar procesamiento de eventos QR/SKU (canal original)
 	go s.procesarEventosCognex()
+
+	// Iniciar procesamiento de eventos DataMatrix (nuevo canal dedicado)
+	go s.procesarEventosDataMatrix()
 
 	if s.plcManager != nil {
 		s.startPLCSubscriptions()
 	}
 
-	log.Printf("✅ Sorter #%d: Iniciado y escuchando eventos de Cognex", s.ID)
+	log.Printf("✅ Sorter #%d: Iniciado y escuchando eventos (QR/SKU + DataMatrix)", s.ID)
 
 	return nil
 }

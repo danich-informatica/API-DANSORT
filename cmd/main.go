@@ -85,6 +85,19 @@ func main() {
 	defer dbManager.Close()
 	log.Println("✅ Base de datos PostgreSQL inicializada correctamente")
 
+	// 3.4. Inicializar FX6Manager para lecturas DataMatrix
+	log.Println("")
+	log.Println("📊 Inicializando conexión a SQL Server FX6...")
+	fx6Manager, err := db.GetFX6Manager(ctx, cfg)
+	if err != nil {
+		log.Printf("⚠️  Error al inicializar FX6Manager: %v (continuando sin soporte DataMatrix)", err)
+		fx6Manager = nil
+	} else {
+		defer fx6Manager.Close()
+		log.Println("✅ FX6Manager inicializado correctamente (tabla PKG_Pallets_Externos)")
+	}
+	log.Println("")
+
 	// 3.5. Inicializar SKUManager para gestión eficiente con streaming
 	skuManager, err := flow.NewSKUManager(ctx, dbManager)
 	if err != nil {
@@ -130,6 +143,7 @@ func main() {
 		log.Printf("     Método: %s", cognexCfg.ScanMethod)
 
 		cognexListener := listeners.NewCognexListener(
+			cognexCfg.ID,
 			cognexCfg.Host,
 			cognexCfg.Port,
 			cognexCfg.ScanMethod,
@@ -206,11 +220,26 @@ func main() {
 					tipo = "automatico"
 				}
 
-				// Crear salida con tipo desde config YAML
-				salida := shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, 1)
+				// Crear salida con todos los parámetros incluyendo CognexID si está disponible
+				var salida shared.Salida
+				if cognexListener != nil {
+					// Obtener el ID del Cognex del listener
+					cognexID := sorterCfg.ID // Asumimos que el CognexID coincide con el SorterID
+					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, cognexID, salidaCfg.Nombre, tipo, 1)
+				} else {
+					salida = shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, 1)
+				}
+
 				salida.EstadoNode = salidaCfg.PLC.EstadoNodeID
 				salida.BloqueoNode = salidaCfg.PLC.BloqueoNodeID
 
+				// Vincular FX6Manager ANTES de añadir al slice (para evitar copiar el mutex)
+				if fx6Manager != nil {
+					salida.SetFX6Manager(fx6Manager)
+					log.Printf("           ✅ FX6Manager vinculado (DataMatrix habilitado)")
+				}
+
+				// Importante: añadir la salida después de configurarla completamente
 				salidas = append(salidas, salida)
 
 				log.Printf("       ↳ Salida %d: %s [%s] (physical_id=%d)", salidaCfg.ID, salidaCfg.Nombre, tipo, physicalID)

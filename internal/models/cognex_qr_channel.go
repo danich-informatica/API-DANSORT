@@ -14,10 +14,11 @@ type LecturaEvent struct {
 	Calibre     string    `json:"calibre"`
 	Variedad    string    `json:"variedad"`
 	Embalaje    string    `json:"embalaje"`
-	Correlativo string    `json:"correlativo"` // ID de la caja insertada en DB
+	Correlativo string    `json:"correlativo"` // ID de la caja insertada en DB (para QR) o código DataMatrix
 	Mensaje     string    `json:"mensaje"`     // Mensaje original o código DataMatrix
 	Error       error     `json:"error"`       // Error si hubo fallo
 	Dispositivo string    `json:"dispositivo"` // Identificador del dispositivo (ej: "Cognex-01")
+	CognexID    int       `json:"cognex_id"`   // ID numérico del dispositivo Cognex
 }
 
 // TipoLectura representa el tipo de lectura
@@ -92,14 +93,15 @@ func NewLecturaExitosa(sku, especie, calibre, variedad, embalaje, correlativo, m
 	}
 }
 
-// NewLecturaDataMatrix crea un evento para una lectura de código DataMatrix
-func NewLecturaDataMatrix(dispositivo, codigo string) LecturaEvent {
+// NewLecturaDataMatrix crea un evento específico para lecturas DataMatrix
+func NewLecturaDataMatrix(codigo, dispositivo string, cognexID int) LecturaEvent {
 	return LecturaEvent{
 		Timestamp:   time.Now(),
 		Exitoso:     true,
 		SKU:         "DATAMATRIX", // SKU especial para identificar este tipo de evento
 		Mensaje:     codigo,
 		Dispositivo: dispositivo,
+		CognexID:    cognexID, // ID numérico del Cognex
 		Error:       nil,
 	}
 }

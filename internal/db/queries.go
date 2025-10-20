@@ -10,6 +10,12 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 	  AND VIE_CodClasse IS NOT NULL 
 	  AND VIE_CodConfezione IS NOT NULL;
 `
+
+const INSERT_LECTURA_DATAMATRIX_SSMS = `
+	INSERT INTO PKG_Pallets_Externos 
+	(Salida, Correlativo, Numero_Caja, Fecha_Lectura, Terminado)
+	VALUES (@p1, @p2, @p3, @p4, 0)
+`
 const INSERT_SKU_INTERNAL_DB = `
 	INSERT INTO SKU (calibre, variedad, embalaje, estado)
 	VALUES ($1, $2, $3, $4)

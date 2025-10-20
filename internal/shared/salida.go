@@ -2,18 +2,21 @@ package shared
 
 import (
 	"API-GREENEX/internal/models"
+	"context"
 	"log"
+	"strconv"
 	"sync"
+	"time"
 )
 
 type Salida struct {
-	ID               int          `json:"id"`
-	SealerPhysicalID int          `json:"sealer_physical_id"`
-	CognexID         int          `json:"cognex_id"` // ID de Cognex asignado a esta salida (0 = sin cognex)
-	Salida_Sorter    string       `json:"salida_sorter"`
-	Tipo             string       `json:"tipo"`       // "automatico" o "manual"
-	BatchSize        int          `json:"batch_size"` // Tamaño de lote para distribución
-	SKUs_Actuales    []models.SKU `json:"skus_actuales"`
+	ID               int              `json:"id"`
+	SealerPhysicalID int              `json:"sealer_physical_id"`
+	CognexID         int              `json:"cognex_id"` // ID de Cognex asignado a esta salida (0 = sin cognex)
+	Salida_Sorter    string           `json:"salida_sorter"`
+	Tipo             string           `json:"tipo"`       // "automatico" o "manual"
+	BatchSize        int              `json:"batch_size"` // Tamaño de lote para distribución
+	SKUs_Actuales    []models.SKU     `json:"skus_actuales"`
 	EventChannel     chan interface{} `json:"-"`
 
 	// Valores en tiempo real desde PLC (protegidos por mutex)
@@ -27,6 +30,9 @@ type Salida struct {
 	IsEnabled   bool   `json:"is_enabled"`
 	EstadoNode  string `json:"estado_node"`  // Nodo OPC UA para estado
 	BloqueoNode string `json:"bloqueo_node"` // Nodo OPC UA para bloqueo
+
+	// Campos para DataMatrix (FX6)
+	fx6Manager interface{} // *db.FX6Manager (interface para evitar import cycle)
 }
 
 // Start inicia la gorutina para escuchar eventos de la salida
@@ -111,4 +117,54 @@ func GetNewSalidaComplete(ID int, physicalID int, cognexID int, salida_sorter st
 	salida.SealerPhysicalID = physicalID
 	salida.CognexID = cognexID
 	return salida
+}
+
+// SetFX6Manager vincula el manager FX6 a esta salida
+func (s *Salida) SetFX6Manager(fx6Manager interface{}) {
+	s.fx6Manager = fx6Manager
+}
+
+// ProcessDataMatrix procesa una lectura de DataMatrix
+// El correlativo ES el número de caja (no hay auto-incremento)
+// Retorna el número de caja (= correlativo) y error si hubo
+func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (int, error) {
+	// Convertir correlativo string a int64
+	correlativo, err := strconv.ParseInt(correlativoStr, 10, 64)
+	if err != nil {
+		log.Printf("❌ [Salida %d] Error al convertir correlativo '%s' a número: %v", s.SealerPhysicalID, correlativoStr, err)
+		return 0, err
+	}
+
+	// El número de caja ES el correlativo mismo
+	numeroCaja := int(correlativo)
+	fechaLectura := time.Now()
+
+	// Insertar en SQL Server FX6 solo si hay manager disponible
+	if s.fx6Manager != nil {
+		// Type assertion para usar el método
+		type FX6Inserter interface {
+			InsertLecturaDataMatrix(ctx context.Context, salida int, correlativo int64, numeroCaja int, fechaLectura time.Time) error
+		}
+
+		if fx6, ok := s.fx6Manager.(FX6Inserter); ok {
+			err := fx6.InsertLecturaDataMatrix(
+				ctx,
+				s.SealerPhysicalID,
+				correlativo,
+				numeroCaja,
+				fechaLectura,
+			)
+
+			if err != nil {
+				// Solo logear, no detener el proceso
+				log.Printf("❌ [Salida %d] Error al insertar DataMatrix en FX6 (Correlativo=%d, Caja=%d): %v",
+					s.SealerPhysicalID, correlativo, numeroCaja, err)
+			} else {
+				log.Printf("✅ [Salida %d] DataMatrix registrado: Correlativo=%d = Caja=%d",
+					s.SealerPhysicalID, correlativo, numeroCaja)
+			}
+		}
+	}
+
+	return numeroCaja, nil
 }

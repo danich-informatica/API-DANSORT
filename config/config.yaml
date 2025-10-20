@@ -1,7 +1,7 @@
 # Base de datos PostgreSQL
 database:
   postgres:
-    url: "postgres://danich:danich155@172.16.100.20:5432/greenex?sslmode=disable"
+    url: "postgres://danich:danich155@127.0.0.1:5432/greenex?sslmode=disable"
     min_conns: 1
     max_conns: 10
     connect_timeout: "10s"
@@ -69,7 +69,7 @@ cognex_devices:
 sorters:
   - id: 1
     name: "Sorter Principal"
-    plc_endpoint: "opc.tcp://192.168.120.100:4840"
+    plc_endpoint: "opc.tcp://192.168.121.20:4840" # Mismo endpoint por ahora 192.168.121.16 para produccion
     plc:
       object_id: "ns=4;i=1"
       method_id: "ns=4;i=21"
@@ -130,6 +130,7 @@ sorters:
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
+        cognex_id: 3
         plc:
           estado_node_id: "ns=4;i=57"
           bloqueo_node_id: "ns=4;i=58"
@@ -175,60 +176,96 @@ sorters:
           bloqueo_node_id: ""
 
   - id: 2
-    name: "Sorter Secundario"
+    name: "Sorter manual"
     ubicacion: "Planta A - Línea 2"
     cognex_id: 2
     scan_method: "QR"
-    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora
+    plc_endpoint: "opc.tcp://192.168.121.20:4840" # Mismo endpoint por ahora
     plc:
-      input_node_id: "ns=4;s=|var|SORTER2.INPUT"
-      output_node_id: "ns=4;s=|var|SORTER2.OUTPUT"
+      object_id: "ns=4;i=1"
+      method_id: "ns=4;i=20"
+      input_node_id: "ns=4;i=21"
+      output_node_id: "ns=4;i=22"
     salidas:
-      - id: 8
-        physical_id: 1 # ← ID FÍSICO del SORTER 2 (1, 2, 3...)
-        nombre: "Premium"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA1.ESTADO"
-          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA1.BLOQUEO"
-      - id: 9
-        physical_id: 2 # ← ID FÍSICO del SORTER 2
-        nombre: "Estándar"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA2.ESTADO"
-          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA2.BLOQUEO"
-      - id: 10
-        physical_id: 3 # ← ID FÍSICO del SORTER 2
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA3.ESTADO"
-          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA3.BLOQUEO"
-      - id: 11
-        physical_id: 4 # ← ID FÍSICO del SORTER 2
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA4.ESTADO"
-          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA4.BLOQUEO"
-      - id: 12
-        physical_id: 5 # ← ID FÍSICO del SORTER 2
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA5.ESTADO"
-          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA5.BLOQUEO"
       - id: 13
-        physical_id: 6 # ← ID FÍSICO del SORTER 2
+        physical_id: 1
+        nombre: "Salida manual"
+        tipo: "manual"
+        batch_size: 3
+        cognex_id: 3
+        plc:
+          estado_node_id: "ns=4;i=26"
+          bloqueo_node_id: "ns=4;i=27"
+      - id: 14
+        physical_id: 2
+        nombre: "Salida manual"
+        tipo: "manual"
+        batch_size: 3
+        plc:
+          estado_node_id: "ns=4;i=31"
+          bloqueo_node_id: "ns=4;i=32"
+      - id: 15
+        physical_id: 3
         nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;s=|var|SORTER2.SALIDA6.ESTADO"
-          bloqueo_node_id: "ns=4;s=|var|SORTER2.SALIDA6.BLOQUEO"
+          estado_node_id: "ns=4;i=36"
+          bloqueo_node_id: "ns=4;i=37"
+      - id: 16
+        physical_id: 4
+        nombre: "Salida manual"
+        tipo: "manual"
+        batch_size: 1
+        plc:
+          estado_node_id: "ns=4;i=41"
+          bloqueo_node_id: "ns=4;i=42"
+      - id: 17
+        physical_id: 5
+        nombre: "Salida manual"
+        tipo: "manual"
+        batch_size: 1
+        plc:
+          estado_node_id: "ns=4;i=46"
+          bloqueo_node_id: "ns=4;i=47"
+      - id: 18
+        physical_id: 6
+        nombre: "Salida manunal"
+        tipo: "manual"
+        batch_size: 1
+        plc:
+          estado_node_id: "ns=4;i=51"
+          bloqueo_node_id: "ns=4;i=52"
+      - id: 19
+        physical_id: 7
+        nombre: "Salida manual"
+        tipo: "manual"
+        batch_size: 1
+        cognex_id: 3
+        plc:
+          estado_node_id: "ns=4;i=56"
+          bloqueo_node_id: "ns=4;i=57"
+      - id: 20
+        physical_id: 8
+        nombre: "Salida manual"
+        tipo: "manual"
+        batch_size: 1
+        plc:
+          estado_node_id: "ns=4;i=61"
+          bloqueo_node_id: "ns=4;i=62"
+      - id: 21
+        physical_id: 9
+        nombre: "Salida manual"
+        tipo: "manual"
+        batch_size: 1
+        plc:
+          estado_node_id: "ns=4;i=66"
+          bloqueo_node_id: "ns=4;i=67"
+      - id: 22
+        physical_id: 10
+        nombre: "Salida descarte"
+        tipo: "descarte"
+        batch_size: 1
+        plc:
+          estado_node_id: "ns=4;i=71"
+          bloqueo_node_id: ""

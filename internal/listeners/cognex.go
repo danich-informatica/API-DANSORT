@@ -29,31 +29,35 @@ type insertResult struct {
 }
 
 type CognexListener struct {
-	remoteHost  string // Host remoto de donde viene la cámara (solo informativo)
-	port        int
-	scan_method string // "QR" o "DATAMATRIX"
-	listener    net.Listener
-	ctx         context.Context
-	cancel      context.CancelFunc
-	dbManager   *db.PostgresManager
-	EventChan   chan models.LecturaEvent
-	insertChan  chan insertRequest // Canal para inserciones asíncronas
-	dispositivo string
+	id             int    // ID numérico del Cognex (del config)
+	remoteHost     string // Host remoto de donde viene la cámara (solo informativo)
+	port           int
+	scan_method    string // "QR" o "DATAMATRIX"
+	listener       net.Listener
+	ctx            context.Context
+	cancel         context.CancelFunc
+	dbManager      *db.PostgresManager
+	EventChan      chan models.LecturaEvent    // Canal para lecturas QR/SKU (flujo original)
+	DataMatrixChan chan models.DataMatrixEvent // Canal para lecturas DataMatrix (nuevo flujo)
+	insertChan     chan insertRequest          // Canal para inserciones asíncronas
+	dispositivo    string
 }
 
-func NewCognexListener(remoteHost string, port int, scan_method string, dbManager *db.PostgresManager) *CognexListener {
+func NewCognexListener(id int, remoteHost string, port int, scan_method string, dbManager *db.PostgresManager) *CognexListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	dispositivo := fmt.Sprintf("Cognex-%s:%d", remoteHost, port)
+	dispositivo := fmt.Sprintf("Cognex-%d:%d", id, port)
 	cl := &CognexListener{
-		remoteHost:  remoteHost,
-		port:        port,
-		ctx:         ctx,
-		scan_method: scan_method,
-		cancel:      cancel,
-		dbManager:   dbManager,
-		EventChan:   make(chan models.LecturaEvent, 100), // buffer para 100 eventos
-		insertChan:  make(chan insertRequest, 200),       // buffer para 200 inserciones pendientes
-		dispositivo: dispositivo,
+		id:             id,
+		remoteHost:     remoteHost,
+		port:           port,
+		ctx:            ctx,
+		scan_method:    scan_method,
+		cancel:         cancel,
+		dbManager:      dbManager,
+		EventChan:      make(chan models.LecturaEvent, 100),    // buffer para 100 eventos QR/SKU
+		DataMatrixChan: make(chan models.DataMatrixEvent, 100), // buffer para 100 eventos DataMatrix
+		insertChan:     make(chan insertRequest, 200),          // buffer para 200 inserciones pendientes
+		dispositivo:    dispositivo,
 	}
 
 	// Iniciar worker para inserciones asíncronas
@@ -345,19 +349,23 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if message == "" {
 			log.Printf("❌ Mensaje DataMatrix vacío recibido")
 			response := "NACK\r\n"
-			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("mensaje datamatrix vacío"), message, c.dispositivo)
 			if _, err := conn.Write([]byte(response)); err != nil {
 				log.Printf("Error al enviar respuesta NACK: %v\n", err)
 			}
 			return
 		}
 
-		// Crear y enviar un evento específico para DataMatrix.
-		// Este evento será recogido por el Sorter, que buscará la salida asociada
-		// al dispositivo y ejecutará la lógica correspondiente con el código leído.
-		// NOTA: Se asume la existencia de 'NewLecturaDataMatrix(dispositivo, codigo)' en el paquete 'models'.
-		log.Printf("✅ Enviando evento DataMatrix para dispositivo '%s' con código '%s'", c.dispositivo, message)
-		c.EventChan <- models.NewLecturaDataMatrix(c.dispositivo, message)
+		// Crear y enviar evento DataMatrix al nuevo canal dedicado
+		// Este flujo es SEPARADO del flujo QR/SKU original
+		dmEvent := models.NewDataMatrixEvent(message, c.dispositivo, c.id, message)
+		log.Printf("✅ [Cognex#%d] DataMatrix → Canal dedicado | Código: %s", c.id, message)
+
+		select {
+		case c.DataMatrixChan <- dmEvent:
+			log.Printf("   ✓ Evento DataMatrix enviado correctamente")
+		case <-time.After(2 * time.Second):
+			log.Printf("   ⚠️  Timeout enviando evento DataMatrix (canal lleno?)")
+		}
 
 		// Enviar confirmación inmediata a la cámara
 		response := "ACK\r\n"

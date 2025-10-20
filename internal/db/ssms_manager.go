@@ -51,6 +51,16 @@ func GetManager(ctx context.Context) (*Manager, error) {
 // GetManagerWithConfig devuelve una instancia del gestor usando configuración YAML
 // No usa singleton, crea una nueva instancia cada vez
 func GetManagerWithConfig(ctx context.Context, cfg config.SQLServerConfig) (*Manager, error) {
+	return newManagerWithConfig(ctx, cfg, "")
+}
+
+// GetManagerWithConfigAndLabel crea un manager con label personalizada para logs
+func GetManagerWithConfigAndLabel(ctx context.Context, cfg config.SQLServerConfig, label string) (*Manager, error) {
+	return newManagerWithConfig(ctx, cfg, label)
+}
+
+// newManagerWithConfig es la función interna que crea el manager
+func newManagerWithConfig(ctx context.Context, cfg config.SQLServerConfig, label string) (*Manager, error) {
 	// Construir URL con encoding apropiado para caracteres especiales
 	query := url.Values{}
 	if cfg.Database != "" {
@@ -58,7 +68,12 @@ func GetManagerWithConfig(ctx context.Context, cfg config.SQLServerConfig) (*Man
 	}
 	query.Add("encrypt", cfg.Encrypt)
 	query.Add("TrustServerCertificate", fmt.Sprintf("%t", cfg.TrustCert))
-	query.Add("app name", cfg.AppName)
+
+	appName := cfg.AppName
+	if label != "" {
+		appName = fmt.Sprintf("%s-%s", cfg.AppName, label)
+	}
+	query.Add("app name", appName)
 	query.Add("connection timeout", fmt.Sprintf("%d", cfg.ConnectTimeout))
 
 	u := &url.URL{
@@ -97,9 +112,14 @@ func GetManagerWithConfig(ctx context.Context, cfg config.SQLServerConfig) (*Man
 		return nil, fmt.Errorf("db: no fue posible conectarse a SQL Server: %w", err)
 	}
 
+	logLabel := label
+	if logLabel == "" {
+		logLabel = "SQL Server"
+	}
+
 	log.Printf(
-		"db: pool SQL Server YAML inicializado (host=%s:%d user=%s encrypt=%s database=%s)",
-		cfg.Host, cfg.Port, cfg.User, cfg.Encrypt, visibleDatabase(cfg.Database),
+		"✅ %s inicializado (host=%s:%d user=%s database=%s)",
+		logLabel, cfg.Host, cfg.Port, cfg.User, visibleDatabase(cfg.Database),
 	)
 
 	return &Manager{db: db}, nil
