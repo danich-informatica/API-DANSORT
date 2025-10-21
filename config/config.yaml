@@ -8,7 +8,7 @@ database:
     healthcheck_interval: "30s"
 
   sqlserver:
-    host: "192.168.0.9"
+    host: "190.110.163.22" # Producción: 192.168.0.9 -- Desarrollo: 190.110.163.22
     port: 1433
     user: "Danich"
     password: "yb*;NC&5r9U2"
@@ -69,7 +69,7 @@ cognex_devices:
 sorters:
   - id: 1
     name: "Sorter Principal"
-    plc_endpoint: "opc.tcp://192.168.121.20:4840" # Mismo endpoint por ahora 192.168.121.16 para produccion
+    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora 192.168.121.16 para produccion
     plc:
       object_id: "ns=4;i=1"
       method_id: "ns=4;i=21"
@@ -180,7 +180,7 @@ sorters:
     ubicacion: "Planta A - Línea 2"
     cognex_id: 2
     scan_method: "QR"
-    plc_endpoint: "opc.tcp://192.168.121.20:4840" # Mismo endpoint por ahora
+    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora para produccion 192.168.121.20
     plc:
       object_id: "ns=4;i=1"
       method_id: "ns=4;i=20"

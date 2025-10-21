@@ -18,6 +18,7 @@ type insertRequest struct {
 	variedad string
 	calibre  string
 	embalaje string
+	dark     int
 	sku      string
 	message  string
 	resultCh chan insertResult
@@ -97,6 +98,7 @@ func (c *CognexListener) processInsert(req insertRequest) {
 		req.variedad,
 		req.calibre,
 		req.embalaje,
+		req.dark,
 	)
 
 	req.resultCh <- insertResult{
@@ -258,6 +260,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			variedad: variedad,
 			calibre:  calibre,
 			embalaje: embalaje,
+			dark:     sku.Dark,
 			sku:      sku.SKU,
 			message:  message,
 			resultCh: resultCh,
@@ -309,6 +312,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 				variedad,
 				calibre,
 				embalaje,
+				sku.Dark,
 			)
 
 			if err != nil {

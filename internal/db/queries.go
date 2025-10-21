@@ -1,10 +1,25 @@
 package db
 
+// Query CON VIE_Dark (intentar primero)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 	SELECT 
 		VIE_CodVarieta AS variedad,
 		VIE_CodClasse AS calibre,
-		VIE_CodConfezione AS embalaje
+		VIE_CodConfezione AS embalaje,
+		VIE_Dark AS dark
+	FROM dbo.VW_INT_DANICH_ENVIVO
+	WHERE VIE_CodVarieta IS NOT NULL 
+	  AND VIE_CodClasse IS NOT NULL 
+	  AND VIE_CodConfezione IS NOT NULL;
+`
+
+// Query SIN VIE_Dark (fallback si la columna no existe)
+const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
+	SELECT 
+		VIE_CodVarieta AS variedad,
+		VIE_CodClasse AS calibre,
+		VIE_CodConfezione AS embalaje,
+		0 AS dark
 	FROM dbo.VW_INT_DANICH_ENVIVO
 	WHERE VIE_CodVarieta IS NOT NULL 
 	  AND VIE_CodClasse IS NOT NULL 
@@ -17,22 +32,24 @@ const INSERT_LECTURA_DATAMATRIX_SSMS = `
 	VALUES (@p1, @p2, @p3, @p4, 0)
 `
 const INSERT_SKU_INTERNAL_DB = `
-	INSERT INTO SKU (calibre, variedad, embalaje, estado)
-	VALUES ($1, $2, $3, $4)
-	ON CONFLICT (calibre, variedad, embalaje) 
+	INSERT INTO SKU (calibre, variedad, embalaje, dark, estado)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT (calibre, variedad, embalaje, dark) 
 	DO UPDATE SET estado = EXCLUDED.estado
 `
 
 const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `
-	INSERT INTO SKU (calibre, variedad, embalaje, estado)
-	VALUES ($1, $2, $3, $4)
-	ON CONFLICT (calibre, variedad, embalaje) DO NOTHING
+	INSERT INTO SKU (calibre, variedad, embalaje, dark, estado)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT (calibre, variedad, embalaje, dark) DO NOTHING
 `
 
 const SELECT_ALL_SKUS_INTERNAL_DB = `
-	SELECT calibre, variedad, embalaje, sku, estado
+	SELECT calibre, variedad, embalaje, dark, 
+	       CONCAT(calibre, '-', variedad, '-', embalaje, '-', dark) as sku, 
+	       estado
 	FROM SKU
-	ORDER BY variedad, calibre, embalaje
+	ORDER BY variedad, calibre, embalaje, dark
 `
 const SELECT_IF_EXISTS_SKU_INTERNAL_DB = `
 	SELECT EXISTS(SELECT 1 FROM sku WHERE calibre = $1 AND variedad = $2 AND embalaje = $3)
@@ -57,6 +74,7 @@ const INSERT_CAJA_SIN_CORRELATIVO_INTERNAL_DB = `
 		variedad,
 		calibre,
 		embalaje,
+		dark,
 		color,
 		correlativo_pallet
 	) VALUES (
@@ -65,6 +83,7 @@ const INSERT_CAJA_SIN_CORRELATIVO_INTERNAL_DB = `
 		$2,
 		$3,
 		$4,
+		$5,
 		'Rojo',
 		NULL
 	) RETURNING correlativo;
@@ -112,10 +131,12 @@ const COUNT_BOXES_INTERNAL_DB = `
 `
 
 const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
-	SELECT calibre, variedad, embalaje, sku, estado
+	SELECT calibre, variedad, embalaje, dark, 
+	       CONCAT(calibre, '-', variedad, '-', embalaje, '-', dark) as sku, 
+	       estado
 	FROM sku
 	WHERE estado = true
-	ORDER BY variedad, calibre, embalaje
+	ORDER BY variedad, calibre, embalaje, dark
 `
 
 const INSERT_NEW_SORTER_IF_NOT_EXISTS_INTERNAL_DB = `
@@ -154,18 +175,19 @@ const SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB = `
 		ss.calibre AS salida_calibre,
 		ss.variedad AS salida_variedad,
 		ss.embalaje AS salida_embalaje,
+		ss.dark AS salida_dark,
 		s2.estado AS sku_estado
 	FROM sorter s
 	JOIN salida sal ON s.id = sal.sorter
 	JOIN salida_sku ss ON sal.id = ss.salida_id
-	JOIN sku s2 ON ss.calibre = s2.calibre AND ss.variedad = s2.variedad AND ss.embalaje = s2.embalaje
+	JOIN sku s2 ON ss.calibre = s2.calibre AND ss.variedad = s2.variedad AND ss.embalaje = s2.embalaje AND ss.dark = s2.dark
 	WHERE s.id = $1
 	ORDER BY sal.id
 `
 const INSERT_SALIDA_SKU_INTERNAL_DB = `
-	INSERT INTO salida_sku (salida_id, calibre, variedad, embalaje)
-	VALUES ($1, $2, $3, $4)
-	ON CONFLICT (salida_id, calibre, variedad, embalaje) DO NOTHING
+	INSERT INTO salida_sku (salida_id, calibre, variedad, embalaje, dark)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT (salida_id, calibre, variedad, embalaje, dark) DO NOTHING
 `
 
 const DELETE_SALIDA_SKU_INTERNAL_DB = `
@@ -174,6 +196,7 @@ const DELETE_SALIDA_SKU_INTERNAL_DB = `
 	  AND calibre = $2 
 	  AND variedad = $3 
 	  AND embalaje = $4
+	  AND dark = $5
 `
 const DELETE_ALL_SALIDA_SKUS_INTERNAL_DB = `
     DELETE FROM salida_sku 
@@ -187,13 +210,14 @@ const CHECK_SALIDA_SKU_EXISTS_INTERNAL_DB = `
 		  AND calibre = $2 
 		  AND variedad = $3 
 		  AND embalaje = $4
+		  AND dark = $5
 	)
 `
 
 const SELECT_HISTORIAL_DESVIOS_INTERNAL_DB = `
 	SELECT 
 		sc.correlativo_caja AS box_id,
-		CONCAT(c.calibre, '-', c.variedad, '-', c.embalaje) AS sku,
+		CONCAT(c.calibre, '-', c.variedad, '-', c.embalaje, '-', c.dark) AS sku,
 		c.calibre,
 		sc.salida_enviada AS sealer,
 		sc.llena AS is_sealer_full_type,

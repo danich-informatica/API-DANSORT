@@ -6,6 +6,7 @@ SET search_path TO public;
 -- Borramos tablas en orden inverso de dependencias
 DROP TABLE IF EXISTS orden_vaciado CASCADE;
 DROP TABLE IF EXISTS salida_caja CASCADE;
+DROP TABLE IF EXISTS salida_sku CASCADE;
 DROP TABLE IF EXISTS orden_fabricacion CASCADE;
 DROP TABLE IF EXISTS mesa CASCADE;
 DROP TABLE IF EXISTS salida CASCADE;
@@ -22,8 +23,9 @@ CREATE TABLE sku (
     calibre   VARCHAR(50)  NOT NULL,
     variedad  VARCHAR(100) NOT NULL,
     embalaje  VARCHAR(50)  NOT NULL,
+    dark      INTEGER      NOT NULL DEFAULT 0,
     estado    BOOLEAN      NOT NULL DEFAULT TRUE,
-    CONSTRAINT pk_sku PRIMARY KEY (calibre, variedad, embalaje)
+    CONSTRAINT pk_sku PRIMARY KEY (calibre, variedad, embalaje, dark)
 );
 
 -- =======================
@@ -45,12 +47,13 @@ CREATE TABLE caja (
     variedad            VARCHAR(100) NOT NULL,
     calibre             VARCHAR(50)  NOT NULL,
     embalaje            VARCHAR(50)  NOT NULL,
+    dark                INTEGER      NOT NULL DEFAULT 0,
     color               VARCHAR(50)  NOT NULL,
     correlativo_pallet  VARCHAR(50)  NOT NULL,
     CONSTRAINT fk_caja_pallet FOREIGN KEY (correlativo_pallet)
         REFERENCES pallet (correlativo) ON DELETE CASCADE,
-    CONSTRAINT fk_caja_sku FOREIGN KEY (calibre, variedad, embalaje)
-        REFERENCES sku (calibre, variedad, embalaje) ON DELETE RESTRICT
+    CONSTRAINT fk_caja_sku FOREIGN KEY (calibre, variedad, embalaje, dark)
+        REFERENCES sku (calibre, variedad, embalaje, dark) ON DELETE RESTRICT
 );
 
 CREATE INDEX idx_caja_variedad ON caja (variedad);
@@ -84,11 +87,12 @@ CREATE TABLE salida_sku (
     calibre     VARCHAR(50)  NOT NULL,
     variedad    VARCHAR(100) NOT NULL,
     embalaje    VARCHAR(50)  NOT NULL,
-    CONSTRAINT pk_salida_sku PRIMARY KEY (salida_id, calibre, variedad, embalaje),
+    dark     INTEGER      NOT NULL DEFAULT 0,
+    CONSTRAINT pk_salida_sku PRIMARY KEY (salida_id, calibre, variedad, embalaje, dark),
     CONSTRAINT fk_salida_sku_salida FOREIGN KEY (salida_id)
         REFERENCES salida (id) ON DELETE CASCADE,
-    CONSTRAINT fk_salida_sku_sku FOREIGN KEY (calibre, variedad, embalaje)
-        REFERENCES sku (calibre, variedad, embalaje) ON DELETE SET NULL
+    CONSTRAINT fk_salida_sku_sku FOREIGN KEY (calibre, variedad, embalaje, dark)
+        REFERENCES sku (calibre, variedad, embalaje, dark) ON DELETE SET NULL
 );
 
 -- =======================

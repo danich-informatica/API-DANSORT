@@ -101,7 +101,7 @@ func (a *PostgresDBAdapter) GetTotalBoxesCount(ctx interface{}) (int, error) {
 
 // InsertSKU inserta una única SKU en la base de datos
 // Excluye SKUs nulas, inválidas y duplicadas
-func (m *PostgresManager) InsertSKU(ctx context.Context, calibre, variedad, embalaje string) error {
+func (m *PostgresManager) InsertSKU(ctx context.Context, calibre, variedad, embalaje string, dark int) error {
 	if m == nil || m.pool == nil {
 		return fmt.Errorf("manager no inicializado")
 	}
@@ -115,6 +115,7 @@ func (m *PostgresManager) InsertSKU(ctx context.Context, calibre, variedad, emba
 		strings.TrimSpace(calibre),
 		strings.TrimSpace(variedad),
 		strings.TrimSpace(embalaje),
+		dark,
 		true)
 
 	if err != nil {
@@ -145,7 +146,7 @@ func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]models.SKU, error) 
 	for rows.Next() {
 		var sku models.SKU
 
-		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.SKU, &sku.Estado); err != nil {
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 
@@ -199,7 +200,7 @@ func isNullOrEmpty(calibre, variedad, embalaje string) bool {
 	return false
 }
 
-func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, calibre, embalaje string) (string, error) {
+func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, calibre, embalaje string, dark int) (string, error) {
 	// NO crear un nuevo manager cada vez, usar el singleton existente
 	if m == nil || m.pool == nil {
 		return "", fmt.Errorf("gestor de base de datos no inicializado")
@@ -212,21 +213,21 @@ func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, c
 	}
 
 	if !exists {
-		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente...", calibre, variedad, embalaje)
+		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente con dark=%d...", calibre, variedad, embalaje, dark)
 
 		// Insertar la SKU con estado true
-		err = m.InsertSKU(ctx, calibre, variedad, embalaje)
+		err = m.InsertSKU(ctx, calibre, variedad, embalaje, dark)
 		if err != nil {
 			return "", fmt.Errorf("error al crear SKU: %w", err)
 		}
 
-		log.Printf("✅ SKU creada: %s-%s-%s", calibre, variedad, embalaje)
+		log.Printf("✅ SKU creada: %s-%s-%s (dark=%d)", calibre, variedad, embalaje, dark)
 	}
 
 	// Paso 2: Insertar la caja
 	var correlativo string // ⚠️ CAMBIO: ahora es string, no int
 
-	err = m.pool.QueryRow(ctx, INSERT_CAJA_SIN_CORRELATIVO_INTERNAL_DB, especie, variedad, calibre, embalaje).Scan(&correlativo)
+	err = m.pool.QueryRow(ctx, INSERT_CAJA_SIN_CORRELATIVO_INTERNAL_DB, especie, variedad, calibre, embalaje, dark).Scan(&correlativo)
 	if err != nil {
 		return "", fmt.Errorf("error al insertar caja: %w", err)
 	}
@@ -250,7 +251,7 @@ func (m *PostgresManager) GetActiveSKUs(ctx context.Context) ([]models.SKU, erro
 
 	for rows.Next() {
 		var sku models.SKU
-		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.SKU, &sku.Estado); err != nil {
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 		skus = append(skus, sku)
@@ -288,11 +289,11 @@ func (m *PostgresManager) InsertSalidaIfNotExists(ctx context.Context, id int, s
 }
 
 // InsertSalidaSKU inserta una asignación de SKU a salida en la tabla salida_sku
-func (m *PostgresManager) InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error {
+func (m *PostgresManager) InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int) error {
 	if m == nil || m.pool == nil {
 		return fmt.Errorf("manager no inicializado")
 	}
-	_, err := m.pool.Exec(ctx, INSERT_SALIDA_SKU_INTERNAL_DB, salidaID, calibre, variedad, embalaje)
+	_, err := m.pool.Exec(ctx, INSERT_SALIDA_SKU_INTERNAL_DB, salidaID, calibre, variedad, embalaje, dark)
 	if err != nil {
 		return fmt.Errorf("error al insertar asignación salida-sku: %w", err)
 	}
@@ -320,6 +321,7 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 		var salidaSorter string
 		var salidaEstado bool
 		var calibre, variedad, embalaje string
+		var dark int
 		var skuEstado bool
 
 		err := rows.Scan(
@@ -329,19 +331,21 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 			&calibre,
 			&variedad,
 			&embalaje,
+			&dark,
 			&skuEstado,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 
-		// Construir el SKU completo: calibre-variedad-embalaje
-		skuName := fmt.Sprintf("%s-%s-%s", calibre, variedad, embalaje)
+		// Construir el SKU completo: calibre-variedad-embalaje-dark
+		skuName := fmt.Sprintf("%s-%s-%s-%d", calibre, variedad, embalaje, dark)
 
 		sku := models.SKU{
 			Calibre:  calibre,
 			Variedad: variedad,
 			Embalaje: embalaje,
+			Dark:     dark,
 			SKU:      skuName,
 			Estado:   skuEstado,
 		}
@@ -358,24 +362,24 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 }
 
 // DeleteSalidaSKU elimina una SKU específica de una salida en la base de datos
-func (m *PostgresManager) DeleteSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error {
+func (m *PostgresManager) DeleteSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int) error {
 	if m == nil || m.pool == nil {
 		return fmt.Errorf("manager no inicializado")
 	}
 
 	// Primero verificar si existe
 	var exists bool
-	err := m.pool.QueryRow(ctx, CHECK_SALIDA_SKU_EXISTS_INTERNAL_DB, salidaID, calibre, variedad, embalaje).Scan(&exists)
+	err := m.pool.QueryRow(ctx, CHECK_SALIDA_SKU_EXISTS_INTERNAL_DB, salidaID, calibre, variedad, embalaje, dark).Scan(&exists)
 	if err != nil {
 		return fmt.Errorf("error al verificar existencia de SKU: %w", err)
 	}
 
 	if !exists {
-		return fmt.Errorf("SKU %s-%s-%s no encontrada en salida %d", calibre, variedad, embalaje, salidaID)
+		return fmt.Errorf("SKU %s-%s-%s-%d no encontrada en salida %d", calibre, variedad, embalaje, dark, salidaID)
 	}
 
 	// Ejecutar DELETE
-	commandTag, err := m.pool.Exec(ctx, DELETE_SALIDA_SKU_INTERNAL_DB, salidaID, calibre, variedad, embalaje)
+	commandTag, err := m.pool.Exec(ctx, DELETE_SALIDA_SKU_INTERNAL_DB, salidaID, calibre, variedad, embalaje, dark)
 	if err != nil {
 		return fmt.Errorf("error al eliminar SKU de salida: %w", err)
 	}
@@ -384,7 +388,7 @@ func (m *PostgresManager) DeleteSalidaSKU(ctx context.Context, salidaID int, cal
 		return fmt.Errorf("no se pudo eliminar la SKU de la salida %d", salidaID)
 	}
 
-	log.Printf("✅ [DB] SKU %s-%s-%s eliminada de salida %d", calibre, variedad, embalaje, salidaID)
+	log.Printf("✅ [DB] SKU %s-%s-%s-%d eliminada de salida %d", calibre, variedad, embalaje, dark, salidaID)
 	return nil
 }
 

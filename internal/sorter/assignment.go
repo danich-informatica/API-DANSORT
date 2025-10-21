@@ -8,20 +8,20 @@ import (
 )
 
 // AssignSKUToSalida asigna una SKU a una salida específica
-func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, err error) {
+func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, err error) {
 	targetSalida := s.findSalidaByID(salidaID)
 	if targetSalida == nil {
-		return "", "", "", fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
+		return "", "", "", 0, fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
 	}
 
 	if skuID == 0 && targetSalida.Tipo == "automatico" {
-		return "", "", "", fmt.Errorf("no se puede asignar SKU REJECT (ID=0) a salida automática '%s' (ID=%d)",
+		return "", "", "", 0, fmt.Errorf("no se puede asignar SKU REJECT (ID=0) a salida automática '%s' (ID=%d)",
 			targetSalida.Salida_Sorter, salidaID)
 	}
 
 	targetSKU := s.findSKUByID(skuID)
 	if targetSKU == nil {
-		return "", "", "", fmt.Errorf("SKU con ID %d no encontrada en las SKUs disponibles del sorter #%d", skuID, s.ID)
+		return "", "", "", 0, fmt.Errorf("SKU con ID %d no encontrada en las SKUs disponibles del sorter #%d", skuID, s.ID)
 	}
 
 	sku := models.SKU{
@@ -29,6 +29,7 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 		Variedad: targetSKU.Variedad,
 		Calibre:  targetSKU.Calibre,
 		Embalaje: targetSKU.Embalaje,
+		Dark:     targetSKU.Dark,
 		Estado:   true,
 	}
 
@@ -44,14 +45,14 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 
 	s.UpdateSKUs(s.assignedSKUs)
 
-	return targetSKU.Calibre, targetSKU.Variedad, targetSKU.Embalaje, nil
+	return targetSKU.Calibre, targetSKU.Variedad, targetSKU.Embalaje, targetSKU.Dark, nil
 }
 
 // RemoveSKUFromSalida elimina una SKU específica de una salida
-func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, err error) {
+func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, err error) {
 	// ✅ PROTECCIÓN: NO permitir eliminar SKU REJECT (ID=0)
 	if skuID == 0 {
-		return "", "", "", fmt.Errorf("no se puede eliminar SKU REJECT (ID=0), está protegida")
+		return "", "", "", 0, fmt.Errorf("no se puede eliminar SKU REJECT (ID=0), está protegida")
 	}
 
 	var targetSalida *shared.Salida
@@ -66,7 +67,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 	}
 
 	if targetSalida == nil {
-		return "", "", "", fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
+		return "", "", "", 0, fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
 	}
 
 	skuFound := false
@@ -84,7 +85,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 	}
 
 	if !skuFound {
-		return "", "", "", fmt.Errorf("SKU con ID %d no encontrada en salida %d del sorter #%d", skuID, salidaID, s.ID)
+		return "", "", "", 0, fmt.Errorf("SKU con ID %d no encontrada en salida %d del sorter #%d", skuID, salidaID, s.ID)
 	}
 
 	s.Salidas[salidaIndex].SKUs_Actuales = newSKUs
@@ -101,7 +102,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 
 	s.UpdateSKUs(s.assignedSKUs)
 
-	return removedSKU.Calibre, removedSKU.Variedad, removedSKU.Embalaje, nil
+	return removedSKU.Calibre, removedSKU.Variedad, removedSKU.Embalaje, removedSKU.Dark, nil
 }
 
 // RemoveAllSKUsFromSalida elimina TODAS las SKUs de una salida específica

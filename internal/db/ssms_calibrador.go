@@ -20,20 +20,27 @@ type SegregazioneProgrammaRow struct {
 	Variedad sql.NullString
 	Calibre  sql.NullString
 	Embalaje sql.NullString
+	Dark     sql.NullInt64 // 0 o 1, default 0 si no existe la columna
 }
 
 // FetchSegregazioneProgramma ejecuta la consulta definida en queries.go y devuelve todas las filas.
+// Intenta primero con VIE_Dark, si falla usa query sin esa columna (para compatibilidad).
 func FetchSegregazioneProgramma(ctx context.Context, executor QueryExecutor) ([]SegregazioneProgrammaRow, error) {
+	// Intentar primero con VIE_Dark
 	rows, err := executor.Query(ctx, SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA)
 	if err != nil {
-		return nil, fmt.Errorf("db: no fue posible ejecutar la consulta de segregazione: %w", err)
+		// Si falla (probablemente columna no existe), intentar sin VIE_Dark
+		rows, err = executor.Query(ctx, SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK)
+		if err != nil {
+			return nil, fmt.Errorf("db: no fue posible ejecutar la consulta de segregazione: %w", err)
+		}
 	}
 	defer rows.Close()
 
 	var result []SegregazioneProgrammaRow
 	for rows.Next() {
 		var row SegregazioneProgrammaRow
-		if err := rows.Scan(&row.Variedad, &row.Calibre, &row.Embalaje); err != nil {
+		if err := rows.Scan(&row.Variedad, &row.Calibre, &row.Embalaje, &row.Dark); err != nil {
 			return nil, fmt.Errorf("db: error leyendo resultados de segregazione: %w", err)
 		}
 		result = append(result, row)

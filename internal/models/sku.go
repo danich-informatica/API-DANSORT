@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"hash/fnv"
 	"strings"
 )
@@ -10,8 +11,14 @@ type SKU struct {
 	Variedad string
 	Calibre  string
 	Embalaje string
+	Dark     int
 	SKU      string
 	Estado   bool
+}
+
+// BuildSKU construye el string SKU en formato: calibre-variedad-embalaje-dark
+func (s *SKU) BuildSKU() string {
+	return fmt.Sprintf("%s-%s-%s-%d", s.Calibre, s.Variedad, s.Embalaje, s.Dark)
 }
 
 // CleanSKU limpia el formato de SKU de la base de datos:
@@ -40,6 +47,7 @@ type SKUAssignable struct {
 	Calibre      string  `json:"calibre,omitempty"`
 	Variedad     string  `json:"variedad,omitempty"`
 	Embalaje     string  `json:"embalaje,omitempty"`
+	Dark         int     `json:"dark"`
 	Percentage   float64 `json:"percentage"`
 	IsAssigned   bool    `json:"is_assigned"`
 	IsMasterCase bool    `json:"is_master_case"`
@@ -71,6 +79,7 @@ func (s *SKU) ToAssignable(id int) SKUAssignable {
 		Calibre:      s.Calibre,
 		Variedad:     s.Variedad,
 		Embalaje:     s.Embalaje,
+		Dark:         s.Dark,
 		Percentage:   0.0,
 		IsAssigned:   false,
 		IsMasterCase: false,
@@ -85,6 +94,7 @@ func (s *SKU) ToAssignableWithHash() SKUAssignable {
 		Calibre:      s.Calibre,
 		Variedad:     s.Variedad,
 		Embalaje:     s.Embalaje,
+		Dark:         s.Dark,
 		Percentage:   0.0,
 		IsAssigned:   false,
 		IsMasterCase: false,
@@ -96,6 +106,7 @@ func GetRejectSKU() SKUAssignable {
 	return SKUAssignable{
 		ID:           0,
 		SKU:          "REJECT",
+		Dark:         0,
 		Percentage:   0.0,
 		IsAssigned:   false,
 		IsMasterCase: false,
