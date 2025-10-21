@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador Cognex - Control Panel</title>
+    <style>
+        :root {
+            --primary-color: #197979;
+            --primary-dark: #135858;
+            --primary-light: #1fa0a0;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+            --bg-color: #f5f5f5;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --text-muted: #6c757d;
+            -                            <div class="button-group">
+                                <button 
+                                    class="btn btn-start" 
+                                    id="start-btn-${device.id}"
+                                    onclick="startDevice(${device.id})" 
+                                    ${device.is_running ? 'disabled' : ''}
+                                >
+                                    ▶️ Iniciar
+                                </button>
+                                <button 
+                                    class="btn btn-stop" 
+                                    id="stop-btn-${device.id}"
+                                    onclick="stopDevice(${device.id})" 
+                                    ${!device.is_running ? 'disabled' : ''}
+                                >
+                                    ⏸️ Detener
+                                </button>
+                            </div>dee2e6;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, var(--bg-color) 0%, #e8f4f4 100%);
+            color: var(--text-color);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: var(--primary-color);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .controls {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        .controls h2 {
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .controls h2::before {
+            content: "⚙️";
+            font-size: 1.8rem;
+        }
+
+        .devices-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 25px;
+        }
+
+        .device-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            border-left: 5px solid var(--primary-color);
+        }
+
+        .device-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .device-card.running {
+            border-left-color: var(--success-color);
+            background: linear-gradient(to right, rgba(40, 167, 69, 0.05), white);
+        }
+
+        .device-card.stopped {
+            border-left-color: var(--text-muted);
+        }
+
+        .device-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .device-title {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .status-badge {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-badge.running {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .status-badge.stopped {
+            background: var(--text-muted);
+            color: white;
+        }
+
+        .device-info {
+            margin-bottom: 20px;
+            line-height: 1.8;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .info-value {
+            color: var(--text-color);
+            font-family: 'Courier New', monospace;
+        }
+
+        .config-section {
+            background: var(--bg-color);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .config-section h4 {
+            color: var(--primary-color);
+            margin-bottom: 12px;
+            font-size: 1rem;
+        }
+
+        .input-group {
+            margin-bottom: 12px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-start {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .btn-start:hover {
+            background: #218838;
+        }
+
+        .btn-stop {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .btn-stop:hover {
+            background: #c82333;
+        }
+
+        .btn-update {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-update:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-burst {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+        }
+
+        .btn-burst:hover {
+            background: linear-gradient(135deg, #ee5a6f 0%, #c44569 100%);
+        }
+
+        .btn-burst:disabled {
+            background: #ccc;
+        }
+
+        .burst-section {
+            background: linear-gradient(135deg, rgba(255, 107, 107, 0.1) 0%, rgba(238, 90, 111, 0.05) 100%);
+            border: 2px solid rgba(255, 107, 107, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .burst-section h4 {
+            color: #c44569;
+            margin-bottom: 12px;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .burst-section h4::before {
+            content: "🔫";
+            font-size: 1.2rem;
+        }
+
+        .burst-indicator {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #ff6b6b;
+            color: white;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-left: 10px;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+
+        .loading::before {
+            content: "⏳";
+            display: block;
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+
+        .error {
+            background: #fff3cd;
+            border: 2px solid var(--warning-color);
+            color: #856404;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .notification.success {
+            background: var(--success-color);
+        }
+
+        .notification.error {
+            background: var(--danger-color);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .footer {
+            text-align: center;
+            padding: 30px 20px;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 40px;
+        }
+
+        @media (max-width: 768px) {
+            .devices-grid {
+                grid-template-columns: 1fr;
+            }
+
+            header h1 {
+                font-size: 2rem;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔬 Simulador Cognex</h1>
+            <p>Control y monitoreo en tiempo real de lectores Cognex</p>
+        </header>
+
+        <div id="app">
+            <div class="loading">Cargando simuladores...</div>
+        </div>
+
+        <div class="footer">
+            <p>Greenex API v1.0 | Simulador Cognex © 2025</p>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:9091/api';
+        let refreshInterval;
+        let devicesRendered = false; // Flag para saber si ya se renderizó
+
+        async function loadStatus() {
+            try {
+                const response = await fetch(`${API_URL}/status`);
+                if (!response.ok) throw new Error('Error al cargar estado');
+                
+                const data = await response.json();
+                
+                // Primera carga: renderizar todo
+                if (!devicesRendered) {
+                    renderDevices(data.cognex_devices);
+                    devicesRendered = true;
+                } else {
+                    // Actualizaciones siguientes: solo actualizar estados
+                    updateDeviceStatuses(data.cognex_devices);
+                }
+            } catch (error) {
+                document.getElementById('app').innerHTML = `
+                    <div class="error">
+                        ❌ Error al conectar con el servidor: ${error.message}
+                        <br><br>Verifica que el simulador esté corriendo en el puerto 9091
+                    </div>
+                `;
+                console.error('Error:', error);
+            }
+        }
+
+        function updateDeviceStatuses(devices) {
+            devices.forEach(device => {
+                // Actualizar badge de estado
+                const statusBadge = document.querySelector(`#status-badge-${device.id}`);
+                if (statusBadge) {
+                    statusBadge.className = `status-badge ${device.is_running ? 'running' : 'stopped'}`;
+                    statusBadge.textContent = device.is_running ? '🟢 Activo' : '⚪ Detenido';
+                }
+
+                // Actualizar clase de la tarjeta
+                const deviceCard = document.querySelector(`#device-card-${device.id}`);
+                if (deviceCard) {
+                    deviceCard.className = `device-card ${device.is_running ? 'running' : 'stopped'}`;
+                }
+
+                // Actualizar indicador de burst
+                const burstIndicator = document.querySelector(`#burst-indicator-${device.id}`);
+                if (burstIndicator) {
+                    burstIndicator.style.display = device.is_burst_mode ? 'inline-block' : 'none';
+                }
+
+                // Actualizar botones de Start/Stop
+                const startBtn = document.querySelector(`#start-btn-${device.id}`);
+                const stopBtn = document.querySelector(`#stop-btn-${device.id}`);
+                if (startBtn) startBtn.disabled = device.is_running;
+                if (stopBtn) stopBtn.disabled = !device.is_running;
+
+                // Actualizar botones de Burst
+                const burstBtn = document.querySelector(`#burst-btn-${device.id}`);
+                const stopBurstBtn = document.querySelector(`#stop-burst-btn-${device.id}`);
+                if (burstBtn) burstBtn.disabled = device.is_burst_mode || !device.is_running;
+                if (stopBurstBtn) stopBurstBtn.disabled = !device.is_burst_mode;
+
+                // Actualizar inputs de burst (deshabilitarlos si hay burst activo)
+                const burstInputs = document.querySelectorAll(`[id^="burst-"][id$="-${device.id}"]`);
+                burstInputs.forEach(input => {
+                    input.disabled = device.is_burst_mode;
+                });
+            });
+        }
+
+        function renderDevices(devices) {
+            const html = `
+                <div class="devices-grid">
+                    ${devices.map(device => `
+                        <div class="device-card ${device.is_running ? 'running' : 'stopped'}" id="device-card-${device.id}">
+                            <div class="device-header">
+                                <div class="device-title">
+                                    ${device.name}
+                                    <div style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">
+                                        ID: ${device.id}
+                                    </div>
+                                </div>
+                                <span class="status-badge ${device.is_running ? 'running' : 'stopped'}" id="status-badge-${device.id}">
+                                    ${device.is_running ? '🟢 Activo' : '⚪ Detenido'}
+                                </span>
+                            </div>
+
+                            <div class="device-info">
+                                <div class="info-row">
+                                    <span class="info-label">📍 Ubicación:</span>
+                                    <span class="info-value">${device.ubicacion}</span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="info-label">🌐 Dirección:</span>
+                                    <span class="info-value">${device.host}:${device.port}</span>
+                                </div>
+                            </div>
+
+                            <div class="config-section">
+                                <h4>⚙️ Configuración</h4>
+                                <div class="input-group">
+                                    <label>Intervalo (ms):</label>
+                                    <input 
+                                        type="number" 
+                                        id="interval-${device.id}" 
+                                        value="${device.interval_ms}"
+                                        min="100"
+                                        max="10000"
+                                        step="100"
+                                    >
+                                </div>
+                                <div class="input-group">
+                                    <label>% NO_READ:</label>
+                                    <input 
+                                        type="number" 
+                                        id="noread-${device.id}" 
+                                        value="${device.no_read_percent}"
+                                        min="0"
+                                        max="100"
+                                        step="5"
+                                    >
+                                </div>
+                            </div>
+
+                            <div class="burst-section">
+                                <h4>Modo Disparador <span class="burst-indicator" id="burst-indicator-${device.id}" style="display: ${device.is_burst_mode ? 'inline-block' : 'none'}">ACTIVO</span></h4>
+                                <div class="input-group">
+                                    <label>Cantidad de cajas:</label>
+                                    <input 
+                                        type="number" 
+                                        id="burst-cantidad-${device.id}" 
+                                        value="50"
+                                        min="1"
+                                        max="1000"
+                                        ${device.is_burst_mode ? 'disabled' : ''}
+                                    >
+                                </div>
+                                <div class="input-group">
+                                    <label>Intervalo entre cajas (ms):</label>
+                                    <input 
+                                        type="number" 
+                                        id="burst-intervalo-${device.id}" 
+                                        value="100"
+                                        min="10"
+                                        max="60000"
+                                        step="10"
+                                        ${device.is_burst_mode ? 'disabled' : ''}
+                                    >
+                                </div>
+                                <div class="input-group">
+                                    <label>Pausa después de ráfaga (segundos):</label>
+                                    <input 
+                                        type="number" 
+                                        id="burst-pausa-${device.id}" 
+                                        value="5"
+                                        min="0"
+                                        max="300"
+                                        ${device.is_burst_mode ? 'disabled' : ''}
+                                    >
+                                </div>
+                                <div class="button-group">
+                                    <button 
+                                        class="btn btn-burst"
+                                        id="burst-btn-${device.id}"
+                                        onclick="dispararRafaga(${device.id})"
+                                        ${device.is_burst_mode || !device.is_running ? 'disabled' : ''}
+                                    >
+                                        🔫 Disparar Ráfaga
+                                    </button>
+                                    <button 
+                                        class="btn btn-stop"
+                                        id="stop-burst-btn-${device.id}"
+                                        onclick="detenerRafaga(${device.id})"
+                                        ${!device.is_burst_mode ? 'disabled' : ''}
+                                    >
+                                        ⏹️ Detener Ráfaga
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="button-group">
+                                <button 
+                                    class="btn btn-start"
+                                    id="start-btn-${device.id}"
+                                    onclick="startDevice(${device.id})"
+                                    ${device.is_running ? 'disabled' : ''}
+                                >
+                                    ▶️ Iniciar
+                                </button>
+                                <button 
+                                    class="btn btn-stop"
+                                    id="stop-btn-${device.id}"
+                                    onclick="stopDevice(${device.id})"
+                                    ${!device.is_running ? 'disabled' : ''}
+                                >
+                                    ⏸️ Detener
+                                </button>
+                            </div>
+                            <button 
+                                class="btn btn-update" 
+                                onclick="updateConfig(${device.id})"
+                                style="margin-top: 10px;"
+                            >
+                                💾 Actualizar Config
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            document.getElementById('app').innerHTML = html;
+        }
+
+        async function startDevice(id) {
+            try {
+                const response = await fetch(`${API_URL}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al iniciar');
+                }
+                
+                showNotification('✅ Cognex iniciado correctamente', 'success');
+                await loadStatus();
+            } catch (error) {
+                showNotification('❌ ' + error.message, 'error');
+            }
+        }
+
+        async function stopDevice(id) {
+            try {
+                const response = await fetch(`${API_URL}/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al detener');
+                }
+                
+                showNotification('⏸️ Cognex detenido correctamente', 'success');
+                await loadStatus();
+            } catch (error) {
+                showNotification('❌ ' + error.message, 'error');
+            }
+        }
+
+        async function updateConfig(id) {
+            const intervalMs = parseInt(document.getElementById(`interval-${id}`).value);
+            const noReadPercent = parseInt(document.getElementById(`noread-${id}`).value);
+
+            if (intervalMs < 100 || intervalMs > 10000) {
+                showNotification('❌ Intervalo debe estar entre 100 y 10000 ms', 'error');
+                return;
+            }
+
+            if (noReadPercent < 0 || noReadPercent > 100) {
+                showNotification('❌ % NO_READ debe estar entre 0 y 100', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/config`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        id,
+                        interval_ms: intervalMs,
+                        no_read_percent: noReadPercent
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al actualizar');
+                }
+                
+                showNotification('💾 Configuración actualizada', 'success');
+                await loadStatus();
+            } catch (error) {
+                showNotification('❌ ' + error.message, 'error');
+            }
+        }
+
+        async function dispararRafaga(id) {
+            const cantidad = parseInt(document.getElementById(`burst-cantidad-${id}`).value);
+            const intervalo = parseInt(document.getElementById(`burst-intervalo-${id}`).value);
+            const pausa = parseInt(document.getElementById(`burst-pausa-${id}`).value);
+
+            // Validaciones
+            if (cantidad < 1 || cantidad > 1000) {
+                showNotification('❌ Cantidad debe estar entre 1 y 1000', 'error');
+                return;
+            }
+            if (intervalo < 10 || intervalo > 60000) {
+                showNotification('❌ Intervalo debe estar entre 10 y 60000 ms', 'error');
+                return;
+            }
+            if (pausa < 0 || pausa > 300) {
+                showNotification('❌ Pausa debe estar entre 0 y 300 segundos', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/burst`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        id,
+                        cantidad: cantidad,
+                        intervalo_ms: intervalo,
+                        pausa_segundos: pausa
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al disparar ráfaga');
+                }
+                
+                const data = await response.json();
+                showNotification(`🔫 ${data.message}`, 'success');
+                await loadStatus();
+            } catch (error) {
+                showNotification('❌ ' + error.message, 'error');
+            }
+        }
+
+        async function detenerRafaga(id) {
+            try {
+                const response = await fetch(`${API_URL}/burst/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al detener ráfaga');
+                }
+                
+                showNotification('⏹️ Ráfaga detenida', 'success');
+                await loadStatus();
+            } catch (error) {
+                showNotification('❌ ' + error.message, 'error');
+            }
+        }
+
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+
+        // Cargar estado inicial
+        loadStatus();
+
+        // Refrescar cada 2 segundos
+        refreshInterval = setInterval(loadStatus, 2000);
+
+        // Limpiar al cerrar
+        window.addEventListener('beforeunload', () => {
+            clearInterval(refreshInterval);
+        });
+    </script>
+</body>
+</html>

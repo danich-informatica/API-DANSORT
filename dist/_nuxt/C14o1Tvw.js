@@ -1,0 +1,1 @@
+import{e as o,c as s,a as r,o as l}from"#entry";const n=["width","height"],c=o({__name:"ArrowUp",props:{size:{}},setup(e){return(i,t)=>(l(),s("svg",{xmlns:"http://www.w3.org/2000/svg",width:e.size,height:e.size,viewBox:"0 0 24 24"},[...t[0]||(t[0]=[r("path",{fill:"currentColor",d:"m12 10.8l-4.6 4.6L6 14l6-6l6 6l-1.4 1.4z"},null,-1)])],8,n))}});export{c as default};
