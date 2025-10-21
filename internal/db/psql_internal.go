@@ -146,7 +146,7 @@ func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]models.SKU, error) 
 	for rows.Next() {
 		var sku models.SKU
 
-		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado, &sku.NombreVariedad); err != nil {
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado, &sku.NombreVariedad, &sku.DescripcionEmbalaje); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 
@@ -215,10 +215,21 @@ func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, c
 	if !exists {
 		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente con dark=%d y estado=false...", calibre, variedad, embalaje, dark)
 
+		// CRÍTICO: Insertar variedad PRIMERO para evitar FK violation
+		// Usar código como nombre si no existe (será actualizado en próxima sincronización)
+		_, err = m.pool.Exec(ctx, `
+			INSERT INTO variedad (codigo_variedad, nombre_variedad) 
+			VALUES ($1, $1)
+			ON CONFLICT (codigo_variedad) DO NOTHING
+		`, variedad)
+		if err != nil {
+			log.Printf("⚠️  Error al insertar variedad %s: %v (continuando...)", variedad, err)
+		}
+
 		// Insertar la SKU con estado false (desactivada hasta que sea activada manualmente)
 		_, err = m.pool.Exec(ctx, `
-			INSERT INTO sku (calibre, variedad, embalaje, dark, estado) 
-			VALUES ($1, $2, $3, $4, false)
+			INSERT INTO sku (calibre, variedad, embalaje, dark, estado, descripcion_embalaje) 
+			VALUES ($1, $2, $3, $4, false, NULL)
 			ON CONFLICT (calibre, variedad, embalaje, dark) DO NOTHING
 		`, calibre, variedad, embalaje, dark)
 
@@ -256,7 +267,7 @@ func (m *PostgresManager) GetActiveSKUs(ctx context.Context) ([]models.SKU, erro
 
 	for rows.Next() {
 		var sku models.SKU
-		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado, &sku.NombreVariedad); err != nil {
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado, &sku.NombreVariedad, &sku.DescripcionEmbalaje); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 		skus = append(skus, sku)
@@ -329,6 +340,7 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 		var dark int
 		var skuEstado bool
 		var nombreVariedad string
+		var descripcionEmbalaje string
 
 		err := rows.Scan(
 			&salidaID,
@@ -340,6 +352,7 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 			&dark,
 			&skuEstado,
 			&nombreVariedad,
+			&descripcionEmbalaje,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
@@ -354,13 +367,14 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 		skuName := fmt.Sprintf("%s-%s-%s-%d", calibre, strings.ToUpper(variedadDisplay), embalaje, dark)
 
 		sku := models.SKU{
-			Calibre:        calibre,
-			Variedad:       variedad, // Código de variedad
-			Embalaje:       embalaje,
-			Dark:           dark,
-			SKU:            skuName,
-			Estado:         skuEstado,
-			NombreVariedad: nombreVariedad, // Nombre de variedad
+			Calibre:             calibre,
+			Variedad:            variedad, // Código de variedad
+			Embalaje:            embalaje, // Código de embalaje
+			Dark:                dark,
+			SKU:                 skuName,
+			Estado:              skuEstado,
+			NombreVariedad:      nombreVariedad,      // Nombre de variedad
+			DescripcionEmbalaje: descripcionEmbalaje, // Descripción de embalaje
 		}
 
 		// Agregar SKU al mapa agrupado por salida_id

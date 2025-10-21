@@ -7,7 +7,8 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 		VIE_CodClasse AS calibre,
 		VIE_CodConfezione AS embalaje,
 		VIE_Dark AS dark,
-		VIE_Varieta AS nombre_variedad
+		VIE_Varieta AS nombre_variedad,
+		VIE_Confezione AS descripcion_embalaje
 	FROM dbo.VW_INT_DANICH_ENVIVO
 	WHERE VIE_CodVarieta IS NOT NULL 
 	  AND VIE_CodClasse IS NOT NULL 
@@ -21,7 +22,8 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
 		VIE_CodClasse AS calibre,
 		VIE_CodConfezione AS embalaje,
 		0 AS dark,
-		VIE_Varieta AS nombre_variedad
+		VIE_Varieta AS nombre_variedad,
+		VIE_Confezione AS descripcion_embalaje
 	FROM dbo.VW_INT_DANICH_ENVIVO
 	WHERE VIE_CodVarieta IS NOT NULL 
 	  AND VIE_CodClasse IS NOT NULL 
@@ -46,11 +48,21 @@ const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `
 	ON CONFLICT (calibre, variedad, embalaje, dark) DO NOTHING
 `
 
+const UPSERT_SKU_WITH_DESCRIPTION = `
+	INSERT INTO SKU (calibre, variedad, embalaje, dark, estado, descripcion_embalaje)
+	VALUES ($1, $2, $3, $4, $5, $6)
+	ON CONFLICT (calibre, variedad, embalaje, dark) 
+	DO UPDATE SET 
+		estado = EXCLUDED.estado,
+		descripcion_embalaje = EXCLUDED.descripcion_embalaje
+`
+
 const SELECT_ALL_SKUS_INTERNAL_DB = `
 	SELECT s.calibre, s.variedad, s.embalaje, s.dark, 
 	       CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
 	       s.estado,
-	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
+	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad,
+	       COALESCE(s.descripcion_embalaje, s.embalaje) as descripcion_embalaje
 	FROM SKU s
 	LEFT JOIN variedad v ON s.variedad = v.codigo_variedad
 	ORDER BY s.variedad, s.calibre, s.embalaje, s.dark
@@ -138,7 +150,8 @@ const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
 	SELECT s.calibre, s.variedad, s.embalaje, s.dark, 
 	       CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
 	       s.estado,
-	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
+	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad,
+	       COALESCE(s.descripcion_embalaje, s.embalaje) as descripcion_embalaje
 	FROM sku s
 	LEFT JOIN variedad v ON s.variedad = v.codigo_variedad
 	WHERE s.estado = true
@@ -183,7 +196,8 @@ const SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB = `
 		ss.embalaje AS salida_embalaje,
 		ss.dark AS salida_dark,
 		s2.estado AS sku_estado,
-		COALESCE(v.nombre_variedad, ss.variedad) as nombre_variedad
+		COALESCE(v.nombre_variedad, ss.variedad) as nombre_variedad,
+		COALESCE(s2.descripcion_embalaje, ss.embalaje) as descripcion_embalaje
 	FROM sorter s
 	JOIN salida sal ON s.id = sal.sorter
 	JOIN salida_sku ss ON sal.id = ss.salida_id

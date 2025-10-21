@@ -30,14 +30,15 @@ CREATE TABLE variedad (
 CREATE INDEX idx_variedad_nombre ON variedad(nombre_variedad);
 
 -- =======================
--- Catálogo SKU
+-- Catálogo SKU (desnormalizado para performance)
 -- =======================
 CREATE TABLE sku (
-    calibre   VARCHAR(50)  NOT NULL,
-    variedad  VARCHAR(100) NOT NULL,
-    embalaje  VARCHAR(50)  NOT NULL,
-    dark      INTEGER      NOT NULL DEFAULT 0,
-    estado    BOOLEAN      NOT NULL DEFAULT TRUE,
+    calibre              VARCHAR(50)  NOT NULL,
+    variedad             VARCHAR(100) NOT NULL,
+    embalaje             VARCHAR(50)  NOT NULL,
+    dark                 INTEGER      NOT NULL DEFAULT 0,
+    estado               BOOLEAN      NOT NULL DEFAULT TRUE,
+    descripcion_embalaje VARCHAR(255),  
     CONSTRAINT pk_sku PRIMARY KEY (calibre, variedad, embalaje, dark),
     CONSTRAINT fk_sku_variedad FOREIGN KEY (variedad)
         REFERENCES variedad (codigo_variedad) ON DELETE CASCADE

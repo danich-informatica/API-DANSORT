@@ -17,11 +17,12 @@ type QueryExecutor interface {
 
 // SegregazioneProgrammaRow representa una fila de la consulta SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA.
 type SegregazioneProgrammaRow struct {
-	Variedad       sql.NullString
-	Calibre        sql.NullString
-	Embalaje       sql.NullString
-	Dark           sql.NullInt64  // 0 o 1, default 0 si no existe la columna
-	NombreVariedad sql.NullString // VIE_Descrizione (ej: "LAPINS")
+	Variedad            sql.NullString
+	Calibre             sql.NullString
+	Embalaje            sql.NullString
+	Dark                sql.NullInt64  // 0 o 1, default 0 si no existe la columna
+	NombreVariedad      sql.NullString // VIE_Varieta (ej: "LAPINS")
+	DescripcionEmbalaje sql.NullString // VIE_Confezione (ej: "TFYVDPAM25")
 }
 
 // FetchSegregazioneProgramma ejecuta la consulta definida en queries.go y devuelve todas las filas.
@@ -41,7 +42,7 @@ func FetchSegregazioneProgramma(ctx context.Context, executor QueryExecutor) ([]
 	var result []SegregazioneProgrammaRow
 	for rows.Next() {
 		var row SegregazioneProgrammaRow
-		if err := rows.Scan(&row.Variedad, &row.Calibre, &row.Embalaje, &row.Dark, &row.NombreVariedad); err != nil {
+		if err := rows.Scan(&row.Variedad, &row.Calibre, &row.Embalaje, &row.Dark, &row.NombreVariedad, &row.DescripcionEmbalaje); err != nil {
 			return nil, fmt.Errorf("db: error leyendo resultados de segregazione: %w", err)
 		}
 		result = append(result, row)

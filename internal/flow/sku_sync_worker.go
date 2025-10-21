@@ -161,8 +161,14 @@ func (w *SKUSyncWorker) syncSKUs() {
 			dark = int(row.Dark.Int64)
 		}
 
-		// INSERT con ON CONFLICT → UPDATE estado = true
-		result, err := tx.Exec(ctx, db.INSERT_SKU_INTERNAL_DB, calibre, variedad, embalaje, dark, true)
+		// Obtener descripción de embalaje (desnormalizado para performance)
+		descripcionEmbalaje := ""
+		if row.DescripcionEmbalaje.Valid {
+			descripcionEmbalaje = strings.TrimSpace(row.DescripcionEmbalaje.String)
+		}
+
+		// INSERT con ON CONFLICT → UPDATE estado = true y descripcion_embalaje
+		result, err := tx.Exec(ctx, db.UPSERT_SKU_WITH_DESCRIPTION, calibre, variedad, embalaje, dark, true, descripcionEmbalaje)
 		if err != nil {
 			log.Printf("⚠️  Sync SKU: error upsert %s-%s-%s (dark=%d): %v", calibre, variedad, embalaje, dark, err)
 			continue

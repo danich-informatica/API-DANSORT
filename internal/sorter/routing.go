@@ -97,28 +97,32 @@ func (s *Sorter) getSalidaConfiguradaParaSKU(sku string) *shared.Salida {
 }
 
 // getSalidaDescarte obtiene salida de descarte como último recurso
+// SOLO usa la salida con SKU "REJECT" asignado, no cualquier salida manual
 func (s *Sorter) getSalidaDescarte(sku string) shared.Salida {
-	for _, salida := range s.Salidas {
-		if salida.Tipo == "manual" && salida.IsAvailable() {
-			log.Printf("⚠️ Sorter #%d: SKU '%s' sin salida disponible configurada, enviando a descarte (salida %d)",
-				s.ID, sku, salida.ID)
-			return salida
+	// Buscar SOLO la salida que tiene "REJECT" asignado
+	for i := range s.Salidas {
+		for _, skuConfig := range s.Salidas[i].SKUs_Actuales {
+			if skuConfig.SKU == "REJECT" {
+				if s.Salidas[i].IsAvailable() {
+					log.Printf("⚠️ Sorter #%d: SKU '%s' sin salida configurada, enviando a REJECT (salida %d)",
+						s.ID, sku, s.Salidas[i].ID)
+					return s.Salidas[i]
+				}
+
+				estado := s.Salidas[i].GetEstado()
+				bloqueo := s.Salidas[i].GetBloqueo()
+				log.Printf("🚨 Sorter #%d: Salida REJECT (ID=%d) NO disponible (Estado=%d, Bloqueo=%t) para SKU '%s'",
+					s.ID, s.Salidas[i].ID, estado, bloqueo, sku)
+				break
+			}
 		}
 	}
 
-	for _, salida := range s.Salidas {
-		if salida.IsAvailable() {
-			log.Printf("🚨 Sorter #%d: SKU '%s' sin salida manual disponible, usando salida %d",
-				s.ID, sku, salida.ID)
-			return salida
-		}
-	}
+	// Si no hay salida REJECT disponible, NO enviar a ninguna salida
+	log.Printf("🚨 Sorter #%d: ERROR CRÍTICO - No hay salida REJECT disponible para SKU '%s', caja perdida",
+		s.ID, sku)
 
-	if len(s.Salidas) > 0 {
-		log.Printf("🚨 Sorter #%d: ADVERTENCIA CRÍTICA - Todas las salidas bloqueadas/en falla, usando última salida", s.ID)
-		return s.Salidas[len(s.Salidas)-1]
-	}
-
+	// Retornar salida vacía (no válida)
 	return shared.Salida{}
 }
 

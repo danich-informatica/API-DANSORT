@@ -8,13 +8,14 @@ import (
 
 // SKU representa un SKU en la base de datos
 type SKU struct {
-	Variedad       string // Código de variedad (ej: "V018") - uso interno
-	Calibre        string
-	Embalaje       string
-	Dark           int
-	SKU            string
-	Estado         bool
-	NombreVariedad string // Nombre de variedad (ej: "LAPINS") - para frontend
+	Variedad            string // Código de variedad (ej: "V018") - uso interno
+	Calibre             string
+	Embalaje            string // Código de embalaje (ej: "TFYVDPAM25") - uso interno
+	Dark                int
+	SKU                 string
+	Estado              bool
+	NombreVariedad      string // Nombre de variedad (ej: "LAPINS") - para frontend
+	DescripcionEmbalaje string // Descripción de embalaje (ej: "TFY VD PAM 25") - para frontend
 }
 
 // BuildSKU construye el string SKU en formato: calibre-NOMBRE_VARIEDAD-embalaje-dark
@@ -49,16 +50,17 @@ func (s *SKU) CleanSKU() string {
 
 // SKUAssignable representa la estructura JSON para el endpoint HTTP de SKUs asignables
 type SKUAssignable struct {
-	ID             int     `json:"id"`
-	SKU            string  `json:"sku"`
-	Calibre        string  `json:"calibre,omitempty"`
-	Variedad       string  `json:"variedad,omitempty"`        // Código de variedad (ej: "V018")
-	NombreVariedad string  `json:"nombre_variedad,omitempty"` // Nombre de variedad (ej: "LAPINS")
-	Embalaje       string  `json:"embalaje,omitempty"`
-	Dark           int     `json:"dark"`
-	Percentage     float64 `json:"percentage"`
-	IsAssigned     bool    `json:"is_assigned"`
-	IsMasterCase   bool    `json:"is_master_case"`
+	ID                  int     `json:"id"`
+	SKU                 string  `json:"sku"`
+	Calibre             string  `json:"calibre,omitempty"`
+	Variedad            string  `json:"variedad,omitempty"`             // Código de variedad (ej: "V018")
+	NombreVariedad      string  `json:"nombre_variedad,omitempty"`      // Nombre de variedad (ej: "LAPINS")
+	Embalaje            string  `json:"embalaje,omitempty"`             // Código de embalaje (ej: "TFYVDPAM25")
+	DescripcionEmbalaje string  `json:"descripcion_embalaje,omitempty"` // Descripción de embalaje
+	Dark                int     `json:"dark"`
+	Percentage          float64 `json:"percentage"`
+	IsAssigned          bool    `json:"is_assigned"`
+	IsMasterCase        bool    `json:"is_master_case"`
 }
 
 // SKUChannel es un canal tipado para streaming de SKUs
@@ -82,32 +84,34 @@ func (s *SKU) GetNumericID() int {
 // ToAssignable convierte un SKU a su representación HTTP asignable
 func (s *SKU) ToAssignable(id int) SKUAssignable {
 	return SKUAssignable{
-		ID:             id,
-		SKU:            s.CleanSKU(), // Limpia paréntesis del formato de BD
-		Calibre:        s.Calibre,
-		Variedad:       s.Variedad,       // Código (ej: "V018")
-		NombreVariedad: s.NombreVariedad, // Nombre (ej: "LAPINS")
-		Embalaje:       s.Embalaje,
-		Dark:           s.Dark,
-		Percentage:     0.0,
-		IsAssigned:     false,
-		IsMasterCase:   false,
+		ID:                  id,
+		SKU:                 s.CleanSKU(), // Limpia paréntesis del formato de BD
+		Calibre:             s.Calibre,
+		Variedad:            s.Variedad,            // Código (ej: "V018")
+		NombreVariedad:      s.NombreVariedad,      // Nombre (ej: "LAPINS")
+		Embalaje:            s.Embalaje,            // Código (ej: "TFYVDPAM25")
+		DescripcionEmbalaje: s.DescripcionEmbalaje, // Descripción
+		Dark:                s.Dark,
+		Percentage:          0.0,
+		IsAssigned:          false,
+		IsMasterCase:        false,
 	}
 }
 
 // ToAssignableWithHash convierte un SKU usando su hash como ID numérico
 func (s *SKU) ToAssignableWithHash() SKUAssignable {
 	return SKUAssignable{
-		ID:             s.GetNumericID(),
-		SKU:            s.CleanSKU(),
-		Calibre:        s.Calibre,
-		Variedad:       s.Variedad,       // Código (ej: "V018")
-		NombreVariedad: s.NombreVariedad, // Nombre (ej: "LAPINS")
-		Embalaje:       s.Embalaje,
-		Dark:           s.Dark,
-		Percentage:     0.0,
-		IsAssigned:     false,
-		IsMasterCase:   false,
+		ID:                  s.GetNumericID(),
+		SKU:                 s.CleanSKU(),
+		Calibre:             s.Calibre,
+		Variedad:            s.Variedad,            // Código (ej: "V018")
+		NombreVariedad:      s.NombreVariedad,      // Nombre (ej: "LAPINS")
+		Embalaje:            s.Embalaje,            // Código (ej: "TFYVDPAM25")
+		DescripcionEmbalaje: s.DescripcionEmbalaje, // Descripción
+		Dark:                s.Dark,
+		Percentage:          0.0,
+		IsAssigned:          false,
+		IsMasterCase:        false,
 	}
 }
 
