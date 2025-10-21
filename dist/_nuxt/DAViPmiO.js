@@ -1,1 +1,0 @@
-import{Z as n}from"#entry";import{g as r}from"./XIrV35nz.js";const e=()=>({loft:[]}),i={async getLoftCoversByLine(o){try{this.loft=await r(`/monitoring/lines/${o}/loft`)}catch(t){console.error(t)}}},s={...i},a=n("myMonitoringLoftStore",{state:e,actions:s});export{a as u};

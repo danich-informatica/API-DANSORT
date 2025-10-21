@@ -1,1 +1,0 @@
-import{u as s}from"./3CeJB1AE.js";const r=()=>{const e=s();return{getSkus:t=>e.getSkus(t),getAssignments:t=>e.getAssignments(t),getEnrollmentHistory:t=>e.getEnrollmentHistory(t),getSorterHistory:t=>e.getSorterHistory(t)}};export{r as u};

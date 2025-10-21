@@ -236,7 +236,19 @@ func main() {
 				// Vincular FX6Manager ANTES de añadir al slice (para evitar copiar el mutex)
 				if fx6Manager != nil {
 					salida.SetFX6Manager(fx6Manager)
+
+					// Inicializar números de caja disponibles para DataMatrix
+					boxNumbers := []int{
+						20000058, 20000059, 20000060, 20000061, 20000062,
+						20000063, 20000064, 20000065, 20000066, 20000067,
+						20000068, 20000069, 20000070, 20000071, 20000072,
+						20000073, 20000074, 20000075, 20000076, 20000077,
+						20000078,
+					}
+					salida.InitializeBoxNumbers(boxNumbers)
+
 					log.Printf("           ✅ FX6Manager vinculado (DataMatrix habilitado)")
+					log.Printf("           📦 %d números de caja configurados", len(boxNumbers))
 				}
 
 				// Importante: añadir la salida después de configurarla completamente

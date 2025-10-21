@@ -3,6 +3,7 @@ package shared
 import (
 	"API-GREENEX/internal/models"
 	"context"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -32,7 +33,10 @@ type Salida struct {
 	BloqueoNode string `json:"bloqueo_node"` // Nodo OPC UA para bloqueo
 
 	// Campos para DataMatrix (FX6)
-	fx6Manager interface{} // *db.FX6Manager (interface para evitar import cycle)
+	fx6Manager       interface{} // *db.FX6Manager (interface para evitar import cycle)
+	availableBoxNums []int       // Lista de números de caja disponibles
+	currentBoxIndex  int         // Índice actual en la lista de cajas
+	boxIndexMu       sync.Mutex  // Mutex para el índice
 }
 
 // Start inicia la gorutina para escuchar eventos de la salida
@@ -124,9 +128,39 @@ func (s *Salida) SetFX6Manager(fx6Manager interface{}) {
 	s.fx6Manager = fx6Manager
 }
 
+// InitializeBoxNumbers inicializa la lista de números de caja disponibles
+func (s *Salida) InitializeBoxNumbers(boxNumbers []int) {
+	s.boxIndexMu.Lock()
+	defer s.boxIndexMu.Unlock()
+
+	s.availableBoxNums = boxNumbers
+	s.currentBoxIndex = 0
+	log.Printf("📦 [Salida %d] Inicializada con %d números de caja disponibles", s.ID, len(boxNumbers))
+}
+
+// GetNextBoxNumber obtiene el siguiente número de caja disponible (rotación circular)
+func (s *Salida) GetNextBoxNumber() int {
+	s.boxIndexMu.Lock()
+	defer s.boxIndexMu.Unlock()
+
+	if len(s.availableBoxNums) == 0 {
+		log.Printf("⚠️  [Salida %d] No hay números de caja configurados, usando 0", s.ID)
+		return 0
+	}
+
+	// Obtener número actual
+	boxNum := s.availableBoxNums[s.currentBoxIndex]
+
+	// Avanzar al siguiente (rotación circular)
+	s.currentBoxIndex = (s.currentBoxIndex + 1) % len(s.availableBoxNums)
+
+	return boxNum
+}
+
 // ProcessDataMatrix procesa una lectura de DataMatrix
-// El correlativo ES el número de caja (no hay auto-incremento)
-// Retorna el número de caja (= correlativo) y error si hubo
+// Correlativo: Número aleatorio que termina en 1 (viene del DataMatrix)
+// Número de Caja: Se asigna de la lista disponible (rotación)
+// Retorna el número de caja asignado y error si hubo
 func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (int, error) {
 	// Convertir correlativo string a int64
 	correlativo, err := strconv.ParseInt(correlativoStr, 10, 64)
@@ -135,8 +169,17 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 		return 0, err
 	}
 
-	// El número de caja ES el correlativo mismo
-	numeroCaja := int(correlativo)
+	// Validar que el correlativo termina en 1
+	if correlativo%10 != 1 {
+		log.Printf("⚠️  [Salida %d] ADVERTENCIA: Correlativo %d NO termina en 1", s.SealerPhysicalID, correlativo)
+	}
+
+	// Obtener siguiente número de caja de la lista disponible
+	numeroCaja := s.GetNextBoxNumber()
+	if numeroCaja == 0 {
+		return 0, fmt.Errorf("no hay números de caja disponibles")
+	}
+
 	fechaLectura := time.Now()
 
 	// Insertar en SQL Server FX6 solo si hay manager disponible
@@ -160,7 +203,7 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 				log.Printf("❌ [Salida %d] Error al insertar DataMatrix en FX6 (Correlativo=%d, Caja=%d): %v",
 					s.SealerPhysicalID, correlativo, numeroCaja, err)
 			} else {
-				log.Printf("✅ [Salida %d] DataMatrix registrado: Correlativo=%d = Caja=%d",
+				log.Printf("✅ [Salida %d] DataMatrix registrado: Correlativo=%d → Caja=%d",
 					s.SealerPhysicalID, correlativo, numeroCaja)
 			}
 		}

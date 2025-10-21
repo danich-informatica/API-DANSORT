@@ -8,7 +8,7 @@ database:
     healthcheck_interval: "30s"
 
   sqlserver:
-    host: "190.110.163.22"
+    host: "192.168.0.9"
     port: 1433
     user: "Danich"
     password: "yb*;NC&5r9U2"
@@ -50,7 +50,7 @@ cognex_devices:
 
   - id: 2
     name: "Cognex Línea 2"
-    host: "127.0.0.1" # IP informativa de la cámara física
+    host: "192.168.121.101" # IP informativa de la cámara física
     port: 8086 # Puerto ÚNICO donde escuchará (0.0.0.0:8086)
     scan_method: "QR" # Método por defecto: QR o DATAMATRIX
     ubicacion: "Línea Secundaria"

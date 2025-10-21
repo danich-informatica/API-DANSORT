@@ -1,0 +1,1 @@
+import{Z as o}from"#entry";import{p as r}from"./BXKflvj5.js";const i=()=>({etiquette_box:null}),n={async printSagEtiquette(t){try{await r(`printer/sag/${t}`,{})}catch(e){console.error(e)}},async printPalletizerEtiquette(t){try{await r(`printer/palletizer/${t}`,{})}catch(e){console.error(e)}}},s={...n},u=o("myEtiquettePrinterStore",{state:i,actions:s});export{u};
