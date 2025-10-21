@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador Sorter - Greenex</title>
+    <style>
+        :root {
+            --primary-color: #197979;
+            --cognex-color: #ff6b35;
+            --box-color: #4ecdc4;
+            --success-color: #28a745;
+            --reject-color: #dc3545;
+            --bg-color: #1a1a2e;
+            --card-bg: #16213e;
+            --text-color: #e8e8e8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            overflow-x: hidden;
+        }
+
+        .header {
+            background: var(--primary-color);
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .controls {
+            background: var(--card-bg);
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            border-bottom: 2px solid var(--primary-color);
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-group label {
+            font-weight: bold;
+        }
+
+        .control-group select {
+            padding: 8px 15px;
+            border-radius: 6px;
+            border: 2px solid var(--primary-color);
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 1rem;
+        }
+
+        .status-bar {
+            background: var(--card-bg);
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-around;
+            border-bottom: 1px solid #333;
+        }
+
+        .status-item {
+            text-align: center;
+        }
+
+        .status-item .label {
+            font-size: 0.9rem;
+            color: #999;
+        }
+
+        .status-item .value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .visualization-container {
+            padding: 40px 20px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Cognex Reader Section */
+        .cognex-section {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            border: 2px solid var(--cognex-color);
+        }
+
+        .cognex-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .cognex-icon {
+            font-size: 2rem;
+        }
+
+        .cognex-info {
+            flex: 1;
+        }
+
+        .cognex-name {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: var(--cognex-color);
+        }
+
+        .cognex-status {
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .last-read {
+            background: var(--bg-color);
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1rem;
+            text-align: center;
+            border: 2px solid #333;
+        }
+
+        /* Production Flow Section */
+        .production-section {
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            text-align: center;
+            color: var(--primary-color);
+        }
+
+        /* Conveyor System */
+        .conveyor-system {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding: 30px 0;
+        }
+
+        .conveyor-belt {
+            flex: 1;
+            position: relative;
+            height: 150px;
+            background: repeating-linear-gradient(
+                90deg,
+                #2d2d44 0px,
+                #2d2d44 30px,
+                #1a1a2e 30px,
+                #1a1a2e 60px
+            );
+            border: 4px solid #444;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: inset 0 6px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .belt-animation {
+            animation: beltMove 2s linear infinite;
+        }
+
+        @keyframes beltMove {
+            0% { background-position: 0 0; }
+            100% { background-position: 60px 0; }
+        }
+
+        .box {
+            position: absolute;
+            width: 100px;
+            height: 100px;
+            background: var(--box-color);
+            border: 4px solid #3ba99c;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
+            animation: moveBox 4s ease-in-out;
+            top: 25px;
+            left: 0;
+            z-index: 100;
+        }
+
+        .box.reject {
+            background: var(--reject-color);
+            border-color: #c82333;
+        }
+
+        @keyframes moveBox {
+            0% {
+                left: 0;
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                left: calc(100% - 100px);
+                transform: scale(1);
+            }
+        }
+
+        .box .sku-label {
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-align: center;
+            padding: 4px 8px;
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 4px;
+            margin-bottom: 5px;
+            max-width: 90px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .box .box-icon {
+            font-size: 2rem;
+        }
+
+        /* Salidas Grid */
+        .salidas-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .salida-card {
+            background: var(--bg-color);
+            border: 3px solid #333;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .salida-card.active {
+            border-color: var(--success-color);
+            box-shadow: 0 0 20px var(--success-color);
+            animation: pulse 0.5s ease;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.03);
+            }
+        }
+
+        .salida-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--primary-color);
+        }
+
+        .salida-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .salida-name {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .salida-type {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            background: rgba(25, 121, 121, 0.3);
+            border: 1px solid var(--primary-color);
+        }
+
+        .salida-stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: var(--card-bg);
+            border-radius: 8px;
+        }
+
+        .stat {
+            flex: 1;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #999;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .salida-skus {
+            margin-top: 15px;
+        }
+
+        .skus-title {
+            font-size: 0.9rem;
+            color: #999;
+            margin-bottom: 8px;
+        }
+
+        .sku-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .sku-tag {
+            background: var(--primary-color);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-family: 'Courier New', monospace;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        /* Connection Status */
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .connection-status.connected {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .connection-status.disconnected {
+            background: var(--reject-color);
+            color: white;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .status-bar {
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .conveyor-system {
+                flex-direction: column;
+            }
+
+            .salidas-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .empty-state-text {
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <h1>🎯 Visualizador Sorter en Tiempo Real</h1>
+        <p>Monitoreo de flujo de cajas y distribución por salidas</p>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <div class="control-group">
+            <label for="sorterSelect">Seleccionar Sorter:</label>
+            <select id="sorterSelect">
+                <option value="1">Sorter #1</option>
+                <option value="2">Sorter #2</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div class="status-item">
+            <div class="label">Lecturas Exitosas</div>
+            <div class="value" id="successCount" style="color: var(--success-color)">0</div>
+        </div>
+        <div class="status-item">
+            <div class="label">Lecturas Fallidas</div>
+            <div class="value" id="failCount" style="color: var(--reject-color)">0</div>
+        </div>
+        <div class="status-item">
+            <div class="label">Total Procesado</div>
+            <div class="value" id="totalCount">0</div>
+        </div>
+    </div>
+
+    <!-- Visualization Container -->
+    <div class="visualization-container">
+        <!-- Cognex Reader -->
+        <div class="cognex-section">
+            <div class="cognex-header">
+                <div class="cognex-icon">📷</div>
+                <div class="cognex-info">
+                    <div class="cognex-name">Cognex Reader</div>
+                    <div class="cognex-status" id="cognexStatus">Esperando lectura...</div>
+                </div>
+            </div>
+            <div class="last-read">
+                <strong>Última lectura:</strong> <span id="lastRead">-</span>
+            </div>
+        </div>
+
+        <!-- Production Flow -->
+        <div class="production-section">
+            <h2 class="section-title">📦 Flujo de Producción</h2>
+            <div class="conveyor-system">
+                <div class="conveyor-belt belt-animation" id="conveyor">
+                    <!-- Las cajas se crean dinámicamente aquí -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Salidas -->
+        <div class="production-section">
+            <h2 class="section-title">🎯 Distribución por Salidas</h2>
+            <div class="salidas-container" id="salidasContainer">
+                <!-- Salidas se cargan dinámicamente -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Connection Status -->
+    <div class="connection-status disconnected" id="connectionStatus">
+        🔴 Desconectado
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let ws = null;
+        let currentSorter = '1';
+        let salidas = {};
+        let stats = {
+            success: 0,
+            fail: 0
+        };
+
+        // Initialize
+        function init() {
+            document.getElementById('sorterSelect').addEventListener('change', (e) => {
+                currentSorter = e.target.value;
+                loadSorterData(currentSorter);
+                reconnectWebSocket();
+            });
+
+            loadSorterData(currentSorter);
+            connectWebSocket();
+        }
+
+        // Load sorter data
+        async function loadSorterData(sorterId) {
+            try {
+                const response = await fetch(`${API_BASE}/sku/assigned/${sorterId}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load salidas');
+                }
+
+                const data = await response.json();
+                salidas = {};
+                
+                const container = document.getElementById('salidasContainer');
+                container.innerHTML = '';
+
+                if (data.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📭</div>
+                            <div class="empty-state-text">No hay salidas configuradas para este sorter</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                data.forEach(salida => {
+                    salidas[salida.sealer_db_id] = {
+                        name: salida.mode || `Salida ${salida.sealer_physical_id}`,
+                        type: salida.mode || 'Normal',
+                        batch_size: salida.batch_size || 1,
+                        count: 0,
+                        skus: salida.assignments.map(a => a.sku_name)
+                    };
+
+                    const card = document.createElement('div');
+                    card.className = 'salida-card';
+                    card.id = `salida-${salida.sealer_db_id}`;
+                    card.innerHTML = `
+                        <div class="salida-header">
+                            <div class="salida-name">${salidas[salida.sealer_db_id].name}</div>
+                            <div class="salida-type">${salidas[salida.sealer_db_id].type}</div>
+                        </div>
+                        <div class="salida-stats">
+                            <div class="stat">
+                                <div class="stat-label">Cajas</div>
+                                <div class="stat-value" id="count-${salida.sealer_db_id}">0</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-label">Batch Size</div>
+                                <div class="stat-value">${salidas[salida.sealer_db_id].batch_size}</div>
+                            </div>
+                        </div>
+                        <div class="salida-skus">
+                            <div class="skus-title">SKUs Asignados (${salidas[salida.sealer_db_id].skus.length}):</div>
+                            <div class="sku-tags">
+                                ${salidas[salida.sealer_db_id].skus.map(sku => 
+                                    `<div class="sku-tag">${sku}</div>`
+                                ).join('') || '<span style="color: #999;">Sin SKUs asignados</span>'}
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Error loading salidas:', error);
+                document.getElementById('salidasContainer').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">⚠️</div>
+                        <div class="empty-state-text">Error al cargar salidas: ${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        // Connect WebSocket with room
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const roomName = `assignment_${currentSorter}`;
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/${roomName}`;
+            
+            console.log('Connecting to:', wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected to room:', roomName);
+                updateConnectionStatus(true);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('WebSocket message:', data);
+                    handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateConnectionStatus(false);
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Reconnect WebSocket when sorter changes
+        function reconnectWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+            setTimeout(connectWebSocket, 500);
+        }
+
+        // Handle WebSocket messages
+        function handleWebSocketMessage(data) {
+            console.log('Message type:', data.type);
+            
+            if (data.type === 'lectura_procesada') {
+                handleLecturaProcesada(data);
+            } else if (data.type === 'lectura_exitosa' || data.type === 'lectura_fallida') {
+                handleLectura(data);
+            } else if (data.type === 'sku_assigned') {
+                // Reload salidas when configuration changes
+                loadSorterData(currentSorter);
+            }
+        }
+
+        // Handle lectura_procesada event (new per-box event)
+        function handleLecturaProcesada(data) {
+            const isSuccess = data.exitoso;
+            const isReject = data.sku === 'REJECT' || data.sku === 'NO_READ' || !isSuccess;
+
+            // Update stats
+            if (isSuccess) {
+                stats.success++;
+                document.getElementById('successCount').textContent = stats.success;
+            } else {
+                stats.fail++;
+                document.getElementById('failCount').textContent = stats.fail;
+            }
+            document.getElementById('totalCount').textContent = stats.success + stats.fail;
+
+            // Update Cognex display
+            document.getElementById('lastRead').textContent = data.qr_code || data.sku || 'NO_READ';
+            document.getElementById('cognexStatus').textContent = isSuccess ? 
+                `✅ Lectura exitosa (${data.correlativo})` : '❌ Lectura fallida';
+
+            // Create and animate box
+            const boxLabel = data.sku || 'NO_READ';
+            createBox(boxLabel, isReject);
+
+            // Highlight target salida
+            if (data.salida_id && salidas[data.salida_id]) {
+                setTimeout(() => {
+                    highlightSalida(data.salida_id);
+                    salidas[data.salida_id].count++;
+                    const countEl = document.getElementById(`count-${data.salida_id}`);
+                    if (countEl) {
+                        countEl.textContent = salidas[data.salida_id].count;
+                    }
+                }, 3500); // Highlight when box arrives at end
+            }
+        }
+
+        // Handle lectura event (legacy)
+        function handleLectura(data) {
+            const isSuccess = data.type === 'lectura_exitosa';
+            const isReject = data.sku === 'REJECT' || data.sku === 'NO_READ';
+
+            // Update stats
+            if (isSuccess) {
+                stats.success++;
+                document.getElementById('successCount').textContent = stats.success;
+            } else {
+                stats.fail++;
+                document.getElementById('failCount').textContent = stats.fail;
+            }
+            document.getElementById('totalCount').textContent = stats.success + stats.fail;
+
+            // Update Cognex display
+            document.getElementById('lastRead').textContent = data.qr_code || data.sku || 'NO_READ';
+            document.getElementById('cognexStatus').textContent = isSuccess ? 
+                '✅ Lectura exitosa' : '❌ Lectura fallida';
+
+            // Create and animate box
+            createBox(data.sku, isReject);
+
+            // Highlight target salida
+            if (isSuccess && data.salida_id && salidas[data.salida_id]) {
+                setTimeout(() => {
+                    highlightSalida(data.salida_id);
+                    salidas[data.salida_id].count++;
+                    const countEl = document.getElementById(`count-${data.salida_id}`);
+                    if (countEl) {
+                        countEl.textContent = salidas[data.salida_id].count;
+                    }
+                }, 3500); // Highlight when box arrives at end
+            }
+        }
+
+        // Create animated box
+        function createBox(sku, isReject) {
+            const conveyor = document.getElementById('conveyor');
+            const box = document.createElement('div');
+            box.className = `box ${isReject ? 'reject' : ''}`;
+            box.innerHTML = `
+                <div class="sku-label">${sku || 'NO_READ'}</div>
+                <div class="box-icon">${isReject ? '❌' : '📦'}</div>
+            `;
+
+            conveyor.appendChild(box);
+
+            // Remove box after animation
+            setTimeout(() => {
+                box.remove();
+            }, 4000);
+        }
+
+        // Highlight salida temporarily
+        function highlightSalida(salidaId) {
+            const element = document.getElementById(`salida-${salidaId}`);
+            if (element) {
+                element.classList.add('active');
+                setTimeout(() => {
+                    element.classList.remove('active');
+                }, 800);
+            }
+        }
+
+        // Update connection status
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            if (connected) {
+                status.className = 'connection-status connected';
+                status.textContent = '🟢 Conectado';
+            } else {
+                status.className = 'connection-status disconnected';
+                status.textContent = '🔴 Desconectado';
+            }
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>

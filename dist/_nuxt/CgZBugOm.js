@@ -1,0 +1,1 @@
+import{e as s,c as o,a as n,o as h}from"#entry";const i=["width","height"],l=s({__name:"Plus",props:{size:{}},setup(e){return(r,t)=>(h(),o("svg",{xmlns:"http://www.w3.org/2000/svg",width:e.size,height:e.size,viewBox:"0 0 24 24"},[...t[0]||(t[0]=[n("path",{fill:"currentColor",d:"M11 13H5v-2h6V5h2v6h6v2h-6v6h-2z"},null,-1)])],8,i))}});export{l as _};

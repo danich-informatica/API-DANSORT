@@ -1,0 +1,1 @@
+import{_ as t}from"./DlAUqK2U.js";import{c as s,a as c,o}from"#entry";const r={},n={class:"flex flex-col justify-center items-center h-96 w-full"};function a(l,e){return o(),s("div",n,[...e[0]||(e[0]=[c("h1",{class:"title-1 text-dgreen1"},"NO TIENES ACCESO",-1)])])}const d=t(r,[["render",a]]);export{d as default};
