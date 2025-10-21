@@ -220,10 +220,12 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			return
 		}
 
-		// Extraer componentes
+		// Extraer componentes (formato: Especie;Calibre;Dark;Embalaje;Etiqueta;Variedad)
 		especie := strings.TrimSpace(message_splitted[0])
 		calibre := strings.TrimSpace(message_splitted[1])
+		darkStr := strings.TrimSpace(message_splitted[2])
 		embalaje := strings.TrimSpace(message_splitted[3])
+		// message_splitted[4] es etiqueta/marca (no se usa)
 		variedad := strings.TrimSpace(message_splitted[5])
 
 		// Validar que los componentes no estén vacíos
@@ -235,8 +237,19 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			return
 		}
 
+		// Parsear el valor de dark (esperamos "0" o "1")
+		var dark int
+		if darkStr == "0" || darkStr == "" {
+			dark = 0
+		} else if darkStr == "1" {
+			dark = 1
+		} else {
+			log.Printf("⚠️  Valor dark inválido '%s', usando 0 por defecto", darkStr)
+			dark = 0
+		}
+
 		// Generar SKU para validación
-		sku, err := models.RequestSKU(variedad, calibre, embalaje)
+		sku, err := models.RequestSKU(variedad, calibre, embalaje, dark)
 		if err != nil {
 			log.Printf("❌ SKU inválido generado desde mensaje: %s | Error: %v", message, err)
 			response := "NACK\r\n"
@@ -260,7 +273,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			variedad: variedad,
 			calibre:  calibre,
 			embalaje: embalaje,
-			dark:     sku.Dark,
+			dark:     dark, // Usar el dark extraído del QR
 			sku:      sku.SKU,
 			message:  message,
 			resultCh: resultCh,
@@ -312,7 +325,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 				variedad,
 				calibre,
 				embalaje,
-				sku.Dark,
+				dark, // Usar el dark extraído del QR
 			)
 
 			if err != nil {
