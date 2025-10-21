@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"API-GREENEX/internal/config"
+	"API-GREENEX/internal/db"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,26 +22,21 @@ import (
 // Código NO_READ constante
 const NO_READ_CODE = "NO_READ"
 
-// Combinaciones válidas de SKUs
-var skusCombinaciones = []struct {
+// SKU representa una SKU de la base de datos
+type SKU struct {
 	Calibre  string
 	Variedad string
 	Embalaje string
-}{
-	{"XL", "V018", "CECDCAM5"},
-	{"4J", "V018", "CEMDSAM4"},
-	{"2J", "V018", "CEMGKAM5"},
-	{"2J", "V018", "CEMDSAM4"},
-	{"XLD", "V018", "CECGKAM5"},
-	{"2J", "V022", "CEMGKAM5"},
-	{"3J", "V022", "CEMGKAM5"},
-	{"J", "V022", "CEMGKAM5"},
-	{"JD", "V022", "CEMGKAM5"},
+	Dark     int
 }
 
 var (
-	especies = []string{"E003", "E001", "E005", "E007"}
-	marcas   = []string{"CHLION", "GREENEX", "PREMIUM", "SELECT"}
+	especies        = []string{"E003", "E001", "E005", "E007"}
+	marcas          = []string{"CHLION", "GREENEX", "PREMIUM", "SELECT"}
+	skusFromDB      []SKU
+	skusLastUpdated time.Time
+	skusMutex       sync.RWMutex
+	dbManager       *db.PostgresManager
 )
 
 // CognexSimulator simula un lector Cognex
@@ -95,19 +92,66 @@ func init() {
 	}
 }
 
-// generarQR genera un código QR simulado con formato: ESPECIE;CALIBRE;INVERTIR;EMBALAJE;MARCA;VARIEDAD
+// loadSKUsFromDB carga las SKUs activas desde la base de datos
+func loadSKUsFromDB() error {
+	ctx := context.Background()
+
+	activeSKUs, err := dbManager.GetActiveSKUs(ctx)
+	if err != nil {
+		return fmt.Errorf("error al cargar SKUs: %w", err)
+	}
+
+	skusMutex.Lock()
+	defer skusMutex.Unlock()
+
+	skusFromDB = make([]SKU, 0, len(activeSKUs))
+	for _, sku := range activeSKUs {
+		skusFromDB = append(skusFromDB, SKU{
+			Calibre:  sku.Calibre,
+			Variedad: sku.Variedad,
+			Embalaje: sku.Embalaje,
+			Dark:     sku.Dark,
+		})
+	}
+	skusLastUpdated = time.Now()
+
+	log.Printf("✅ Cargadas %d SKUs activas desde la base de datos", len(skusFromDB))
+	return nil
+}
+
+// startSKURefreshWorker actualiza las SKUs periódicamente
+func startSKURefreshWorker() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := loadSKUsFromDB(); err != nil {
+			log.Printf("⚠️  Error al refrescar SKUs: %v", err)
+		}
+	}
+}
+
+// generarQR genera un código QR simulado con formato: ESPECIE;CALIBRE;DARK;EMBALAJE;MARCA;VARIEDAD
 func generarQR() string {
-	// Seleccionar combinación aleatoria
-	sku := skusCombinaciones[rand.Intn(len(skusCombinaciones))]
+	skusMutex.RLock()
+	defer skusMutex.RUnlock()
+
+	// Si no hay SKUs en la BD, usar valores por defecto
+	if len(skusFromDB) == 0 {
+		log.Printf("⚠️  No hay SKUs en la BD, usando valores por defecto")
+		return "E003;XL;0;CECDCAM5;GREENEX;V018"
+	}
+
+	// Seleccionar SKU aleatoria de la BD
+	sku := skusFromDB[rand.Intn(len(skusFromDB))]
 	especie := especies[rand.Intn(len(especies))]
 	marca := marcas[rand.Intn(len(marcas))]
-	invertirColores := "0" // Puede ser "0" o "1"
 
-	// Formato correcto: E003;XL;0;CECDCAM5;PREMIUM;V018
-	return fmt.Sprintf("%s;%s;%s;%s;%s;%s",
+	// Formato correcto: Especie;Calibre;Dark;Embalaje;Marca;Variedad
+	return fmt.Sprintf("%s;%s;%d;%s;%s;%s",
 		especie,
 		sku.Calibre,
-		invertirColores,
+		sku.Dark,
 		sku.Embalaje,
 		marca,
 		sku.Variedad,
@@ -546,6 +590,31 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ Error cargando configuración: %v", err)
 	}
+
+	// Inicializar gestor de base de datos PostgreSQL
+	log.Println("🔌 Conectando a base de datos PostgreSQL...")
+	dbManager, err = db.GetPostgresManagerWithURL(
+		context.Background(),
+		cfg.Database.Postgres.URL,
+		1,  // minConns
+		10, // maxConns
+		10*time.Second,
+		30*time.Second,
+	)
+	if err != nil {
+		log.Fatalf("❌ Error al conectar con PostgreSQL: %v", err)
+	}
+	defer dbManager.Close()
+	log.Println("✅ Conectado a PostgreSQL")
+
+	// Cargar SKUs activas desde la base de datos
+	log.Println("📦 Cargando SKUs activas desde la base de datos...")
+	if err := loadSKUsFromDB(); err != nil {
+		log.Printf("⚠️  No se pudieron cargar SKUs: %v (usando valores por defecto)", err)
+	}
+
+	// Iniciar worker para refrescar SKUs periódicamente
+	go startSKURefreshWorker()
 
 	// Crear simuladores desde configuración
 	log.Println("🔧 Inicializando simuladores Cognex...")

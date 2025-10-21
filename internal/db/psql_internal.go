@@ -146,7 +146,7 @@ func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]models.SKU, error) 
 	for rows.Next() {
 		var sku models.SKU
 
-		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado); err != nil {
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado, &sku.NombreVariedad); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 
@@ -213,15 +213,20 @@ func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, c
 	}
 
 	if !exists {
-		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente con dark=%d...", calibre, variedad, embalaje, dark)
+		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente con dark=%d y estado=false...", calibre, variedad, embalaje, dark)
 
-		// Insertar la SKU con estado true
-		err = m.InsertSKU(ctx, calibre, variedad, embalaje, dark)
+		// Insertar la SKU con estado false (desactivada hasta que sea activada manualmente)
+		_, err = m.pool.Exec(ctx, `
+			INSERT INTO sku (calibre, variedad, embalaje, dark, estado) 
+			VALUES ($1, $2, $3, $4, false)
+			ON CONFLICT (calibre, variedad, embalaje, dark) DO NOTHING
+		`, calibre, variedad, embalaje, dark)
+
 		if err != nil {
 			return "", fmt.Errorf("error al crear SKU: %w", err)
 		}
 
-		log.Printf("✅ SKU creada: %s-%s-%s (dark=%d)", calibre, variedad, embalaje, dark)
+		log.Printf("✅ SKU creada: %s-%s-%s (dark=%d, estado=false - desactivada)", calibre, variedad, embalaje, dark)
 	}
 
 	// Paso 2: Insertar la caja
@@ -251,7 +256,7 @@ func (m *PostgresManager) GetActiveSKUs(ctx context.Context) ([]models.SKU, erro
 
 	for rows.Next() {
 		var sku models.SKU
-		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado); err != nil {
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &sku.SKU, &sku.Estado, &sku.NombreVariedad); err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 		skus = append(skus, sku)
@@ -323,6 +328,7 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 		var calibre, variedad, embalaje string
 		var dark int
 		var skuEstado bool
+		var nombreVariedad string
 
 		err := rows.Scan(
 			&salidaID,
@@ -333,21 +339,28 @@ func (m *PostgresManager) LoadAssignedSKUsForSorter(ctx context.Context, sorterI
 			&embalaje,
 			&dark,
 			&skuEstado,
+			&nombreVariedad,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("error al escanear fila: %w", err)
 		}
 
-		// Construir el SKU completo: calibre-variedad-embalaje-dark
-		skuName := fmt.Sprintf("%s-%s-%s-%d", calibre, variedad, embalaje, dark)
+		// Construir el SKU completo: calibre-NOMBRE_VARIEDAD-embalaje-dark
+		// Usar nombre si existe, sino usar código, siempre en MAYÚSCULAS
+		variedadDisplay := nombreVariedad
+		if variedadDisplay == "" {
+			variedadDisplay = variedad
+		}
+		skuName := fmt.Sprintf("%s-%s-%s-%d", calibre, strings.ToUpper(variedadDisplay), embalaje, dark)
 
 		sku := models.SKU{
-			Calibre:  calibre,
-			Variedad: variedad,
-			Embalaje: embalaje,
-			Dark:     dark,
-			SKU:      skuName,
-			Estado:   skuEstado,
+			Calibre:        calibre,
+			Variedad:       variedad, // Código de variedad
+			Embalaje:       embalaje,
+			Dark:           dark,
+			SKU:            skuName,
+			Estado:         skuEstado,
+			NombreVariedad: nombreVariedad, // Nombre de variedad
 		}
 
 		// Agregar SKU al mapa agrupado por salida_id
@@ -540,4 +553,94 @@ func (m *PostgresManager) BeginTx(ctx context.Context) (pgx.Tx, error) {
 		return nil, fmt.Errorf("manager no inicializado")
 	}
 	return m.pool.Begin(ctx)
+}
+
+// ==============================================================================
+// Funciones para tabla variedad (mapeo código ↔ nombre)
+// ==============================================================================
+
+// InsertVariedad inserta o actualiza el mapeo código-nombre de variedad
+func (m *PostgresManager) InsertVariedad(ctx context.Context, codigoVariedad, nombreVariedad string) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+
+	if codigoVariedad == "" || nombreVariedad == "" {
+		return fmt.Errorf("código o nombre de variedad vacío")
+	}
+
+	_, err := m.pool.Exec(ctx, INSERT_VARIEDAD_INTERNAL_DB,
+		strings.TrimSpace(codigoVariedad),
+		strings.TrimSpace(nombreVariedad))
+	if err != nil {
+		return fmt.Errorf("error al insertar variedad: %w", err)
+	}
+
+	return nil
+}
+
+// GetNombreVariedad obtiene el nombre de variedad dado su código
+// Retorna el nombre o un string vacío si no existe
+func (m *PostgresManager) GetNombreVariedad(ctx context.Context, codigoVariedad string) (string, error) {
+	if m == nil || m.pool == nil {
+		return "", fmt.Errorf("manager no inicializado")
+	}
+
+	var nombre string
+	err := m.pool.QueryRow(ctx, SELECT_NOMBRE_VARIEDAD_BY_CODIGO, strings.TrimSpace(codigoVariedad)).Scan(&nombre)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", nil // No existe, retornar vacío sin error
+		}
+		return "", fmt.Errorf("error al obtener nombre variedad: %w", err)
+	}
+
+	return nombre, nil
+}
+
+// GetCodigoVariedad obtiene el código de variedad dado su nombre
+// Retorna el código o un string vacío si no existe
+func (m *PostgresManager) GetCodigoVariedad(ctx context.Context, nombreVariedad string) (string, error) {
+	if m == nil || m.pool == nil {
+		return "", fmt.Errorf("manager no inicializado")
+	}
+
+	var codigo string
+	err := m.pool.QueryRow(ctx, SELECT_CODIGO_VARIEDAD_BY_NOMBRE, strings.TrimSpace(nombreVariedad)).Scan(&codigo)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", nil // No existe, retornar vacío sin error
+		}
+		return "", fmt.Errorf("error al obtener código variedad: %w", err)
+	}
+
+	return codigo, nil
+}
+
+// GetAllVariedades obtiene todas las variedades (código y nombre)
+func (m *PostgresManager) GetAllVariedades(ctx context.Context) (map[string]string, error) {
+	if m == nil || m.pool == nil {
+		return nil, fmt.Errorf("manager no inicializado")
+	}
+
+	rows, err := m.pool.Query(ctx, SELECT_ALL_VARIEDADES)
+	if err != nil {
+		return nil, fmt.Errorf("error al obtener variedades: %w", err)
+	}
+	defer rows.Close()
+
+	variedades := make(map[string]string)
+	for rows.Next() {
+		var codigo, nombre string
+		if err := rows.Scan(&codigo, &nombre); err != nil {
+			return nil, fmt.Errorf("error al leer variedad: %w", err)
+		}
+		variedades[codigo] = nombre
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterando variedades: %w", err)
+	}
+
+	return variedades, nil
 }

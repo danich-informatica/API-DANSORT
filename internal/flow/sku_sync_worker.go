@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"API-GREENEX/internal/db"
@@ -92,6 +93,38 @@ func (w *SKUSyncWorker) syncSKUs() {
 	}
 
 	log.Printf("📊 Sync SKU: %d filas obtenidas de SQL Server", len(rows))
+
+	// 1.5 CRÍTICO: Sincronizar variedades PRIMERO (sku.variedad es FK a variedad.codigo_variedad)
+	// Extraer variedades únicas
+	variedadesMap := make(map[string]string) // codigo -> nombre
+	for _, row := range rows {
+		if row.Variedad.Valid && row.NombreVariedad.Valid {
+			codigo := strings.TrimSpace(row.Variedad.String)
+			nombre := strings.TrimSpace(row.NombreVariedad.String)
+			if codigo != "" && nombre != "" {
+				variedadesMap[codigo] = nombre
+			}
+		}
+	}
+
+	// Insertar/actualizar variedades en PostgreSQL ANTES de tocar SKUs
+	variedadCount := 0
+	variedadErrors := 0
+	for codigo, nombre := range variedadesMap {
+		if err := w.postgresMgr.InsertVariedad(ctx, codigo, nombre); err != nil {
+			log.Printf("⚠️  Error al sincronizar variedad %s: %v", codigo, err)
+			variedadErrors++
+		} else {
+			variedadCount++
+		}
+	}
+	log.Printf("✅ Variedades sincronizadas: %d exitosas, %d errores", variedadCount, variedadErrors)
+
+	// Si hay errores críticos en variedades, abortar para evitar FK violations
+	if variedadErrors > 0 && variedadCount == 0 {
+		log.Printf("❌ Sync SKU: no se pudo sincronizar ninguna variedad, abortando para evitar FK violations")
+		return
+	}
 
 	// 2. Usar transacción PostgreSQL para atomicidad
 	tx, err := w.postgresMgr.BeginTx(ctx)

@@ -83,22 +83,22 @@ func simular_escaneo(host string, intervaloMs int, noReadPercentage int) {
 				// Seleccionar una combinación válida de SKU
 				skuCombo := skusCombinaciones[rand.Intn(len(skusCombinaciones))]
 
-				// Generar código QR con la estructura: E003;XL;0;CECDCAM5;CHLION;V018
+				// Generar código QR con la estructura: Especie;Calibre;Dark;Embalaje;Marca;Variedad
 				especie := especies[rand.Intn(len(especies))]
 				calibre := skuCombo.Calibre
-				invertirColores := "0"
+				dark := fmt.Sprintf("%d", rand.Intn(2)) // 0 o 1 aleatoriamente
 				embalaje := skuCombo.Embalaje
 				marca := marcas[rand.Intn(len(marcas))]
 				variedad := skuCombo.Variedad
 
-				// Construir el código QR
+				// Construir el código QR (formato: Especie;Calibre;Dark;Embalaje;Marca;Variedad)
 				qrCode := fmt.Sprintf("%s;%s;%s;%s;%s;%s",
-					especie, calibre, invertirColores, embalaje, marca, variedad)
+					especie, calibre, dark, embalaje, marca, variedad)
 
 				message = qrCode + "\r\n"
 
-				// Construir el SKU para el log
-				sku := fmt.Sprintf("%s-%s-%s", calibre, variedad, embalaje)
+				// Construir el SKU para el log (incluye dark ahora)
+				sku := fmt.Sprintf("%s-%s-%s-%s", calibre, variedad, embalaje, dark)
 				log.Printf("📤 #%-4d → %s (SKU: %s)", contador, qrCode, sku)
 			}
 

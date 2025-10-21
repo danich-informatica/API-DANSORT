@@ -111,6 +111,13 @@ func (s *Sorter) processLecturaFallida(evento models.LecturaEvent) {
 	tipoLectura := evento.GetTipo()
 	salida, razon := s.getSalidaForFallo(tipoLectura)
 
+	// Protección contra salida nil
+	if salida == nil {
+		log.Printf("❌ Sorter #%d: Fallo #%d | SKU: %s | Sin salida disponible | Razón: %s | %s",
+			s.ID, s.LecturasFallidas, evento.SKU, razon, evento.String())
+		return
+	}
+
 	log.Printf("❌ Sorter #%d: Fallo #%d | SKU: %s | Salida: %s (ID: %d) | Razón: %s | %s",
 		s.ID, s.LecturasFallidas, evento.SKU, salida.Salida_Sorter, salida.ID, razon, evento.String())
 

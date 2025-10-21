@@ -14,7 +14,20 @@ DROP TABLE IF EXISTS sorter CASCADE;
 DROP TABLE IF EXISTS caja CASCADE;
 DROP TABLE IF EXISTS pallet CASCADE;
 DROP TABLE IF EXISTS sku CASCADE;
+DROP TABLE IF EXISTS variedad CASCADE;
 DROP TABLE IF EXISTS codigoenvase CASCADE;
+
+-- =======================
+-- Tabla de Variedades (mapeo código ↔ nombre)
+-- Debe crearse ANTES de sku porque sku.variedad es FK
+-- =======================
+CREATE TABLE variedad (
+    codigo_variedad VARCHAR(100) PRIMARY KEY,
+    nombre_variedad VARCHAR(255) NOT NULL,
+    CONSTRAINT uq_nombre_variedad UNIQUE (nombre_variedad)
+);
+
+CREATE INDEX idx_variedad_nombre ON variedad(nombre_variedad);
 
 -- =======================
 -- Catálogo SKU
@@ -25,7 +38,9 @@ CREATE TABLE sku (
     embalaje  VARCHAR(50)  NOT NULL,
     dark      INTEGER      NOT NULL DEFAULT 0,
     estado    BOOLEAN      NOT NULL DEFAULT TRUE,
-    CONSTRAINT pk_sku PRIMARY KEY (calibre, variedad, embalaje, dark)
+    CONSTRAINT pk_sku PRIMARY KEY (calibre, variedad, embalaje, dark),
+    CONSTRAINT fk_sku_variedad FOREIGN KEY (variedad)
+        REFERENCES variedad (codigo_variedad) ON DELETE CASCADE
 );
 
 -- =======================
@@ -49,7 +64,7 @@ CREATE TABLE caja (
     embalaje            VARCHAR(50)  NOT NULL,
     dark                INTEGER      NOT NULL DEFAULT 0,
     color               VARCHAR(50)  NOT NULL,
-    correlativo_pallet  VARCHAR(50)  NOT NULL,
+    correlativo_pallet  VARCHAR(50),
     CONSTRAINT fk_caja_pallet FOREIGN KEY (correlativo_pallet)
         REFERENCES pallet (correlativo) ON DELETE CASCADE,
     CONSTRAINT fk_caja_sku FOREIGN KEY (calibre, variedad, embalaje, dark)

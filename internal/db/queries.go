@@ -1,12 +1,13 @@
 package db
 
-// Query CON VIE_Dark (intentar primero)
+// Query CON VIE_Dark y VIE_Descrizione (intentar primero)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 	SELECT 
 		VIE_CodVarieta AS variedad,
 		VIE_CodClasse AS calibre,
 		VIE_CodConfezione AS embalaje,
-		VIE_Dark AS dark
+		VIE_Dark AS dark,
+		VIE_Varieta AS nombre_variedad
 	FROM dbo.VW_INT_DANICH_ENVIVO
 	WHERE VIE_CodVarieta IS NOT NULL 
 	  AND VIE_CodClasse IS NOT NULL 
@@ -19,7 +20,8 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
 		VIE_CodVarieta AS variedad,
 		VIE_CodClasse AS calibre,
 		VIE_CodConfezione AS embalaje,
-		0 AS dark
+		0 AS dark,
+		VIE_Varieta AS nombre_variedad
 	FROM dbo.VW_INT_DANICH_ENVIVO
 	WHERE VIE_CodVarieta IS NOT NULL 
 	  AND VIE_CodClasse IS NOT NULL 
@@ -45,11 +47,13 @@ const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `
 `
 
 const SELECT_ALL_SKUS_INTERNAL_DB = `
-	SELECT calibre, variedad, embalaje, dark, 
-	       CONCAT(calibre, '-', variedad, '-', embalaje, '-', dark) as sku, 
-	       estado
-	FROM SKU
-	ORDER BY variedad, calibre, embalaje, dark
+	SELECT s.calibre, s.variedad, s.embalaje, s.dark, 
+	       CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
+	       s.estado,
+	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
+	FROM SKU s
+	LEFT JOIN variedad v ON s.variedad = v.codigo_variedad
+	ORDER BY s.variedad, s.calibre, s.embalaje, s.dark
 `
 const SELECT_IF_EXISTS_SKU_INTERNAL_DB = `
 	SELECT EXISTS(SELECT 1 FROM sku WHERE calibre = $1 AND variedad = $2 AND embalaje = $3)
@@ -131,12 +135,14 @@ const COUNT_BOXES_INTERNAL_DB = `
 `
 
 const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
-	SELECT calibre, variedad, embalaje, dark, 
-	       CONCAT(calibre, '-', variedad, '-', embalaje, '-', dark) as sku, 
-	       estado
-	FROM sku
-	WHERE estado = true
-	ORDER BY variedad, calibre, embalaje, dark
+	SELECT s.calibre, s.variedad, s.embalaje, s.dark, 
+	       CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
+	       s.estado,
+	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
+	FROM sku s
+	LEFT JOIN variedad v ON s.variedad = v.codigo_variedad
+	WHERE s.estado = true
+	ORDER BY s.variedad, s.calibre, s.embalaje, s.dark
 `
 
 const INSERT_NEW_SORTER_IF_NOT_EXISTS_INTERNAL_DB = `
@@ -176,11 +182,13 @@ const SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB = `
 		ss.variedad AS salida_variedad,
 		ss.embalaje AS salida_embalaje,
 		ss.dark AS salida_dark,
-		s2.estado AS sku_estado
+		s2.estado AS sku_estado,
+		COALESCE(v.nombre_variedad, ss.variedad) as nombre_variedad
 	FROM sorter s
 	JOIN salida sal ON s.id = sal.sorter
 	JOIN salida_sku ss ON sal.id = ss.salida_id
 	JOIN sku s2 ON ss.calibre = s2.calibre AND ss.variedad = s2.variedad AND ss.embalaje = s2.embalaje AND ss.dark = s2.dark
+	LEFT JOIN variedad v ON ss.variedad = v.codigo_variedad
 	WHERE s.id = $1
 	ORDER BY sal.id
 `
@@ -217,7 +225,7 @@ const CHECK_SALIDA_SKU_EXISTS_INTERNAL_DB = `
 const SELECT_HISTORIAL_DESVIOS_INTERNAL_DB = `
 	SELECT 
 		sc.correlativo_caja AS box_id,
-		CONCAT(c.calibre, '-', c.variedad, '-', c.embalaje, '-', c.dark) AS sku,
+		CONCAT(c.calibre, '-', UPPER(COALESCE(v.nombre_variedad, c.variedad)), '-', c.embalaje, '-', c.dark) AS sku,
 		c.calibre,
 		sc.salida_enviada AS sealer,
 		sc.llena AS is_sealer_full_type,
@@ -226,7 +234,31 @@ const SELECT_HISTORIAL_DESVIOS_INTERNAL_DB = `
 	FROM salida_caja sc
 	INNER JOIN caja c ON sc.correlativo_caja = c.correlativo
 	INNER JOIN salida s ON sc.id_salida = s.id
+	LEFT JOIN variedad v ON c.variedad = v.codigo_variedad
 	WHERE s.sorter = $1
 	ORDER BY sc.fecha_salida DESC
 	LIMIT 12
+`
+
+// =======================
+// Queries para tabla variedad (mapeo código ↔ nombre)
+// =======================
+
+const INSERT_VARIEDAD_INTERNAL_DB = `
+	INSERT INTO variedad (codigo_variedad, nombre_variedad)
+	VALUES ($1, $2)
+	ON CONFLICT (codigo_variedad) 
+	DO UPDATE SET nombre_variedad = EXCLUDED.nombre_variedad
+`
+
+const SELECT_NOMBRE_VARIEDAD_BY_CODIGO = `
+	SELECT nombre_variedad FROM variedad WHERE codigo_variedad = $1
+`
+
+const SELECT_CODIGO_VARIEDAD_BY_NOMBRE = `
+	SELECT codigo_variedad FROM variedad WHERE nombre_variedad = $1
+`
+
+const SELECT_ALL_VARIEDADES = `
+	SELECT codigo_variedad, nombre_variedad FROM variedad ORDER BY nombre_variedad
 `

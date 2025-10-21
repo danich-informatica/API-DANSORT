@@ -25,8 +25,9 @@ type insertRequest struct {
 }
 
 type insertResult struct {
-	correlativo string
-	err         error
+	correlativo    string
+	nombreVariedad string // Nombre de variedad para construir SKU correcto
+	err            error
 }
 
 type CognexListener struct {
@@ -92,8 +93,9 @@ func (c *CognexListener) insertWorker() {
 
 // processInsert realiza la inserción real en la base de datos
 func (c *CognexListener) processInsert(req insertRequest) {
+	ctx := context.Background()
 	correlativo, err := c.dbManager.InsertNewBox(
-		context.Background(),
+		ctx,
 		req.especie,
 		req.variedad,
 		req.calibre,
@@ -101,9 +103,22 @@ func (c *CognexListener) processInsert(req insertRequest) {
 		req.dark,
 	)
 
+	// Obtener nombre de variedad para construir SKU correctamente
+	nombreVariedad := ""
+	if err == nil {
+		nombreVar, errNombre := c.dbManager.GetNombreVariedad(ctx, req.variedad)
+		if errNombre == nil && nombreVar != "" {
+			nombreVariedad = nombreVar
+		} else {
+			// Si no se encuentra nombre, usar código
+			nombreVariedad = req.variedad
+		}
+	}
+
 	req.resultCh <- insertResult{
-		correlativo: correlativo,
-		err:         err,
+		correlativo:    correlativo,
+		nombreVariedad: nombreVariedad,
+		err:            err,
 	}
 }
 
@@ -301,10 +316,17 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 						c.dispositivo,
 					)
 				} else {
+					// Reconstruir SKU con nombre de variedad en vez de código
+					skuFinal := fmt.Sprintf("%s-%s-%s-%d",
+						calibre,
+						strings.ToUpper(result.nombreVariedad),
+						embalaje,
+						dark)
+
 					log.Printf("📦 Correlativo de caja insertado: %s", result.correlativo)
-					log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", result.correlativo, sku.SKU, especie)
+					log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", result.correlativo, skuFinal, especie)
 					c.EventChan <- models.NewLecturaExitosa(
-						sku.SKU,
+						skuFinal,
 						especie,
 						calibre,
 						variedad,
@@ -319,8 +341,9 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		default:
 			// Buffer lleno, responder NACK y procesar síncrono
 			log.Printf("⚠️  Buffer de inserciones lleno, procesando síncronamente")
+			ctx := context.Background()
 			correlativo, err := c.dbManager.InsertNewBox(
-				context.Background(),
+				ctx,
 				especie,
 				variedad,
 				calibre,
@@ -344,12 +367,26 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 				return
 			}
 
+			// Obtener nombre de variedad para construir SKU correctamente
+			nombreVariedad := variedad
+			nombreVar, errNombre := c.dbManager.GetNombreVariedad(ctx, variedad)
+			if errNombre == nil && nombreVar != "" {
+				nombreVariedad = nombreVar
+			}
+
+			// Reconstruir SKU con nombre de variedad en vez de código
+			skuFinal := fmt.Sprintf("%s-%s-%s-%d",
+				calibre,
+				strings.ToUpper(nombreVariedad),
+				embalaje,
+				dark)
+
 			response := "ACK\r\n"
 			conn.Write([]byte(response))
 			log.Printf("📦 Correlativo de caja insertado: %s", correlativo)
-			log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", correlativo, sku.SKU, especie)
+			log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", correlativo, skuFinal, especie)
 			c.EventChan <- models.NewLecturaExitosa(
-				sku.SKU,
+				skuFinal,
 				especie,
 				calibre,
 				variedad,

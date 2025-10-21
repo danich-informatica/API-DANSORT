@@ -97,6 +97,32 @@ func (h *HTTPFrontend) SetPostgresManager(mgr interface{}) {
 	h.postgresMgr = mgr
 }
 
+// resolveVariedadToCodigo convierte nombre de variedad a código si es necesario
+// Si variedadInput ya es un código (ej: "V018"), lo retorna sin cambios
+// Si es un nombre (ej: "LAPINS"), intenta convertirlo a código
+// Útil para endpoints futuros donde el frontend envíe nombre en lugar de sku_id
+func (h *HTTPFrontend) resolveVariedadToCodigo(ctx context.Context, variedadInput string) (string, error) {
+	if h.postgresMgr == nil {
+		return variedadInput, nil // Sin DB, asumir que es código
+	}
+
+	// Intentar convertir nombre → código
+	if dbMgr, ok := h.postgresMgr.(interface {
+		GetCodigoVariedad(ctx context.Context, nombreVariedad string) (string, error)
+	}); ok {
+		codigo, err := dbMgr.GetCodigoVariedad(ctx, variedadInput)
+		if err != nil {
+			return "", fmt.Errorf("error al resolver variedad: %w", err)
+		}
+		if codigo != "" {
+			return codigo, nil // Se encontró el código
+		}
+	}
+
+	// Si no se encontró conversión, asumir que variedadInput ya es código
+	return variedadInput, nil
+}
+
 // SetSKUManager vincula el SKU manager al frontend HTTP
 func (h *HTTPFrontend) SetSKUManager(mgr interface{}) {
 	h.skuManager = mgr
