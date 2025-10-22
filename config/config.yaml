@@ -50,8 +50,8 @@ cognex_devices:
 
   - id: 2
     name: "Cognex Línea 2"
-    host: "192.168.121.101" # IP informativa de la cámara física
-    port: 8086 # Puerto ÚNICO donde escuchará (0.0.0.0:8086)
+    host: "192.168.121.40" # IP informativa de la cámara física
+    port: 9000 # Puerto ÚNICO donde escuchará (0.0.0.0:8086)
     scan_method: "QR" # Método por defecto: QR o DATAMATRIX
     ubicacion: "Línea Secundaria"
     interval_ms: 100 # Para simulador: 10 lecturas/segundo
@@ -69,12 +69,12 @@ cognex_devices:
 sorters:
   - id: 1
     name: "Sorter Principal"
-    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora 192.168.121.16 para produccion
+    plc_endpoint: "opc.tcp://192.168.121.16:4840" # Mismo endpoint por ahora 192.168.121.16 para produccion
     plc:
       object_id: "ns=4;i=1"
-      method_id: "ns=4;i=21"
-      input_node_id: "ns=4;i=22"
-      output_node_id: "ns=4;i=23"
+      method_id: "ns=4;i=2"
+      input_node_id: "ns=4;i=3"
+      output_node_id: "ns=4;i=4"
     salidas:
       - id: 1
         physical_id: 1
@@ -180,7 +180,7 @@ sorters:
     ubicacion: "Planta A - Línea 2"
     cognex_id: 2
     scan_method: "QR"
-    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora para produccion 192.168.121.20
+    plc_endpoint: "opc.tcp://192.168.121.16:4840" # Mismo endpoint por ahora para produccion 192.168.121.20
     plc:
       object_id: "ns=4;i=1"
       method_id: "ns=4;i=20"

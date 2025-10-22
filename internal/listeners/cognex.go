@@ -3,7 +3,6 @@ package listeners
 import (
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/models"
-	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -174,7 +173,7 @@ func (c *CognexListener) acceptConnections() {
 func (c *CognexListener) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	reader := bufio.NewReader(conn)
+	buffer := make([]byte, 4096) // Buffer para lectura directa
 
 	for {
 		select {
@@ -185,8 +184,8 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 			// Establecer timeout de lectura
 			conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
-			// Leer mensaje (Cognex suele terminar líneas con \r\n)
-			message, err := reader.ReadString('\n')
+			// Leer datos del socket
+			n, err := conn.Read(buffer)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
@@ -195,8 +194,12 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 				return
 			}
 
-			// Procesar el mensaje recibido
-			c.processMessage(message, conn)
+			if n > 0 {
+				// Convertir a string y procesar
+				message := string(buffer[:n])
+				log.Printf("� Datos recibidos (%d bytes): %s\n", n, message)
+				c.processMessage(message, conn)
+			}
 		}
 	}
 }
