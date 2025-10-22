@@ -21,6 +21,8 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 
 	targetSKU := s.findSKUByID(skuID)
 	if targetSKU == nil {
+		// Solo mostrar detalle cuando falla
+		log.Printf("❌ Sorter #%d: SKU ID=%d no disponible. Total SKUs en memoria: %d", s.ID, skuID, len(s.assignedSKUs))
 		return "", "", "", 0, fmt.Errorf("SKU con ID %d no encontrada en las SKUs disponibles del sorter #%d", skuID, s.ID)
 	}
 

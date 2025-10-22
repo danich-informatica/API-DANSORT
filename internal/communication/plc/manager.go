@@ -369,13 +369,15 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		return fmt.Errorf("no se encontró nodo ESTADO para lane %d en sorter %d", laneNumber, sorterID)
 	}
 
-	// Plan A: Intentar llamar al método con el NÚMERO de salida como int16
+	// Intentar llamar al método con el NÚMERO de salida como int16
 	if sorterConfig.PLC.ObjectID != "" && sorterConfig.PLC.MethodID != "" {
 		log.Printf("🔄 [Sorter %d] Intentando método PLC con número de salida %d...", sorterID, laneNumber)
 
 		// CRÍTICO: El método espera int16 con el número de salida, NO un NodeID
 		variant := ua.MustVariant(laneNumber) // laneNumber ya es int16
 		inputArgs := []*ua.Variant{variant}
+
+		time.Sleep(800 * time.Millisecond)
 
 		outputValues, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
 
@@ -386,28 +388,6 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 		// Si falla, loguear warning pero continuar con Plan B (como Rust)
 		log.Printf("⚠️ [Sorter %d] Método falló: %v - usando Plan B (escritura directa)", sorterID, err)
-	}
-
-	// Plan B: Escribir directamente en el nodo BLOQUEO de la salida
-	// (ESTADO es read-only, pero BLOQUEO sí es escribible)
-	var bloqueoNodeID string
-	for _, salida := range sorterConfig.Salidas {
-		if salida.PhysicalID == int(laneNumber) {
-			bloqueoNodeID = salida.PLC.BloqueoNodeID
-			break
-		}
-	}
-
-	if bloqueoNodeID == "" {
-		return fmt.Errorf("no se encontró nodo BLOQUEO para lane %d en sorter %d", laneNumber, sorterID)
-	}
-
-	log.Printf("📝 [Sorter %d] Escribiendo directamente en nodo BLOQUEO %s", sorterID, bloqueoNodeID)
-
-	// Escribir false en BLOQUEO para desbloquear/habilitar la salida
-	err := m.WriteNodeTyped(ctx, sorterID, bloqueoNodeID, false, "bool")
-	if err != nil {
-		return fmt.Errorf("plan B falló - no se pudo escribir en BLOQUEO: %w", err)
 	}
 
 	log.Printf("✅ [Sorter %d] Plan B exitoso - Lane %d desbloqueado", sorterID, laneNumber)

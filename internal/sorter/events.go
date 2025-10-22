@@ -97,6 +97,7 @@ func (s *Sorter) processLecturaExitosa(evento models.LecturaEvent) {
 		s.ID, s.LecturasExitosas, evento.SKU, salida.Salida_Sorter, salida.ID)
 
 	s.sendPLCSignal(&salida)
+	//plcManager.CallMethod(ctx, sorterID, objectID, methodID, inputArgs)
 	s.PublishLecturaEvent(evento, &salida, true)
 
 	if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida, evento.SKU, evento.Calibre); err != nil {

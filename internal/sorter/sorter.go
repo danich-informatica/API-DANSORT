@@ -62,11 +62,14 @@ func (bd *BatchDistributor) NextSalida() int {
 		return bd.Salidas[0]
 	}
 
+	// Obtener salida actual
 	salidaID := bd.Salidas[bd.CurrentIndex]
 	batchSize := bd.BatchSizes[salidaID]
 
+	// Incrementar contador
 	bd.CurrentCount++
 
+	// Si alcanzamos el batch size, avanzar al siguiente
 	if bd.CurrentCount >= batchSize {
 		bd.CurrentIndex = (bd.CurrentIndex + 1) % len(bd.Salidas)
 		bd.CurrentCount = 0

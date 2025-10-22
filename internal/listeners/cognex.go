@@ -3,7 +3,6 @@ package listeners
 import (
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/models"
-	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -171,10 +170,11 @@ func (c *CognexListener) acceptConnections() {
 }
 
 // handleConnection maneja los mensajes de una conexión Cognex
+// handleConnection maneja los mensajes de una conexión Cognex
 func (c *CognexListener) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	reader := bufio.NewReader(conn)
+	buffer := make([]byte, 4096) // Buffer para lectura directa
 
 	for {
 		select {
@@ -185,8 +185,8 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 			// Establecer timeout de lectura
 			conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
-			// Leer mensaje (Cognex suele terminar líneas con \r\n)
-			message, err := reader.ReadString('\n')
+			// Leer datos del socket
+			n, err := conn.Read(buffer)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
@@ -195,8 +195,12 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 				return
 			}
 
-			// Procesar el mensaje recibido
-			c.processMessage(message, conn)
+			if n > 0 {
+				// Convertir a string y procesar
+				message := string(buffer[:n])
+				log.Printf("� Datos recibidos (%d bytes): %s\n", n, message)
+				c.processMessage(message, conn)
+			}
 		}
 	}
 }
@@ -226,22 +230,22 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			conn.Write([]byte(response))
 			return
 		}
-		// Validar que el mensaje tiene el formato correcto (6 partes)
-		if len(message_splitted) < 6 {
-			log.Printf("❌ Mensaje inválido (partes insuficientes): %s (tiene %d partes, necesita 6)", message, len(message_splitted))
+		// Validar que el mensaje tiene el formato correcto (5 partes)
+		if len(message_splitted) < 5 {
+			log.Printf("❌ Mensaje inválido (partes insuficientes): %s (tiene %d partes, necesita 5)", message, len(message_splitted))
 			response := "NACK\r\n"
 			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("formato inválido"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
 		}
 
-		// Extraer componentes (formato: Especie;Calibre;Dark;Embalaje;Etiqueta;Variedad)
+		// Extraer componentes (formato: Especie;Calibre;Dark;Embalaje;Variedad)
 		especie := strings.TrimSpace(message_splitted[0])
 		calibre := strings.TrimSpace(message_splitted[1])
 		darkStr := strings.TrimSpace(message_splitted[2])
 		embalaje := strings.TrimSpace(message_splitted[3])
 		// message_splitted[4] es etiqueta/marca (no se usa)
-		variedad := strings.TrimSpace(message_splitted[5])
+		variedad := strings.TrimSpace(message_splitted[4])
 
 		// Validar que los componentes no estén vacíos
 		if especie == "" || calibre == "" || embalaje == "" || variedad == "" {

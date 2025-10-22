@@ -528,7 +528,20 @@ func (c *Client) CallMethod(ctx context.Context, objectID string, methodID strin
 
 	resp, err := c.client.Call(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("error al llamar método %s: %w", methodID, err)
+		// Detectar error de sesión inválida y reconectar
+		if isSessionError(err) {
+			log.Printf("⚠️ Sesión inválida en CallMethod, reconectando...")
+			if reconnectErr := c.reconnect(ctx); reconnectErr != nil {
+				return nil, fmt.Errorf("error al reconectar: %w", reconnectErr)
+			}
+			// Reintentar después de reconectar
+			resp, err = c.client.Call(ctx, req)
+			if err != nil {
+				return nil, fmt.Errorf("error al llamar método %s después de reconexión: %w", methodID, err)
+			}
+		} else {
+			return nil, fmt.Errorf("error al llamar método %s: %w", methodID, err)
+		}
 	}
 
 	if resp.StatusCode != ua.StatusOK {
