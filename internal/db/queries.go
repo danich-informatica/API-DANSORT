@@ -48,7 +48,7 @@ const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `
 
 const SELECT_ALL_SKUS_INTERNAL_DB = `
 	SELECT s.calibre, s.variedad, s.embalaje, s.dark, 
-	       CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
+		CONCAT(s.calibre, '-', UPPER(s.variedad), '-', s.embalaje, '-', s.dark) as sku, 
 	       s.estado,
 	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
 	FROM SKU s
@@ -189,7 +189,7 @@ const SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB = `
 	JOIN salida_sku ss ON sal.id = ss.salida_id
 	JOIN sku s2 ON ss.calibre = s2.calibre AND ss.variedad = s2.variedad AND ss.embalaje = s2.embalaje AND ss.dark = s2.dark
 	LEFT JOIN variedad v ON ss.variedad = v.codigo_variedad
-	WHERE s.id = $1
+	WHERE s.id = $1 AND s2.estado = true
 	ORDER BY sal.id
 `
 const INSERT_SALIDA_SKU_INTERNAL_DB = `
