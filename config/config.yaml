@@ -72,6 +72,7 @@ sorters:
     plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora 192.168.121.16 para produccion
     plc:
       object_id: "ns=4;i=1"
+      trigger_id: "ns=4;i=73"
       method_id: "ns=4;i=21"
       input_node_id: "ns=4;i=22"
       output_node_id: "ns=4;i=23"
@@ -183,6 +184,7 @@ sorters:
     plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora para produccion 192.168.121.20
     plc:
       object_id: "ns=4;i=1"
+      trigger_id: "ns=4;i=73"
       method_id: "ns=4;i=20"
       input_node_id: "ns=4;i=21"
       output_node_id: "ns=4;i=22"

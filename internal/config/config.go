@@ -120,10 +120,11 @@ type Sorter struct {
 }
 
 type SorterPLCConfig struct {
-	InputNodeID  string `yaml:"input_node_id"`
-	OutputNodeID string `yaml:"output_node_id"`
-	ObjectID     string `yaml:"object_id"`
-	MethodID     string `yaml:"method_id"`
+	InputNodeID   string `yaml:"input_node_id"`
+	OutputNodeID  string `yaml:"output_node_id"`
+	ObjectID      string `yaml:"object_id"`
+	MethodID      string `yaml:"method_id"`
+	TriggerNodeID string `yaml:"trigger_node_id"` // Nodo para verificar si el sorter está ocupado
 }
 
 type Salida struct {
