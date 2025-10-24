@@ -380,7 +380,7 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 			ctxWithTimeout, cancel := context.WithTimeout(ctx, maxWaitTime)
 			defer cancel()
 
-			ticker := time.NewTicker(50 * time.Millisecond)
+			ticker := time.NewTicker(25 * time.Millisecond) // Polling cada 25ms
 			defer ticker.Stop()
 
 			startTime := time.Now()
@@ -391,13 +391,14 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 				case <-ctxWithTimeout.Done():
 					elapsed := time.Since(startTime)
 					log.Printf("⚠️  [Sorter %d] Timeout esperando trigger después de %v, continuando de todas formas...", sorterID, elapsed)
-					triggerReady = true // Salir del loop y continuar
+					triggerReady = true
 
 				case <-ticker.C:
+					// Leer el estado actual del trigger
 					nodeInfo, err := m.ReadNode(ctx, sorterID, sorterConfig.PLC.TriggerNodeID)
 					if err != nil {
-						log.Printf("⚠️  [Sorter %d] Error leyendo trigger: %v, reintentando...", sorterID, err)
-						continue
+						log.Printf("⚠️  [Sorter %d] Error leyendo trigger: %v", sorterID, err)
+						continue // Seguir intentando
 					}
 
 					// Verificar si el trigger está en false (disponible)
@@ -408,8 +409,8 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 							triggerReady = true
 						}
 					} else {
-						log.Printf("⚠️  [Sorter %d] Trigger no es booleano (tipo=%T, valor=%v), usando fallback", sorterID, nodeInfo.Value, nodeInfo.Value)
-						triggerReady = true // Continuar si el tipo no es el esperado
+						log.Printf("⚠️  [Sorter %d] Trigger no es booleano (tipo=%T, valor=%v), continuando", sorterID, nodeInfo.Value, nodeInfo.Value)
+						triggerReady = true
 					}
 				}
 			}
@@ -423,16 +424,43 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		variant := ua.MustVariant(laneNumber) // laneNumber ya es int16
 		inputArgs := []*ua.Variant{variant}
 
-		outputValues, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
+		// 🔁 REINTENTOS: Hasta 2 intentos para manejar errores de sesión OPC UA
+		maxRetries := 2
+		var outputValues []interface{}
+		var lastErr error
 
-		if err == nil {
-			log.Printf("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
-			return nil
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if attempt > 1 {
+				log.Printf("🔄 [Sorter %d] Reintento %d/%d para Lane %d...", sorterID, attempt, maxRetries, laneNumber)
+				time.Sleep(2 * time.Second) // Esperar antes de reintentar
+			}
+
+			outputValues, lastErr = m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
+
+			// ✅ ÉXITO: Sin error
+			if lastErr == nil {
+				// Validar que hay output (algunos PLCs retornan valores de confirmación)
+				if len(outputValues) > 0 {
+					log.Printf("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
+				} else {
+					log.Printf("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado (sin output)", sorterID, laneNumber)
+				}
+				return nil
+			}
+
+			// ⚠️  ERROR: Si es el primer intento y es error de sesión, reintentar
+			if attempt == 1 && isSessionError(lastErr) {
+				log.Printf("⚠️  [Sorter %d] Error de sesión OPC UA detectado, reintentando...", sorterID)
+				continue
+			}
+
+			// ❌ ERROR: No es error de sesión o ya agotamos reintentos
+			break
 		}
 
-		// Si falla, loguear error y retornarlo
-		log.Printf("❌ [Sorter %d] Método falló: %v", sorterID, err)
-		return fmt.Errorf("error llamando método PLC para lane %d en sorter %d: %w", laneNumber, sorterID, err)
+		// Si llegamos aquí, todos los intentos fallaron
+		log.Printf("❌ [Sorter %d] Método falló después de %d intentos: %v", sorterID, maxRetries, lastErr)
+		return fmt.Errorf("error llamando método PLC para lane %d en sorter %d (intentos: %d): %w", laneNumber, sorterID, maxRetries, lastErr)
 	}
 
 	// Si no hay ObjectID o MethodID configurado, retornar error
