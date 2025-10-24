@@ -38,10 +38,6 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 	targetSalida.SKUs_Actuales = append(targetSalida.SKUs_Actuales, sku)
 	targetSKU.IsAssigned = true
 
-	s.batchMutex.Lock()
-	s.updateBatchDistributor(targetSKU.SKU)
-	s.batchMutex.Unlock()
-
 	log.Printf("✅ Sorter #%d: SKU '%s' (ID=%d) asignada a salida '%s' (ID=%d, tipo=%s)",
 		s.ID, targetSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID, targetSalida.Tipo)
 

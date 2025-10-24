@@ -55,38 +55,49 @@ func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
 		return nil
 	}
 
-	// Múltiples salidas: usar round-robin simple por índice
+	// Múltiples salidas: usar round-robin con batch_size
 	s.batchMutex.Lock()
 	defer s.batchMutex.Unlock()
 
-	// Obtener índice actual para este SKU
+	// Obtener o crear distribuidor para este SKU
 	bd, exists := s.batchCounters[sku]
-	var startIdx int
-
 	if !exists {
-		// Primera vez: empezar en 0
-		startIdx = 0
+		// Primera vez: crear distribuidor en índice 0
 		s.batchCounters[sku] = &BatchDistributor{
 			CurrentIndex: 0,
+			CurrentCount: 0,
 		}
 		bd = s.batchCounters[sku]
-		log.Printf("[Sorter %d] Balance activated for SKU '%s' with %d lanes", s.ID, sku, len(todasLasSalidas))
-	} else {
-		// Avanzar al siguiente
-		startIdx = (bd.CurrentIndex + 1) % len(todasLasSalidas)
+		log.Printf("[Sorter %d] ⚖️ Balance activated for SKU '%s' with %d lanes", s.ID, sku, len(todasLasSalidas))
 	}
 
-	// Buscar la primera salida disponible empezando desde startIdx
+	// Buscar salida disponible empezando desde índice actual
+	startIdx := bd.CurrentIndex
 	for attempts := 0; attempts < len(todasLasSalidas); attempts++ {
 		idx := (startIdx + attempts) % len(todasLasSalidas)
-		if todasLasSalidas[idx].IsAvailable() {
-			// Actualizar índice para la próxima vez
-			bd.CurrentIndex = idx
-			return todasLasSalidas[idx]
+		salida := todasLasSalidas[idx]
+
+		if salida.IsAvailable() {
+			// ✅ Incrementar contador de cajas enviadas a esta salida
+			bd.CurrentCount++
+
+			// ✅ Si alcanzamos el batch_size, rotar a la siguiente salida
+			if bd.CurrentCount >= salida.BatchSize {
+				bd.CurrentIndex = (idx + 1) % len(todasLasSalidas)
+				bd.CurrentCount = 0
+				log.Printf("[Sorter %d] 🔄 SKU '%s': Batch completado en salida %d (%d cajas), rotando a siguiente",
+					s.ID, sku, salida.ID, salida.BatchSize)
+			} else {
+				// Mantener en la misma salida (batch no completado)
+				bd.CurrentIndex = idx
+			}
+
+			return salida
 		}
 	}
 
 	// Ninguna salida disponible
+	log.Printf("[Sorter %d] ⚠️ SKU '%s': Ninguna de las %d salidas está disponible", s.ID, sku, len(todasLasSalidas))
 	return nil
 } // getSalidaDescarte obtiene salida de descarte como último recurso
 // SOLO usa la salida con SKU "REJECT" asignado, no cualquier salida manual
@@ -154,42 +165,4 @@ func (s *Sorter) FindSalidaForSKU(skuText string) int {
 		}
 	}
 	return -1
-}
-
-// updateBatchDistributor actualiza o crea el distribuidor de lotes para una SKU
-func (s *Sorter) updateBatchDistributor(skuName string) {
-	var salidaIDs []int
-	batchSizes := make(map[int]int)
-
-	for _, salida := range s.Salidas {
-		for _, sku := range salida.SKUs_Actuales {
-			if sku.SKU == skuName {
-				salidaIDs = append(salidaIDs, salida.ID)
-				batchSizes[salida.ID] = salida.BatchSize
-				break
-			}
-		}
-	}
-
-	if len(salidaIDs) <= 1 {
-		delete(s.batchCounters, skuName)
-		return
-	}
-
-	if bd, exists := s.batchCounters[skuName]; exists {
-		bd.Salidas = salidaIDs
-		bd.BatchSizes = batchSizes
-		if bd.CurrentIndex >= len(salidaIDs) {
-			bd.CurrentIndex = 0
-			bd.CurrentCount = 0
-		}
-	} else {
-		s.batchCounters[skuName] = &BatchDistributor{
-			Salidas:      salidaIDs,
-			CurrentIndex: 0,
-			CurrentCount: 0,
-			BatchSizes:   batchSizes,
-		}
-		log.Printf("🔄 Sorter #%d: BatchDistributor creado para SKU '%s' con %d salidas", s.ID, skuName, len(salidaIDs))
-	}
 }
