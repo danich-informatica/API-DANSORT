@@ -48,7 +48,7 @@ const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `
 
 const SELECT_ALL_SKUS_INTERNAL_DB = `
 	SELECT s.calibre, s.variedad, s.embalaje, s.dark, 
-		CONCAT(s.calibre, '-', UPPER(s.variedad), '-', s.embalaje, '-', s.dark) as sku, 
+		CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
 	       s.estado,
 	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
 	FROM SKU s
