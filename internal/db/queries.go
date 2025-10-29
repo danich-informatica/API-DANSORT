@@ -4,13 +4,14 @@ package db
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 	SELECT 
 		VIE_CodVarieta AS variedad,
-		VIE_CodClasse AS calibre,
+		VIE_Classe AS calibre,
 		VIE_CodConfezione AS embalaje,
 		VIE_Dark AS dark,
-		VIE_Varieta AS nombre_variedad
+		VIE_Varieta AS nombre_variedad,
+		VIE_codLinea AS linea
 	FROM dbo.VW_INT_DANICH_ENVIVO
 	WHERE VIE_CodVarieta IS NOT NULL 
-	  AND VIE_CodClasse IS NOT NULL 
+	  AND VIE_Classe IS NOT NULL 
 	  AND VIE_CodConfezione IS NOT NULL;
 `
 
@@ -18,36 +19,37 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
 	SELECT 
 		VIE_CodVarieta AS variedad,
-		VIE_CodClasse AS calibre,
+		VIE_Classe AS calibre,
 		VIE_CodConfezione AS embalaje,
 		0 AS dark,
-		VIE_Varieta AS nombre_variedad
+		VIE_Varieta AS nombre_variedad,
+		VIE_codLinea AS linea
 	FROM dbo.VW_INT_DANICH_ENVIVO
 	WHERE VIE_CodVarieta IS NOT NULL 
-	  AND VIE_CodClasse IS NOT NULL 
+	  AND VIE_Classe IS NOT NULL 
 	  AND VIE_CodConfezione IS NOT NULL;
 `
 
 const INSERT_LECTURA_DATAMATRIX_SSMS = `
 	INSERT INTO PKG_Pallets_Externos 
 	(Salida, Correlativo, Numero_Caja, Fecha_Lectura, Terminado)
-	VALUES (@p1, @p2, @p3, @p4, 0)
+	VALUES (@p1, @p2, @p3, @p4, 1)
 `
 const INSERT_SKU_INTERNAL_DB = `
-	INSERT INTO SKU (calibre, variedad, embalaje, dark, estado)
-	VALUES ($1, $2, $3, $4, $5)
+	INSERT INTO SKU (calibre, variedad, embalaje, dark, linea, estado)
+	VALUES ($1, $2, $3, $4, $5, $6)
 	ON CONFLICT (calibre, variedad, embalaje, dark) 
-	DO UPDATE SET estado = EXCLUDED.estado
+	DO UPDATE SET estado = EXCLUDED.estado, linea = EXCLUDED.linea
 `
 
 const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `
-	INSERT INTO SKU (calibre, variedad, embalaje, dark, estado)
-	VALUES ($1, $2, $3, $4, $5)
+	INSERT INTO SKU (calibre, variedad, embalaje, dark, linea, estado)
+	VALUES ($1, $2, $3, $4, $5, $6)
 	ON CONFLICT (calibre, variedad, embalaje, dark) DO NOTHING
 `
 
 const SELECT_ALL_SKUS_INTERNAL_DB = `
-	SELECT s.calibre, s.variedad, s.embalaje, s.dark, 
+	SELECT s.calibre, s.variedad, s.embalaje, s.dark, s.linea,
 		CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
 	       s.estado,
 	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
@@ -135,7 +137,7 @@ const COUNT_BOXES_INTERNAL_DB = `
 `
 
 const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
-	SELECT s.calibre, s.variedad, s.embalaje, s.dark, 
+	SELECT s.calibre, s.variedad, s.embalaje, s.dark, s.linea,
 	       CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
 	       s.estado,
 	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad

@@ -22,6 +22,7 @@ type SegregazioneProgrammaRow struct {
 	Embalaje       sql.NullString
 	Dark           sql.NullInt64  // 0 o 1, default 0 si no existe la columna
 	NombreVariedad sql.NullString // VIE_Descrizione (ej: "LAPINS")
+	Linea          sql.NullString // VIE_codLinea (código de línea)
 }
 
 // FetchSegregazioneProgramma ejecuta la consulta definida en queries.go y devuelve todas las filas.
@@ -41,7 +42,7 @@ func FetchSegregazioneProgramma(ctx context.Context, executor QueryExecutor) ([]
 	var result []SegregazioneProgrammaRow
 	for rows.Next() {
 		var row SegregazioneProgrammaRow
-		if err := rows.Scan(&row.Variedad, &row.Calibre, &row.Embalaje, &row.Dark, &row.NombreVariedad); err != nil {
+		if err := rows.Scan(&row.Variedad, &row.Calibre, &row.Embalaje, &row.Dark, &row.NombreVariedad, &row.Linea); err != nil {
 			return nil, fmt.Errorf("db: error leyendo resultados de segregazione: %w", err)
 		}
 		result = append(result, row)

@@ -8,7 +8,7 @@ database:
     healthcheck_interval: "30s"
 
   sqlserver:
-    host: "190.110.163.22" # Producción: 192.168.0.9 -- Desarrollo: 190.110.163.22
+    host: "192.168.0.9" # Producción: 192.168.0.9 -- Desarrollo: 190.110.163.22
     port: 1433
     user: "Danich"
     password: "yb*;NC&5r9U2"
@@ -21,7 +21,7 @@ database:
     min_conns: 5
     max_conn_lifetime: "30m"
     max_conn_idle_time: "5m"
-    sku_sync_interval: "10s" # Intervalo de sincronización de SKUs desde vista
+    sku_sync_interval: "2s" # Intervalo de sincronización de SKUs desde vista (tiempo real)
 
 # Servidor HTTP
 http:
@@ -41,8 +41,8 @@ statistics:
 cognex_devices:
   - id: 1
     name: "Cognex Línea 1"
-    host: "127.0.0.1" # IP informativa de la cámara física
-    port: 8085 # Puerto ÚNICO donde escuchará (0.0.0.0:8085)
+    host: "192.168.121.50" # IP informativa de la cámara física
+    port: 9050 # Puerto ÚNICO donde escuchará (0.0.0.0:9050)
     scan_method: "QR" # Método por defecto: QR o DATAMATRIX
     ubicacion: "Línea Principal"
     interval_ms: 1000 # Para simulador: 5 segundos entre lecturas
@@ -69,111 +69,109 @@ cognex_devices:
 sorters:
   - id: 1
     name: "Sorter Principal"
-    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora 192.168.121.16 para produccion
+    plc_endpoint: "opc.tcp://192.168.121.16:4840" # 16 prod
     plc:
       object_id: "ns=4;i=1"
-      trigger_id: "ns=4;i=73"
-      method_id: "ns=4;i=21"
-      input_node_id: "ns=4;i=22"
-      output_node_id: "ns=4;i=23"
+      method_id: "ns=4;i=2"
+      #trigger_node_id: "ns=4;i=69"
+      input_node_id: "ns=4;i=3"
+      output_node_id: "ns=4;i=4"
     salidas:
       - id: 1
         physical_id: 1
         nombre: "Salida manual"
         tipo: "manual"
-        batch_size: 3
-        cognex_id: 3
+        batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=27"
-          bloqueo_node_id: "ns=4;i=28"
+          estado_node_id: "ns=4;i=8"
+          bloqueo_node_id: "ns=4;i=9"
       - id: 2
         physical_id: 2
         nombre: "Salida manual"
         tipo: "manual"
-        batch_size: 3
+        batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=32"
-          bloqueo_node_id: "ns=4;i=33"
+          estado_node_id: "ns=4;i=13"
+          bloqueo_node_id: "ns=4;i=14"
       - id: 3
         physical_id: 3
         nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=37"
-          bloqueo_node_id: "ns=4;i=38"
+          estado_node_id: "ns=4;i=17"
+          bloqueo_node_id: "ns=4;i=18"
       - id: 4
         physical_id: 4
         nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=42"
-          bloqueo_node_id: "ns=4;i=43"
+          estado_node_id: "ns=4;i=23"
+          bloqueo_node_id: "ns=4;i=24"
       - id: 5
         physical_id: 5
         nombre: "Salida manual"
         tipo: "manual"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=47"
-          bloqueo_node_id: "ns=4;i=48"
+          estado_node_id: "ns=4;i=28"
+          bloqueo_node_id: "ns=4;i=29"
       - id: 6
         physical_id: 6
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=52"
-          bloqueo_node_id: "ns=4;i=53"
+          estado_node_id: "ns=4;i=33"
+          bloqueo_node_id: "ns=4;i=34"
       - id: 7
         physical_id: 7
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        cognex_id: 3
         plc:
-          estado_node_id: "ns=4;i=57"
-          bloqueo_node_id: "ns=4;i=58"
+          estado_node_id: "ns=4;i=38"
+          bloqueo_node_id: "ns=4;i=39"
       - id: 8
         physical_id: 8
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=62"
-          bloqueo_node_id: "ns=4;i=63"
+          estado_node_id: "ns=4;i=43"
+          bloqueo_node_id: "ns=4;i=44"
       - id: 9
         physical_id: 9
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=67"
-          bloqueo_node_id: "ns=4;i=68"
+          estado_node_id: "ns=4;i=48"
+          bloqueo_node_id: "ns=4;i=49"
       - id: 10
         physical_id: 10
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=72"
-          bloqueo_node_id: "ns=4;i=73"
+          estado_node_id: "ns=4;i=53"
+          bloqueo_node_id: "ns=4;i=54"
       - id: 11
         physical_id: 11
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=77"
-          bloqueo_node_id: "ns=4;i=78"
+          estado_node_id: "ns=4;i=58"
+          bloqueo_node_id: "ns=4;i=59"
       - id: 12
         physical_id: 12
         nombre: "Salida de descarte"
         tipo: "descarte"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=83"
+          estado_node_id: "ns=4;i=63"
           bloqueo_node_id: ""
 
   - id: 2
@@ -181,7 +179,7 @@ sorters:
     ubicacion: "Planta A - Línea 2"
     cognex_id: 2
     scan_method: "QR"
-    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora para produccion 192.168.121.20
+    plc_endpoint: "opc.tcp://192.168.121.16:4840" # Mismo endpoint por ahora para produccion 192.168.121.20
     plc:
       object_id: "ns=4;i=1"
       trigger_id: "ns=4;i=73"

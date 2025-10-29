@@ -372,20 +372,19 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 	if sorterConfig.PLC.ObjectID != "" && sorterConfig.PLC.MethodID != "" {
 		log.Printf("🔄 [Sorter %d] Intentando método PLC con número de salida %d...", sorterID, laneNumber)
 
-		// warm up al método llamando con un 0 antes de la llamada real
-
-		warmUpVariant := ua.MustVariant(int16(0))
-		warmUpInputArgs := []*ua.Variant{warmUpVariant}
-		_, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, warmUpInputArgs)
-		if err != nil {
-			log.Printf("⚠️  [Sorter %d] Error en warm up del método PLC: %v", sorterID, err)
-		} else {
-			log.Printf("✅ [Sorter %d] Warm up del método PLC exitoso", sorterID)
-		}
-
 		// ESPERA INTELIGENTE: Verificar trigger antes de llamar al método
 		if sorterConfig.PLC.TriggerNodeID != "" {
 			log.Printf("⏳ [Sorter %d] Esperando trigger disponible...", sorterID)
+			// warm up al método llamando con un 0 antes de la llamada real
+
+			warmUpVariant := ua.MustVariant(int16(0))
+			warmUpInputArgs := []*ua.Variant{warmUpVariant}
+			_, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, warmUpInputArgs)
+			if err != nil {
+				log.Printf("⚠️  [Sorter %d] Error en warm up del método PLC: %v", sorterID, err)
+			} else {
+				log.Printf("✅ [Sorter %d] Warm up del método PLC exitoso", sorterID)
+			}
 
 			maxWaitTime := 2 * time.Second
 			ctxWithTimeout, cancel := context.WithTimeout(ctx, maxWaitTime)
@@ -427,7 +426,7 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 			}
 		} else {
 			// Fallback: Si no hay trigger configurado, usar sleep fijo
-			log.Printf("⚠️  [Sorter %d] No hay trigger_node_id, usando sleep fijo de 700ms", sorterID)
+			log.Printf("⚠️  [Sorter %d] No hay trigger_node_id, usando sleep fijo de 0ms", sorterID)
 			//time.Sleep(700 * time.Millisecond)
 		}
 

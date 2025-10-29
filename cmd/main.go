@@ -486,6 +486,7 @@ func main() {
 			log.Println("   ⚠️  Solo se usarán SKUs ya persistidas en PostgreSQL")
 		} else {
 			log.Println("   ✅ Conexión a SQL Server UNITEC exitosa")
+
 			syncInterval := cfg.Database.SQLServer.GetSKUSyncInterval()
 
 			// Convertir []*sorter.Sorter a []shared.SorterInterface

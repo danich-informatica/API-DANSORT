@@ -57,40 +57,39 @@ func (w *SKUSyncWorker) Stop() {
 }
 
 func (w *SKUSyncWorker) run() {
+	// CRÍTICO: Capturar panics para debug
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ PANIC en SKU Sync Worker: %v", r)
+		}
+	}()
+
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	// CRÍTICO: Cargar SKUs desde PostgreSQL PRIMERO (inicio rápido con datos persistidos)
-	log.Println("🔄 Cargando SKUs desde PostgreSQL al inicio...")
-	ctx := context.Background()
-	if err := w.skuManager.ReloadFromDB(ctx); err != nil {
-		log.Printf("❌ Error al cargar SKUs iniciales desde PostgreSQL: %v", err)
-	} else {
-		activeSKUs := w.skuManager.GetActiveSKUs()
-		log.Printf("✅ SKUs iniciales cargados desde PostgreSQL: %d SKUs activos", len(activeSKUs))
-		
-		// Propagar a sorters con SKUs existentes
-		assignableSKUs := []models.SKUAssignable{models.GetRejectSKU()}
-		for _, sku := range activeSKUs {
-			assignableSKUs = append(assignableSKUs, sku.ToAssignableWithHash())
-		}
-		
-		log.Printf("📤 Propagando %d SKUs (incluye REJECT) a %d sorter(s)...", len(assignableSKUs), len(w.sorters))
-		for _, s := range w.sorters {
-			s.UpdateSKUs(assignableSKUs)
-		}
-		log.Println("✅ SKUs propagados a todos los sorters")
-	}
+	log.Println("🔄 [Worker] Goroutine iniciada")
+
+	// NOTA: NO recargamos desde PostgreSQL aquí porque:
+	// 1. Ya se hizo en main.go antes de crear el worker
+	// 2. El primer syncSKUs() inmediatamente recargará desde UNITEC (fuente de verdad)
+	// 3. Evitamos race condition / deadlock por doble lectura concurrente
+	log.Println("⏭️  [Worker] Omitiendo carga inicial (ya hecha en main.go)")
 
 	// Ejecutar sync desde UNITEC inmediatamente después (actualiza desde fuente de verdad)
+	log.Println("🔄 [Worker] Ejecutando primer syncSKUs()...")
 	w.syncSKUs()
+	log.Println("✅ [Worker] Primer syncSKUs() completado")
 
+	log.Println("🔄 [Worker] Entrando al loop principal...")
 	for {
 		select {
 		case <-w.ctx.Done():
+			log.Println("🛑 [Worker] Contexto cancelado, saliendo...")
 			return
 		case <-ticker.C:
+			log.Println("⏰ [Worker] Ticker disparado, ejecutando syncSKUs()...")
 			w.syncSKUs()
+			log.Println("✅ [Worker] syncSKUs() periódico completado")
 		}
 	}
 }
@@ -151,6 +150,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 		return
 	}
 
+	log.Println("🔄 [Sync] Iniciando transacción PostgreSQL...")
 	// 2. Usar transacción PostgreSQL para atomicidad
 	tx, err := w.postgresMgr.BeginTx(ctx)
 	if err != nil {
@@ -158,12 +158,15 @@ func (w *SKUSyncWorker) syncSKUs() {
 		return
 	}
 	defer tx.Rollback(ctx) // Rollback automático si no se hace commit
+	log.Println("✅ [Sync] Transacción iniciada correctamente")
 
+	log.Println("🔄 [Sync] Marcando todas las SKUs como false...")
 	// 3. PASO CRÍTICO: Marcar todas las SKUs como false
 	if _, err := tx.Exec(ctx, db.UPDATE_TO_FALSE_SKU_STATE_INTERNAL_DB); err != nil {
 		log.Printf("❌ Sync SKU: error marcando SKUs como false: %v", err)
 		return
 	}
+	log.Println("✅ [Sync] Todas las SKUs marcadas como false")
 
 	// 4. Insertar/actualizar desde vista con estado = true
 	syncedCount := 0
@@ -185,11 +188,15 @@ func (w *SKUSyncWorker) syncSKUs() {
 		if row.Dark.Valid {
 			dark = int(row.Dark.Int64)
 		}
+		linea := ""
+		if row.Linea.Valid {
+			linea = strings.TrimSpace(row.Linea.String)
+		}
 
 		// INSERT con ON CONFLICT → UPDATE estado = true
-		result, err := tx.Exec(ctx, db.INSERT_SKU_INTERNAL_DB, calibre, variedad, embalaje, dark, true)
+		result, err := tx.Exec(ctx, db.INSERT_SKU_INTERNAL_DB, calibre, variedad, embalaje, dark, linea, true)
 		if err != nil {
-			log.Printf("⚠️  Sync SKU: error upsert %s-%s-%s (dark=%d): %v", calibre, variedad, embalaje, dark, err)
+			log.Printf("⚠️  Sync SKU: error upsert %s-%s-%s (dark=%d, linea=%s): %v", calibre, variedad, embalaje, dark, linea, err)
 			continue
 		}
 
@@ -204,17 +211,20 @@ func (w *SKUSyncWorker) syncSKUs() {
 		}
 	}
 
+	log.Printf("🔄 [Sync] Haciendo commit de transacción (%d SKUs sincronizados)...", syncedCount)
 	// 5. Commit de la transacción
 	if err := tx.Commit(ctx); err != nil {
 		log.Printf("❌ Sync SKU: error haciendo commit: %v", err)
 		return
 	}
+	log.Println("✅ [Sync] Commit exitoso")
 
 	// 5.5. LIMPIEZA: Eliminar asignaciones de SKUs inactivas en salida_sku
-	// Esto evita que asignaciones antiguas persistan indefinidamente en la BD
+	// IMPORTANTE: NO eliminar REJECT (calibre='REJECT') porque es una SKU especial permanente
 	cleanupQuery := `
 		DELETE FROM salida_sku ss
-		WHERE NOT EXISTS (
+		WHERE ss.calibre != 'REJECT'
+		  AND NOT EXISTS (
 			SELECT 1 FROM sku s 
 			WHERE s.calibre = ss.calibre 
 			  AND s.variedad = ss.variedad 
@@ -230,11 +240,13 @@ func (w *SKUSyncWorker) syncSKUs() {
 		log.Printf("🧹 Sync SKU: %d asignaciones de SKUs inactivas eliminadas", result.RowsAffected())
 	}
 
+	log.Println("🔄 [Sync] Recargando SKUManager desde PostgreSQL...")
 	// 6. Recargar SKUManager desde PostgreSQL (solo SKUs con estado = true)
 	if err := w.skuManager.ReloadFromDB(ctx); err != nil {
 		log.Printf("❌ Sync SKU: error recargando SKUManager: %v", err)
 		return
 	}
+	log.Println("✅ [Sync] SKUManager recargado exitosamente")
 
 	// 7. Propagar a todos los sorters
 	activeSKUs := w.skuManager.GetActiveSKUs()
@@ -244,14 +256,17 @@ func (w *SKUSyncWorker) syncSKUs() {
 		assignableSKUs = append(assignableSKUs, sku.ToAssignableWithHash())
 	}
 
+	log.Printf("📤 Sync SKU: Propagando %d SKUs (REJECT + %d activos) a sorters...", len(assignableSKUs), len(activeSKUs))
+
 	for _, s := range w.sorters {
 		// Actualizar lista de SKUs disponibles
 		s.UpdateSKUs(assignableSKUs)
+		log.Printf("   → Sorter #%d: %d SKUs actualizados", s.GetID(), len(assignableSKUs))
 
-		// Recargar asignaciones desde PostgreSQL para actualizar estado de salidas
-		if err := s.ReloadSalidasFromDB(ctx); err != nil {
-			log.Printf("⚠️  Sync SKU: error recargando salidas de Sorter #%d: %v", s.GetID(), err)
-		}
+		// NOTA: NO recargamos salidas aquí porque sobrescribiría las asignaciones manuales del usuario
+		// Las asignaciones se recargan solo:
+		// 1. Al iniciar el sistema
+		// 2. Cuando el usuario hace cambios via API (POST/DELETE /assignment)
 	}
 
 	elapsed := time.Since(startTime)
