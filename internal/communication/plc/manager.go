@@ -12,6 +12,12 @@ import (
 	"github.com/gopcua/opcua/ua"
 )
 
+// logTs imprime log con timestamp de microsegundos para debugging preciso
+func logTs(format string, args ...interface{}) {
+	ts := time.Now().Format("2006-01-02T15:04:05.000000")
+	log.Printf("[%s] "+format, append([]interface{}{ts}, args...)...)
+}
+
 // Manager gestiona múltiples clientes OPC UA para diferentes sorters
 type Manager struct {
 	config       *config.Config
@@ -370,20 +376,20 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 	// Intentar llamar al método con el NÚMERO de salida como int16
 	if sorterConfig.PLC.ObjectID != "" && sorterConfig.PLC.MethodID != "" {
-		log.Printf("🔄 [Sorter %d] Intentando método PLC con número de salida %d...", sorterID, laneNumber)
+		logTs("🔄 [Sorter %d] Intentando método PLC con número de salida %d...", sorterID, laneNumber)
 
 		// ESPERA INTELIGENTE: Verificar trigger antes de llamar al método
 		if sorterConfig.PLC.TriggerNodeID != "" {
-			log.Printf("⏳ [Sorter %d] Esperando trigger disponible...", sorterID)
+			logTs("⏳ [Sorter %d] Esperando trigger disponible...", sorterID)
 			// warm up al método llamando con un 0 antes de la llamada real
 
 			warmUpVariant := ua.MustVariant(int16(0))
 			warmUpInputArgs := []*ua.Variant{warmUpVariant}
 			_, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, warmUpInputArgs)
 			if err != nil {
-				log.Printf("⚠️  [Sorter %d] Error en warm up del método PLC: %v", sorterID, err)
+				logTs("⚠️  [Sorter %d] Error en warm up del método PLC: %v", sorterID, err)
 			} else {
-				log.Printf("✅ [Sorter %d] Warm up del método PLC exitoso", sorterID)
+				logTs("✅ [Sorter %d] Warm up del método PLC exitoso", sorterID)
 			}
 
 			maxWaitTime := 2 * time.Second
@@ -415,11 +421,11 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 					if boolValue, ok := nodeInfo.Value.(bool); ok {
 						if !boolValue {
 							elapsed := time.Since(startTime)
-							log.Printf("✅ [Sorter %d] Trigger disponible después de %v", sorterID, elapsed)
+							logTs("✅ [Sorter %d] Trigger disponible después de %v", sorterID, elapsed)
 							triggerReady = true
 						}
 					} else {
-						log.Printf("⚠️  [Sorter %d] Trigger no es booleano (tipo=%T, valor=%v), continuando", sorterID, nodeInfo.Value, nodeInfo.Value)
+						logTs("⚠️  [Sorter %d] Trigger no es booleano (tipo=%T, valor=%v), continuando", sorterID, nodeInfo.Value, nodeInfo.Value)
 						triggerReady = true
 					}
 				}
@@ -427,7 +433,7 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		} else {
 			// Fallback: Si no hay trigger configurado, usar sleep fijo
 			log.Printf("⚠️  [Sorter %d] No hay trigger_node_id, usando sleep fijo de 0ms", sorterID)
-			//time.Sleep(700 * time.Millisecond)
+			time.Sleep(0 * time.Millisecond)
 		}
 
 		// CRÍTICO: El método espera int16 con el número de salida, NO un NodeID
@@ -441,7 +447,7 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			if attempt > 1 {
-				log.Printf("🔄 [Sorter %d] Reintento %d/%d para Lane %d...", sorterID, attempt, maxRetries, laneNumber)
+				logTs("🔄 [Sorter %d] Reintento %d/%d para Lane %d...", sorterID, attempt, maxRetries, laneNumber)
 				time.Sleep(2 * time.Second) // Esperar antes de reintentar
 			}
 
@@ -451,16 +457,16 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 			if lastErr == nil {
 				// Validar que hay output (algunos PLCs retornan valores de confirmación)
 				if len(outputValues) > 0 {
-					log.Printf("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
+					logTs("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
 				} else {
-					log.Printf("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado (sin output)", sorterID, laneNumber)
+					logTs("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado (sin output)", sorterID, laneNumber)
 				}
 				return nil
 			}
 
 			// ⚠️  ERROR: Si es el primer intento y es error de sesión, reintentar
 			if attempt == 1 && isSessionError(lastErr) {
-				log.Printf("⚠️  [Sorter %d] Error de sesión OPC UA detectado, reintentando...", sorterID)
+				logTs("⚠️  [Sorter %d] Error de sesión OPC UA detectado, reintentando...", sorterID)
 				continue
 			}
 
@@ -469,7 +475,7 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		}
 
 		// Si llegamos aquí, todos los intentos fallaron
-		log.Printf("❌ [Sorter %d] Método falló después de %d intentos: %v", sorterID, maxRetries, lastErr)
+		logTs("❌ [Sorter %d] Método falló después de %d intentos: %v", sorterID, maxRetries, lastErr)
 		return fmt.Errorf("error llamando método PLC para lane %d en sorter %d (intentos: %d): %w", laneNumber, sorterID, maxRetries, lastErr)
 	}
 

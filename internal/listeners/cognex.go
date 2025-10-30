@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// logTs imprime log con timestamp de microsegundos para debugging preciso
+func logTs(format string, args ...interface{}) {
+	ts := time.Now().Format("2006-01-02T15:04:05.000000")
+	log.Printf("[%s] "+format, append([]interface{}{ts}, args...)...)
+}
+
 // Estructura para inserción asíncrona en DB
 type insertRequest struct {
 	especie  string
@@ -198,7 +204,7 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 			if n > 0 {
 				// Convertir a string y procesar
 				message := string(buffer[:n])
-				log.Printf("� Datos recibidos (%d bytes): %s\n", n, message)
+				logTs("📦 Datos recibidos (%d bytes): %s", n, message)
 				c.processMessage(message, conn)
 			}
 		}
@@ -207,7 +213,7 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 
 // processMessage procesa los mensajes recibidos de Cognex
 func (c *CognexListener) processMessage(message string, conn net.Conn) {
-	log.Printf("📦 Mensaje recibido de %s: %s", conn.RemoteAddr().String(), message)
+	logTs("📦 Mensaje recibido de %s: %s", conn.RemoteAddr().String(), message)
 
 	message = strings.TrimSpace(message)
 	switch c.scan_method {
@@ -304,6 +310,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			// Enviado al worker, responder inmediatamente ACK
 			response := "ACK\r\n"
 			conn.Write([]byte(response))
+			logTs("✅ ACK enviado (async insert en cola)")
 
 			// Procesar resultado en goroutine para no bloquear
 			go func() {
@@ -401,7 +408,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			)
 		}
 	case "DATAMATRIX":
-		log.Printf("📊 DataMatrix detectado: %s", strings.TrimSpace(message))
+		logTs("📊 DataMatrix detectado: %s", strings.TrimSpace(message))
 		message = strings.TrimSpace(message)
 
 		if message == "" {

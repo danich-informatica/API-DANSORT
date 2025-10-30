@@ -154,19 +154,30 @@ func (s *Sorter) getSalidaForFallo(tipoLectura models.TipoLectura) (salida *shar
 
 // sendPLCSignal envía señal al PLC para activar una salida
 func (s *Sorter) sendPLCSignal(salida *shared.Salida) {
-	if s.plcManager == nil || salida.SealerPhysicalID <= 0 {
+	if s.plcManager == nil {
+		log.Printf("⚠️  [Sorter #%d] sendPLCSignal: plcManager es nil, no se puede enviar señal", s.ID)
+		return
+	}
+
+	if salida.SealerPhysicalID <= 0 {
+		log.Printf("⚠️  [Sorter #%d] sendPLCSignal: SealerPhysicalID inválido (%d) para salida ID=%d, no se envía señal PLC",
+			s.ID, salida.SealerPhysicalID, salida.ID)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(salida.SealerPhysicalID)); err != nil {
-		log.Printf("⚠️  [Sorter #%d] Error al enviar señal PLC para salida %d (PhysicalID=%d): %v",
-			s.ID, salida.ID, salida.SealerPhysicalID, err)
+	startTime := time.Now()
+	err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(salida.SealerPhysicalID))
+	elapsed := time.Since(startTime)
+
+	if err != nil {
+		log.Printf("❌ [Sorter #%d] Error al enviar señal PLC para salida %d (PhysicalID=%d) después de %v: %v",
+			s.ID, salida.ID, salida.SealerPhysicalID, elapsed, err)
 	} else {
-		log.Printf("📤 [Sorter #%d] Señal PLC enviada → Salida %d (PhysicalID=%d)",
-			s.ID, salida.ID, salida.SealerPhysicalID)
+		log.Printf("✅ [Sorter #%d] Señal PLC confirmada → Salida %d (PhysicalID=%d) en %v",
+			s.ID, salida.ID, salida.SealerPhysicalID, elapsed)
 	}
 }
 

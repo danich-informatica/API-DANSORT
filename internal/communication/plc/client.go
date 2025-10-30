@@ -544,14 +544,20 @@ func (c *Client) CallMethod(ctx context.Context, objectID string, methodID strin
 		}
 	}
 
+	// Log detallado de la respuesta del PLC
+	log.Printf("🔍 PLC Response: método=%s | statusCode=%s | numOutputs=%d",
+		methodID, resp.StatusCode, len(resp.OutputArguments))
+
 	if resp.StatusCode != ua.StatusOK {
 		return nil, fmt.Errorf("llamada a método %s con status: %s", methodID, resp.StatusCode)
 	}
 
 	// Extraer valores de salida
 	var outputValues []interface{}
-	for _, outArg := range resp.OutputArguments {
-		outputValues = append(outputValues, outArg.Value())
+	for i, outArg := range resp.OutputArguments {
+		value := outArg.Value()
+		outputValues = append(outputValues, value)
+		log.Printf("🔍 PLC Output[%d]: tipo=%T | valor=%v", i, value, value)
 	}
 
 	return outputValues, nil
