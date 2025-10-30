@@ -326,6 +326,24 @@ func main() {
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)
 
+			// Sincronizar mesas de paletizado automático en PostgreSQL
+			log.Printf("     🔄 Sincronizando mesas en PostgreSQL...")
+			mesasSincronizadas := 0
+			for _, salida := range salidas {
+				if salida.Tipo == "automatico" || salida.Tipo == "automatica" {
+					err := dbManager.InsertMesa(ctx, salida.MesaID, salida.ID)
+					if err != nil {
+						log.Printf("        ❌ Error sincronizando mesa %d (salida %d): %v", salida.MesaID, salida.ID, err)
+					} else {
+						log.Printf("        ✅ Mesa %d sincronizada (salida %d)", salida.MesaID, salida.ID)
+						mesasSincronizadas++
+					}
+				}
+			}
+			if mesasSincronizadas > 0 {
+				log.Printf("     ✅ %d mesa(s) sincronizada(s) en PostgreSQL", mesasSincronizadas)
+			}
+
 			// Registrar dispositivos del sorter en el monitor
 			// Registrar PLC
 			if sorterCfg.PLCEndpoint != "" {

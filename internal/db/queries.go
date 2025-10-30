@@ -36,6 +36,12 @@ const INSERT_LECTURA_DATAMATRIX_SSMS = `
 	VALUES (@p1, @p2, @p3, @p4, 1)
 `
 
+const INSERT_MESA_INTERNAL_DB = `
+	INSERT INTO mesa (idmesa, salida) 
+	VALUES ($1, $2) 
+	ON CONFLICT (idmesa) DO NOTHING
+`
+
 // Query para obtener datos de orden de fabricación desde vista V_Danish en FX_Sync
 const SELECT_V_DANISH_BY_CODIGO_EMBALAJE = `
 	SELECT 

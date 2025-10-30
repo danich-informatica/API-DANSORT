@@ -87,13 +87,7 @@ func GetFX6Manager(ctx context.Context, cfg *config.Config) (*FX6Manager, error)
 
 // InsertLecturaDataMatrix registra una lectura de DataMatrix en FX6
 // Método específico del dominio FX6
-func (m *FX6Manager) InsertLecturaDataMatrix(
-	ctx context.Context,
-	salida int,
-	correlativo int64,
-	numeroCaja int,
-	fechaLectura time.Time,
-) error {
+func (m *FX6Manager) InsertLecturaDataMatrix(ctx context.Context, salida int, correlativo int64, numeroCaja int64, fechaLectura time.Time) error {
 	if m == nil || m.Manager == nil || m.Manager.db == nil {
 		return fmt.Errorf("FX6Manager no inicializado")
 	}

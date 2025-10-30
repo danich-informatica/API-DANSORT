@@ -241,6 +241,20 @@ func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, c
 	return correlativo, nil
 }
 
+// InsertMesa inserta un ID de mesa y su salida asociada en la tabla mesa (idempotente)
+func (m *PostgresManager) InsertMesa(ctx context.Context, mesaID int, salidaID int) error {
+	if m == nil || m.pool == nil {
+		return fmt.Errorf("manager no inicializado")
+	}
+
+	_, err := m.pool.Exec(ctx, INSERT_MESA_INTERNAL_DB, mesaID, salidaID)
+	if err != nil {
+		return fmt.Errorf("error al insertar mesa %d: %w", mesaID, err)
+	}
+
+	return nil
+}
+
 func (m *PostgresManager) GetActiveSKUs(ctx context.Context) ([]models.SKU, error) {
 	if m == nil || m.pool == nil {
 		return nil, fmt.Errorf("manager no inicializado")

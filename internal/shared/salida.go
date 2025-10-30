@@ -3,8 +3,8 @@ package shared
 import (
 	"API-GREENEX/internal/models"
 	"context"
-	"fmt"
 	"log"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -140,25 +140,6 @@ func (s *Salida) InitializeBoxNumbers(boxNumbers []int) {
 	log.Printf("📦 [Salida %d] Inicializada con %d números de caja disponibles", s.ID, len(boxNumbers))
 }
 
-// GetNextBoxNumber obtiene el siguiente número de caja disponible (rotación circular)
-func (s *Salida) GetNextBoxNumber() int {
-	s.boxIndexMu.Lock()
-	defer s.boxIndexMu.Unlock()
-
-	if len(s.availableBoxNums) == 0 {
-		log.Printf("⚠️  [Salida %d] No hay números de caja configurados, usando 0", s.ID)
-		return 0
-	}
-
-	// Obtener número actual
-	boxNum := s.availableBoxNums[s.currentBoxIndex]
-
-	// Avanzar al siguiente (rotación circular)
-	s.currentBoxIndex = (s.currentBoxIndex + 1) % len(s.availableBoxNums)
-
-	return boxNum
-}
-
 // ProcessDataMatrix procesa una lectura de DataMatrix
 // Correlativo: Número aleatorio que termina en 1 (viene del DataMatrix)
 // Número de Caja: Se asigna de la lista disponible (rotación)
@@ -171,16 +152,8 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 		return 0, err
 	}
 
-	// Validar que el correlativo termina en 1
-	if correlativo%10 != 1 {
-		log.Printf("⚠️  [Salida %d] ADVERTENCIA: Correlativo %d NO termina en 1", s.SealerPhysicalID, correlativo)
-	}
-
-	// Obtener siguiente número de caja de la lista disponible
-	numeroCaja := s.GetNextBoxNumber()
-	if numeroCaja == 0 {
-		return 0, fmt.Errorf("no hay números de caja disponibles")
-	}
+	// Obtener siguiente número de caja del pool
+	numeroCaja := correlativo % int64(len(s.availableBoxNums))
 
 	fechaLectura := time.Now()
 
@@ -188,14 +161,14 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 	if s.fx6Manager != nil {
 		// Type assertion para usar el método
 		type FX6Inserter interface {
-			InsertLecturaDataMatrix(ctx context.Context, salida int, correlativo int64, numeroCaja int, fechaLectura time.Time) error
+			InsertLecturaDataMatrix(ctx context.Context, salida int, correlativo int64, numeroCaja int64, fechaLectura time.Time) error
 		}
 
 		if fx6, ok := s.fx6Manager.(FX6Inserter); ok {
 			err := fx6.InsertLecturaDataMatrix(
 				ctx,
 				s.SealerPhysicalID,
-				correlativo,
+				rand.Int63n(99999999999999999999999999999999999999999),
 				numeroCaja,
 				fechaLectura,
 			)
@@ -211,5 +184,5 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 		}
 	}
 
-	return numeroCaja, nil
+	return int(numeroCaja), nil
 }
