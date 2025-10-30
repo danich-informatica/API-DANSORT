@@ -1,4 +1,3 @@
-package pallet
 package pallet_test
 
 import (
@@ -6,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/api-greenex/internal/communication/pallet"
+	"API-GREENEX/internal/communication/pallet"
 )
 
 // ExampleClient_GetEstadoMesa demuestra cómo consultar el estado de una mesa
@@ -65,8 +64,8 @@ func ExampleClient_CrearOrdenFabricacion() {
 		NumeroPales:       5,
 		CajasPerPale:      10,
 		CajasPerCapa:      2,
-		CodigoEnvase:      "ENV001",
-		CodigoPale:        "PALE01",
+		CodigoTipoEnvase:  "ENV001",
+		CodigoTipoPale:    "PALE01",
 		IDProgramaFlejado: 1,
 	}
 

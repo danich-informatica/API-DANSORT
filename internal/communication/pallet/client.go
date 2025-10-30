@@ -59,16 +59,32 @@ func (c *Client) GetEstadoMesa(ctx context.Context, idMesa int) ([]EstadoMesa, e
 	switch resp.StatusCode {
 	case http.StatusOK:
 		// 200 - Estado de la mesa (puede ser una o múltiples)
-		var estados []EstadoMesa
-		if err := json.Unmarshal(body, &estados); err != nil {
-			// Intentar como objeto único si falla como array
+		// Primero intentar como lista (id=0)
+		var respList APIResponseList
+		if err := json.Unmarshal(body, &respList); err == nil && respList.DataList != nil {
+			// Convertir dataList a []EstadoMesa
+			dataBytes, _ := json.Marshal(respList.DataList)
+			var estados []EstadoMesa
+			if err := json.Unmarshal(dataBytes, &estados); err != nil {
+				return nil, fmt.Errorf("error deserializando dataList: %w", err)
+			}
+			return estados, nil
+		}
+
+		// Intentar como objeto único (id específico)
+		var respSingle APIResponse
+		if err := json.Unmarshal(body, &respSingle); err == nil && respSingle.Data != nil {
+			dataBytes, _ := json.Marshal(respSingle.Data)
 			var estado EstadoMesa
-			if err := json.Unmarshal(body, &estado); err != nil {
-				return nil, fmt.Errorf("error deserializando respuesta: %w", err)
+			if err := json.Unmarshal(dataBytes, &estado); err != nil {
+				return nil, fmt.Errorf("error deserializando data: %w", err)
 			}
 			return []EstadoMesa{estado}, nil
 		}
-		return estados, nil
+
+		// Si llega aquí, el formato no coincide con ninguno esperado
+		// Log detallado para debugging
+		return nil, fmt.Errorf("error deserializando respuesta: formato inesperado (respuesta: %s)", string(body))
 
 	case 202:
 		return nil, ErrMesaNoActiva

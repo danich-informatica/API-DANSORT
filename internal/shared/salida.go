@@ -16,6 +16,7 @@ type Salida struct {
 	CognexID         int              `json:"cognex_id"` // ID de Cognex asignado a esta salida (0 = sin cognex)
 	Salida_Sorter    string           `json:"salida_sorter"`
 	Tipo             string           `json:"tipo"`       // "automatico" o "manual"
+	MesaID           int              `json:"mesa_id"`    // ID de la mesa de paletizado (solo para salidas automáticas)
 	BatchSize        int              `json:"batch_size"` // Tamaño de lote para distribución
 	SKUs_Actuales    []models.SKU     `json:"skus_actuales"`
 	EventChannel     chan interface{} `json:"-"`
@@ -87,7 +88,7 @@ func (s *Salida) IsAvailable() bool {
 	return estado != 2 && !bloqueo
 }
 
-func GetNewSalida(ID int, salida_sorter string, tipo string, batchSize int) Salida {
+func GetNewSalida(ID int, salida_sorter string, tipo string, mesaID int, batchSize int) Salida {
 	// Si no se especifica batch_size, usar 1 por defecto
 	if batchSize <= 0 {
 		batchSize = 1
@@ -99,6 +100,7 @@ func GetNewSalida(ID int, salida_sorter string, tipo string, batchSize int) Sali
 		CognexID:         0,  // 0 = sin cognex asignado
 		Salida_Sorter:    salida_sorter,
 		Tipo:             tipo,
+		MesaID:           mesaID,
 		BatchSize:        batchSize,
 		SKUs_Actuales:    []models.SKU{},
 		Estado:           0,
@@ -109,15 +111,15 @@ func GetNewSalida(ID int, salida_sorter string, tipo string, batchSize int) Sali
 }
 
 // GetNewSalidaWithPhysicalID crea una nueva salida con ID físico específico
-func GetNewSalidaWithPhysicalID(ID int, physicalID int, salida_sorter string, tipo string, batchSize int) Salida {
-	salida := GetNewSalida(ID, salida_sorter, tipo, batchSize)
+func GetNewSalidaWithPhysicalID(ID int, physicalID int, salida_sorter string, tipo string, mesaID int, batchSize int) Salida {
+	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize)
 	salida.SealerPhysicalID = physicalID
 	return salida
 }
 
 // GetNewSalidaComplete crea una nueva salida con todos los parámetros
-func GetNewSalidaComplete(ID int, physicalID int, cognexID int, salida_sorter string, tipo string, batchSize int) Salida {
-	salida := GetNewSalida(ID, salida_sorter, tipo, batchSize)
+func GetNewSalidaComplete(ID int, physicalID int, cognexID int, salida_sorter string, tipo string, mesaID int, batchSize int) Salida {
+	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize)
 	salida.SealerPhysicalID = physicalID
 	salida.CognexID = cognexID
 	return salida

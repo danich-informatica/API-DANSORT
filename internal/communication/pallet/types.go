@@ -4,17 +4,29 @@ import "time"
 
 // EstadoMesa representa el estado completo de una mesa de paletizado
 type EstadoMesa struct {
-	IDMesa               int    `json:"idMesa"`
-	Estado               int    `json:"estado"` // 1 = libre, 2 = bloqueado (hay orden activa)
-	DescripcionEstado    string `json:"descripcionEstado"`
-	EstadoPLC            int    `json:"estadoPLC"` // 1=Parado 2=Manual 3=Automático 4=Avisos 5=Alarmas
-	DescripcionEstadoPLC string `json:"descripcionEstadoPLC"`
-	NumeroCajaPale       int    `json:"numeroCajaPale"`
-	NumeroPaleActual     int    `json:"numeroPaleActual"` // 0 si ninguno
-	CodigoTipoCaja       string `json:"codigoTipoCaja"`
-	CodigoTipoPale       string `json:"codigoTipoPale"`
-	CajasPerCapa         int    `json:"cajasPerCapa"`
-	NumeroPales          int    `json:"numeroPales"`
+	IDMesa               int             `json:"idMesa"`
+	Estado               int             `json:"estado"` // 1 = libre, 2 = bloqueado (hay orden activa)
+	DescripcionEstado    string          `json:"descripcionEstado"`
+	EstadoPLC            int             `json:"estadoPLC"` // 1=Parado 2=Manual 3=Automático 4=Avisos 5=Alarmas
+	DescripcionEstadoPLC string          `json:"descripcionEstadoPLC"`
+	DatosProduccion      DatosProduccion `json:"datosProduccion"`
+	DatosPaletizado      DatosPaletizado `json:"datosPaletizado"`
+}
+
+// DatosProduccion contiene información sobre el progreso de la producción actual
+type DatosProduccion struct {
+	NumeroPaleActual      int `json:"numeroPaleActual"`      // Número del palé actual
+	NumeroCajasEnPale     int `json:"numeroCajasEnPale"`     // Cajas en el palé actual
+	TotalPalesFinalizados int `json:"totalPalesFinalizados"` // Total de palés completados
+	TotalCajasPaletizadas int `json:"totalCajasPaletizadas"` // Total de cajas paletizadas
+}
+
+// DatosPaletizado contiene la configuración del paletizado
+type DatosPaletizado struct {
+	CajasPorPale     int    `json:"cajasPorPale"`     // Número de cajas por palé
+	CodigoTipoEnvase string `json:"codigoTipoEnvase"` // Código del tipo de envase
+	CodigoTipoPale   string `json:"codigoTipoPale"`   // Código del tipo de palé
+	CajasPorCapa     int    `json:"cajasPorCapa"`     // Cajas por capa
 }
 
 // NuevaCajaRequest representa la solicitud para registrar una nueva caja
@@ -27,8 +39,8 @@ type OrdenFabricacionRequest struct {
 	NumeroPales       int    `json:"numeroPales"`       // Cantidad de palés a hacer
 	CajasPerPale      int    `json:"cajasPerPale"`      // Número de cajas por palé
 	CajasPerCapa      int    `json:"cajasPerCapa"`      // Cuántas cajas habrá en cada capa
-	CodigoEnvase      string `json:"codigoEnvase"`      // Código del envase
-	CodigoPale        string `json:"codigoPale"`        // Código del tipo de palé
+	CodigoTipoEnvase  string `json:"codigoTipoEnvase"`  // Código del tipo de envase
+	CodigoTipoPale    string `json:"codigoTipoPale"`    // Código del tipo de palé
 	IDProgramaFlejado int    `json:"idProgramaFlejado"` // ID del programa de flejado
 }
 
@@ -44,6 +56,35 @@ const (
 	// Se vaciará la mesa con el palé actual y al finalizar se borrará la orden del PLC
 	// La mesa quedará libre para insertar una nueva orden
 	VaciarModoFinalizar VaciarMesaMode = 2
+)
+
+// Estructuras de respuesta estándar de la API
+
+// APIResponse representa la estructura de respuesta estándar con un solo objeto de datos
+type APIResponse struct {
+	Mensaje string      `json:"mensaje"`        // Descripción de la respuesta
+	Status  string      `json:"status"`         // Estado descriptivo (ej: exito, error_formato_incorrecto)
+	Data    interface{} `json:"data,omitempty"` // Datos de respuesta (opcional)
+}
+
+// APIResponseList representa la estructura de respuesta estándar con múltiples objetos de datos
+type APIResponseList struct {
+	Mensaje  string      `json:"mensaje"`            // Descripción de la respuesta
+	Status   string      `json:"status"`             // Estado descriptivo (ej: exito, error_formato_incorrecto)
+	DataList interface{} `json:"dataList,omitempty"` // Lista de datos de respuesta (opcional)
+}
+
+// Status codes comunes usados en el campo "status"
+const (
+	StatusExito                  = "exito"
+	StatusErrorValidacion        = "error_validacion"
+	StatusErrorFormatoIncorrecto = "error_formato_incorrecto"
+	StatusErrorNoEncontrado      = "error_no_encontrado"
+	StatusErrorInterno           = "error_interno"
+	StatusMesaSinOrden           = "mesa_sin_orden"
+	StatusMesaNoDisponible       = "mesa_no_disponible"
+	StatusMesaYaVacia            = "mesa_ya_vacia"
+	StatusCajaDuplicada          = "caja_duplicada"
 )
 
 // APIError representa un error devuelto por la API de paletizado

@@ -546,3 +546,21 @@ func (m *Manager) WaitForSorterReady(ctx context.Context, sorterID int, timeout 
 		}
 	}
 }
+
+func (m *Manager) LockSalida(sorterID int, bloqueoNode string) error {
+	if bloqueoNode == "" {
+		return fmt.Errorf("nodo de bloqueo vacío")
+	}
+
+	ctx := context.Background()
+	return m.WriteNode(ctx, sorterID, bloqueoNode, true)
+}
+
+func (m *Manager) UnlockSalida(sorterID int, bloqueoNode string) error {
+	if bloqueoNode == "" {
+		return fmt.Errorf("nodo de bloqueo vacío")
+	}
+
+	ctx := context.Background()
+	return m.WriteNode(ctx, sorterID, bloqueoNode, false)
+}

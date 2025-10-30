@@ -1,0 +1,1 @@
+const c="selected_backend_ip";function o(){try{return window.localStorage.getItem(c)}catch{return null}}function a(e){const t=o();if(!t)return e;const n=e.filter(r=>r!==t);return[t,...n]}export{a as g};

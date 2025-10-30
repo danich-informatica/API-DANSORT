@@ -12,17 +12,29 @@ import (
 
 // EstadoMesa representa el estado de una mesa de paletizado
 type EstadoMesa struct {
-	IDMesa               int    `json:"idMesa"`
-	Estado               int    `json:"estado"` // 1 = libre, 2 = bloqueado
-	DescripcionEstado    string `json:"descripcionEstado"`
-	EstadoPLC            int    `json:"estadoPLC"` // 1-5
-	DescripcionEstadoPLC string `json:"descripcionEstadoPLC"`
-	NumeroCajaPale       int    `json:"numeroCajaPale"`
-	NumeroPaleActual     int    `json:"numeroPaleActual"`
-	CodigoTipoCaja       string `json:"codigoTipoCaja"`
-	CodigoTipoPale       string `json:"codigoTipoPale"`
-	CajasPerCapa         int    `json:"cajasPerCapa"`
-	NumeroPales          int    `json:"numeroPales"`
+	IDMesa               int             `json:"idMesa"`
+	Estado               int             `json:"estado"` // 1 = libre, 2 = bloqueado
+	DescripcionEstado    string          `json:"descripcionEstado"`
+	EstadoPLC            int             `json:"estadoPLC"` // 1-5
+	DescripcionEstadoPLC string          `json:"descripcionEstadoPLC"`
+	DatosProduccion      DatosProduccion `json:"datosProduccion"`
+	DatosPaletizado      DatosPaletizado `json:"datosPaletizado"`
+}
+
+// DatosProduccion contiene información sobre el progreso de la producción actual
+type DatosProduccion struct {
+	NumeroPaleActual      int `json:"numeroPaleActual"`
+	NumeroCajasEnPale     int `json:"numeroCajasEnPale"`
+	TotalPalesFinalizados int `json:"totalPalesFinalizados"`
+	TotalCajasPaletizadas int `json:"totalCajasPaletizadas"`
+}
+
+// DatosPaletizado contiene la configuración del paletizado
+type DatosPaletizado struct {
+	CajasPorPale     int    `json:"cajasPorPale"`
+	CodigoTipoEnvase string `json:"codigoTipoEnvase"`
+	CodigoTipoPale   string `json:"codigoTipoPale"`
+	CajasPorCapa     int    `json:"cajasPorCapa"`
 }
 
 // OrdenFabricacion representa una orden activa
@@ -30,12 +42,18 @@ type OrdenFabricacion struct {
 	NumeroPales       int      `json:"numeroPales"`
 	CajasPerPale      int      `json:"cajasPerPale"`
 	CajasPerCapa      int      `json:"cajasPerCapa"`
-	CodigoEnvase      string   `json:"codigoEnvase"`
-	CodigoPale        string   `json:"codigoPale"`
+	CodigoTipoEnvase  string   `json:"codigoTipoEnvase"`
+	CodigoTipoPale    string   `json:"codigoTipoPale"`
 	IDProgramaFlejado int      `json:"idProgramaFlejado"`
 	CajasRegistradas  []string `json:"-"`
 	PaleActual        int      `json:"-"`
 	CajasEnPale       int      `json:"-"`
+}
+
+// Response representa una respuesta genérica del servidor
+type Response struct {
+	Mensaje string `json:"mensaje"`
+	Status  string `json:"status"`
 }
 
 // ServerState mantiene el estado del servidor dummy
@@ -51,20 +69,26 @@ var state = &ServerState{
 }
 
 func init() {
-	// Inicializar 3 mesas de ejemplo
-	for i := 1; i <= 3; i++ {
+	// Inicializar 6 mesas de ejemplo (según configuración de salidas automáticas)
+	for i := 1; i <= 6; i++ {
 		state.mesas[i] = &EstadoMesa{
 			IDMesa:               i,
 			Estado:               1, // Libre
 			DescripcionEstado:    "Libre",
 			EstadoPLC:            3, // Automático
 			DescripcionEstadoPLC: "Automático",
-			NumeroCajaPale:       0,
-			NumeroPaleActual:     0,
-			CodigoTipoCaja:       "",
-			CodigoTipoPale:       "",
-			CajasPerCapa:         0,
-			NumeroPales:          0,
+			DatosProduccion: DatosProduccion{
+				NumeroPaleActual:      0,
+				NumeroCajasEnPale:     0,
+				TotalPalesFinalizados: 0,
+				TotalCajasPaletizadas: 0,
+			},
+			DatosPaletizado: DatosPaletizado{
+				CajasPorPale:     0,
+				CodigoTipoEnvase: "",
+				CodigoTipoPale:   "",
+				CajasPorCapa:     0,
+			},
 		}
 	}
 }
@@ -156,7 +180,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
     </div>
     
     <h3>Estado Actual:</h3>
-    <p>Mesas activas: 3 (IDs: 1, 2, 3)</p>
+    <p>Mesas activas: 6 (IDs: 1, 2, 3, 4, 5, 6)</p>
 </body>
 </html>`
 
@@ -274,19 +298,26 @@ func handlePostNuevaCaja(w http.ResponseWriter, r *http.Request) {
 	orden.CajasRegistradas = append(orden.CajasRegistradas, req.IDCaja)
 	orden.CajasEnPale++
 
+	// Actualizar datos de producción
+	mesa.DatosProduccion.NumeroCajasEnPale = orden.CajasEnPale
+	mesa.DatosProduccion.TotalCajasPaletizadas++
+
 	// Si se completó el palé actual, avanzar al siguiente
 	if orden.CajasEnPale >= orden.CajasPerPale {
 		orden.PaleActual++
 		orden.CajasEnPale = 0
-		mesa.NumeroPaleActual = orden.PaleActual
+		mesa.DatosProduccion.NumeroPaleActual = orden.PaleActual
+		mesa.DatosProduccion.NumeroCajasEnPale = 0
+		mesa.DatosProduccion.TotalPalesFinalizados++
 		log.Printf("✅ Palé %d/%d completado en mesa %d", orden.PaleActual, orden.NumeroPales, id)
 	}
 
 	log.Printf("📦 Caja registrada: %s (Mesa %d, Palé %d, Caja %d/%d)",
 		req.IDCaja, id, orden.PaleActual+1, orden.CajasEnPale, orden.CajasPerPale)
 
-	respondJSON(w, http.StatusOK, map[string]string{
-		"message": "La caja ha sido registrada correctamente en la mesa",
+	respondJSON(w, http.StatusOK, Response{
+		Mensaje: "La caja ha sido registrada correctamente en la mesa",
+		Status:  "exito",
 	})
 }
 
@@ -342,17 +373,28 @@ func handlePostOrden(w http.ResponseWriter, r *http.Request) {
 	// Actualizar estado de la mesa
 	mesa.Estado = 2
 	mesa.DescripcionEstado = "Bloqueado (orden activa)"
-	mesa.NumeroCajaPale = orden.CajasPerPale
-	mesa.NumeroPaleActual = 0
-	mesa.CodigoTipoCaja = orden.CodigoEnvase
-	mesa.CodigoTipoPale = orden.CodigoPale
-	mesa.CajasPerCapa = orden.CajasPerCapa
-	mesa.NumeroPales = orden.NumeroPales
+
+	// Actualizar datos de producción
+	mesa.DatosProduccion = DatosProduccion{
+		NumeroPaleActual:      0,
+		NumeroCajasEnPale:     0,
+		TotalPalesFinalizados: 0,
+		TotalCajasPaletizadas: 0,
+	}
+
+	// Actualizar datos de paletizado
+	mesa.DatosPaletizado = DatosPaletizado{
+		CajasPorPale:     orden.CajasPerPale,
+		CodigoTipoEnvase: orden.CodigoTipoEnvase,
+		CodigoTipoPale:   orden.CodigoTipoPale,
+		CajasPorCapa:     orden.CajasPerCapa,
+	}
 
 	log.Printf("📋 Orden creada en mesa %d: %d palés × %d cajas", id, orden.NumeroPales, orden.CajasPerPale)
 
-	respondJSON(w, http.StatusOK, map[string]string{
-		"message": "Orden creada exitosamente",
+	respondJSON(w, http.StatusOK, Response{
+		Mensaje: "Orden creada exitosamente",
+		Status:  "exito",
 	})
 }
 
@@ -395,8 +437,9 @@ func handlePostVaciar(w http.ResponseWriter, r *http.Request) {
 
 	// Verificar que la mesa tiene algo
 	if mesa.Estado == 1 {
-		respondJSON(w, 202, map[string]string{
-			"message": "La mesa ya está vacía",
+		respondJSON(w, 202, Response{
+			Mensaje: "La mesa ya está vacía",
+			Status:  "mesa_ya_vacia",
 		})
 		return
 	}
@@ -406,23 +449,35 @@ func handlePostVaciar(w http.ResponseWriter, r *http.Request) {
 		// Modo 1: Vaciar y continuar
 		log.Printf("🔄 Mesa %d vaciada (modo continuar) - Palé %d completado", id, orden.PaleActual)
 		orden.CajasEnPale = 0
-		mesa.NumeroPaleActual = orden.PaleActual
+		mesa.DatosProduccion.NumeroCajasEnPale = 0
+		mesa.DatosProduccion.NumeroPaleActual = orden.PaleActual
 	} else {
 		// Modo 2: Vaciar y finalizar
 		log.Printf("🏁 Mesa %d vaciada (modo finalizar) - Orden completada", id)
 		delete(state.ordenes, id)
 		mesa.Estado = 1
 		mesa.DescripcionEstado = "Libre"
-		mesa.NumeroCajaPale = 0
-		mesa.NumeroPaleActual = 0
-		mesa.CodigoTipoCaja = ""
-		mesa.CodigoTipoPale = ""
-		mesa.CajasPerCapa = 0
-		mesa.NumeroPales = 0
+
+		// Resetear datos de producción
+		mesa.DatosProduccion = DatosProduccion{
+			NumeroPaleActual:      0,
+			NumeroCajasEnPale:     0,
+			TotalPalesFinalizados: 0,
+			TotalCajasPaletizadas: 0,
+		}
+
+		// Resetear datos de paletizado
+		mesa.DatosPaletizado = DatosPaletizado{
+			CajasPorPale:     0,
+			CodigoTipoEnvase: "",
+			CodigoTipoPale:   "",
+			CajasPorCapa:     0,
+		}
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{
-		"message": "Solicitud de vaciado registrada correctamente en la mesa",
+	respondJSON(w, http.StatusOK, Response{
+		Mensaje: "Solicitud de vaciado registrada correctamente en la mesa",
+		Status:  "exito",
 	})
 }
 

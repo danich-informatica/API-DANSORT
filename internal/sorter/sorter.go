@@ -22,7 +22,12 @@ type Sorter struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 
+	// Configuración de paletizado automático
+	PaletHost string `json:"palet_host"` // Host del servidor de paletizado
+	PaletPort int    `json:"palet_port"` // Puerto del servidor de paletizado
+
 	plcManager          *plc.Manager
+	fxSyncManager       interface{} // *db.FXSyncManager (interface para evitar import cycle)
 	cancelSubscriptions []func()
 	subscriptionMutex   sync.Mutex
 
@@ -84,7 +89,7 @@ func (s *Sorter) GetSalidas() []shared.Salida {
 }
 
 // GetNewSorter crea una nueva instancia de Sorter
-func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}, plcManager *plc.Manager) *Sorter {
+func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, paletHost string, paletPort int, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}, plcManager *plc.Manager, fxSyncManager interface{}) *Sorter {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	channelMgr := shared.GetChannelManager()
@@ -97,11 +102,14 @@ func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode s
 		Ubicacion:           ubicacion,
 		PLCInputNode:        plcInputNode,
 		PLCOutputNode:       plcOutputNode,
+		PaletHost:           paletHost,
+		PaletPort:           paletPort,
 		Salidas:             salidas,
 		Cognex:              cognex,
 		ctx:                 ctx,
 		cancel:              cancel,
 		plcManager:          plcManager,
+		fxSyncManager:       fxSyncManager,
 		cancelSubscriptions: make([]func(), 0),
 		skuChannel:          skuChannel,
 		flowStatsChannel:    flowStatsChannel,

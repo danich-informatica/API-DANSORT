@@ -29,8 +29,8 @@
 //	    NumeroPales:  5,
 //	    CajasPerPale: 10,
 //	    CajasPerCapa: 2,
-//	    CodigoEnvase: "ENV001",
-//	    CodigoPale:   "PALE01",
+//	    CodigoTipoEnvase: "ENV001",
+//	    CodigoTipoPale:   "PALE01",
 //	    IDProgramaFlejado: 1,
 //	}
 //	err = client.CrearOrdenFabricacion(context.Background(), 1, orden)

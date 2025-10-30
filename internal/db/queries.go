@@ -35,6 +35,25 @@ const INSERT_LECTURA_DATAMATRIX_SSMS = `
 	(Salida, Correlativo, Numero_Caja, Fecha_Lectura, Terminado)
 	VALUES (@p1, @p2, @p3, @p4, 1)
 `
+
+// Query para obtener datos de orden de fabricación desde vista V_Danish en FX_Sync
+const SELECT_V_DANISH_BY_CODIGO_EMBALAJE = `
+	SELECT 
+		CANTIDAD_CAJAS AS CajasPerPale,
+		[CAJAS POR CAPA] AS CajasPerCapa,
+		[CODIGO ENVASE] AS CodigoTipoEnvase,
+		ANCHOC,
+		LARGOC,
+		ALTOC,
+		[NOMBRE ENVASE],
+		[CODIGO PALLET] AS CodigoTipoPale,
+		ANCHOP,
+		LARGOP,
+		ALTOP
+	FROM V_Danish
+	WHERE CODIGO_EMBALAJE = @p1
+`
+
 const INSERT_SKU_INTERNAL_DB = `
 	INSERT INTO SKU (calibre, variedad, embalaje, dark, linea, estado)
 	VALUES ($1, $2, $3, $4, $5, $6)

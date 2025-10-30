@@ -98,6 +98,17 @@ func main() {
 	}
 	log.Println("")
 
+	log.Println("📊 Inicializando conexión a SQL Server FX_Sync...")
+	fxSyncManager, err := db.GetFXSyncManager(ctx, cfg)
+	if err != nil {
+		log.Printf("⚠️  Error al inicializar FXSyncManager: %v (continuando sin soporte orden de fabricación)", err)
+		fxSyncManager = nil
+	} else {
+		defer fxSyncManager.Close()
+		log.Println("✅ FXSyncManager inicializado correctamente (vista V_Danish)")
+	}
+	log.Println("")
+
 	// Inicializar SKUManager para gestión eficiente con streaming
 	skuManager, err := flow.NewSKUManager(ctx, dbManager)
 	if err != nil {
@@ -229,9 +240,9 @@ func main() {
 				if cognexListener != nil {
 					// Obtener el ID del Cognex del listener
 					cognexID := sorterCfg.ID // Asumimos que el CognexID coincide con el SorterID
-					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, cognexID, salidaCfg.Nombre, tipo, 1)
+					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, cognexID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize)
 				} else {
-					salida = shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, 1)
+					salida = shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize)
 				}
 
 				salida.EstadoNode = salidaCfg.PLC.EstadoNodeID
@@ -310,7 +321,7 @@ func main() {
 				log.Printf("        ↳ Output Node: %s", sorterCfg.PLC.OutputNodeID)
 			}
 
-			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Name, sorterCfg.PLC.InputNodeID, sorterCfg.PLC.OutputNodeID, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager, plcManager)
+			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Name, sorterCfg.PLC.InputNodeID, sorterCfg.PLC.OutputNodeID, sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager, plcManager, fxSyncManager)
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)

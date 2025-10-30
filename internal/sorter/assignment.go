@@ -1,10 +1,15 @@
 package sorter
 
 import (
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"context"
 	"fmt"
 	"log"
+	"reflect"
+	"time"
+
+	"API-GREENEX/internal/communication/pallet"
+	"API-GREENEX/internal/models"
+	"API-GREENEX/internal/shared"
 )
 
 // AssignSKUToSalida asigna una SKU a una salida específica
@@ -35,6 +40,37 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 		Estado:   true,
 	}
 
+	// logica para asignar SKU en paletizaje automatico en produccion
+	// Normalizar: tanto "automatico" como "automatica" son válidos
+	if targetSalida.Tipo == "automatico" || targetSalida.Tipo == "automatica" {
+		// Usar configuración del sorter para conectar al servidor de paletizado
+		client := pallet.NewClient(s.PaletHost, s.PaletPort, 10*time.Second)
+		defer client.Close()
+
+		log.Printf("Sorter #%d: validando factibilidad de orden de paletizaje para salida %d (servidor: %s:%d, mesa_id: %d).", s.ID, targetSalida.ID, s.PaletHost, s.PaletPort, targetSalida.MesaID)
+
+		// Validar disponibilidad de la mesa
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		mesaDisponible, err := s.IsTableAvailable(ctx, targetSalida.MesaID, client)
+		if err != nil {
+			log.Printf("❌ Sorter #%d: error al consultar estado de mesa %d: %v", s.ID, targetSalida.MesaID, err)
+			return "", "", "", 0, fmt.Errorf("error al validar disponibilidad de mesa %d: %w", targetSalida.MesaID, err)
+		}
+
+		if !mesaDisponible {
+			log.Printf("⚠️ Sorter #%d: mesa %d no está disponible para orden de paletizaje (salida %d)",
+				s.ID, targetSalida.MesaID, targetSalida.ID)
+			return "", "", "", 0, fmt.Errorf("mesa %d no está disponible para orden de paletizaje", targetSalida.MesaID)
+		}
+
+		log.Printf("✅ Sorter #%d: mesa %d disponible, orden de paletizaje factible para salida %d", s.ID, targetSalida.MesaID, targetSalida.ID)
+
+		// creamos orden de paletizaje en una go rutine
+		go s.SendFrabricationOrder(targetSalida, sku, client)
+	}
+
 	targetSalida.SKUs_Actuales = append(targetSalida.SKUs_Actuales, sku)
 	targetSKU.IsAssigned = true
 
@@ -46,9 +82,142 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 	return targetSKU.Calibre, targetSKU.Variedad, targetSKU.Embalaje, targetSKU.Dark, nil
 }
 
+// IsTableAvailable consulta si una mesa de paletizado está disponible
+// Retorna true si la mesa está libre (estado = 1, sin orden activa)
+func (s *Sorter) IsTableAvailable(ctx context.Context, mesaID int, client *pallet.Client) (bool, error) {
+	// Consultar estado de la mesa específica
+	estados, err := client.GetEstadoMesa(ctx, mesaID)
+	if err != nil {
+		// Si el error es "Mesa NO tiene OF activa" (código 202), la mesa está LIBRE
+		if err == pallet.ErrMesaNoActiva {
+			log.Printf("✅ Sorter #%d: Mesa %d está libre (sin orden activa)", s.ID, mesaID)
+			return true, nil
+		}
+		return false, fmt.Errorf("error al consultar estado de mesa %d: %w", mesaID, err)
+	}
+
+	if len(estados) == 0 {
+		return false, fmt.Errorf("no se recibió información de la mesa %d", mesaID)
+	}
+
+	estado := estados[0]
+
+	// Estado = 1: Libre (disponible para nueva orden)
+	// Estado = 2: Bloqueado (tiene orden activa)
+	if estado.Estado == 1 {
+		log.Printf("✅ Sorter #%d: Mesa %d está libre (estado=%d)", s.ID, mesaID, estado.Estado)
+		return true, nil
+	}
+	log.Printf("⚠️ Sorter #%d: Mesa %d está bloqueada (estado=%d, descripción='%s')", s.ID, mesaID, estado.Estado, estado.DescripcionEstado)
+	return false, nil
+}
+
+// SendFrabricationOrder envía una orden de fabricación al sistema de paletizaje
+func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, client *pallet.Client) {
+	log.Printf("🚚 Sorter #%d: Iniciando envío de orden de fabricación para mesa %d", s.ID, salida.MesaID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Valores fijos
+	const (
+		NumeroPalesFijo       = 0 // Fijo
+		IDProgramaFlejadoFijo = 1 // Fijo
+	)
+
+	// Obtener datos dinámicos de FX_Sync usando el código de embalaje
+	var cajasPerPale int
+	var cajasPerCapa int
+	var codigoTipoEnvase string
+	var codigoTipoPale string
+
+	if s.fxSyncManager != nil {
+		// Type assertion para usar el método
+		// Usamos interface{} genérica ya que OrdenFabricacionData está en package db
+		type FXSyncQuerier interface {
+			GetOFData(ctx context.Context, codigoEmbalaje string) (interface{}, error)
+		}
+
+		if fxSync, ok := s.fxSyncManager.(FXSyncQuerier); ok {
+			ofDataRaw, err := fxSync.GetOFData(ctx, sku.Embalaje)
+			if err != nil {
+				log.Printf("❌ Sorter #%d: Error al obtener datos de FX_Sync para embalaje '%s': %v",
+					s.ID, sku.Embalaje, err)
+				log.Printf("⚠️  Sorter #%d: No se puede crear orden sin datos de FX_Sync", s.ID)
+				return
+			}
+
+			// Extraer campos usando reflection ya que viene como interface{}
+			// Usamos interface con métodos getter para acceder a los campos
+			type OFDataGetter interface {
+				GetCajasPerPale() int
+				GetCajasPerCapa() int
+				GetCodigoTipoEnvase() string
+				GetCodigoTipoPale() string
+			}
+
+			// Intentar con interface de métodos
+			if ofGetter, ok := ofDataRaw.(OFDataGetter); ok {
+				cajasPerPale = ofGetter.GetCajasPerPale()
+				cajasPerCapa = ofGetter.GetCajasPerCapa()
+				codigoTipoEnvase = ofGetter.GetCodigoTipoEnvase()
+				codigoTipoPale = ofGetter.GetCodigoTipoPale()
+			} else {
+				// Fallback: usar reflection para extraer campos
+				// Esto funciona con cualquier struct que tenga los campos correctos
+				v := reflect.ValueOf(ofDataRaw)
+				if v.Kind() == reflect.Ptr {
+					v = v.Elem()
+				}
+
+				if v.Kind() != reflect.Struct {
+					log.Printf("❌ Sorter #%d: Error al convertir datos de FX_Sync (tipo: %T, kind: %v)",
+						s.ID, ofDataRaw, v.Kind())
+					return
+				}
+
+				cajasPerPale = int(v.FieldByName("CajasPerPale").Int())
+				cajasPerCapa = int(v.FieldByName("CajasPerCapa").Int())
+				codigoTipoEnvase = v.FieldByName("CodigoTipoEnvase").String()
+				codigoTipoPale = v.FieldByName("CodigoTipoPale").String()
+			}
+
+			log.Printf("📊 Sorter #%d: Datos obtenidos de FX_Sync para '%s': %d cajas/palé, %d cajas/capa, envase='%s', palé='%s'",
+				s.ID, sku.Embalaje, cajasPerPale, cajasPerCapa, codigoTipoEnvase, codigoTipoPale)
+		} else {
+			log.Printf("❌ Sorter #%d: FXSyncManager no implementa interfaz correcta", s.ID)
+			return
+		}
+	} else {
+		log.Printf("❌ Sorter #%d: FXSyncManager no está inicializado", s.ID)
+		return
+	}
+
+	// Crear orden con datos obtenidos
+	orden := pallet.OrdenFabricacionRequest{
+		NumeroPales:       NumeroPalesFijo,       // FIJO: 5
+		CajasPerPale:      cajasPerPale,          // DINÁMICO: de FX_Sync
+		CajasPerCapa:      cajasPerCapa,          // DINÁMICO: de FX_Sync
+		CodigoTipoEnvase:  codigoTipoEnvase,      // DINÁMICO: de FX_Sync
+		CodigoTipoPale:    codigoTipoPale,        // DINÁMICO: de FX_Sync
+		IDProgramaFlejado: IDProgramaFlejadoFijo, // FIJO: 1
+	}
+
+	log.Printf("📋 Sorter #%d: Creando orden en mesa %d: %d palés × %d cajas (envase: %s, palé: %s)",
+		s.ID, salida.MesaID, orden.NumeroPales, orden.CajasPerPale, orden.CodigoTipoEnvase, orden.CodigoTipoPale)
+
+	err := client.CrearOrdenFabricacion(ctx, salida.MesaID, orden)
+	if err != nil {
+		log.Printf("❌ Sorter #%d: Error al crear orden en mesa %d: %v", s.ID, salida.MesaID, err)
+		return
+	}
+
+	log.Printf("✅ Sorter #%d: Orden de fabricación creada exitosamente en mesa %d", s.ID, salida.MesaID)
+}
+
 // RemoveSKUFromSalida elimina una SKU específica de una salida
 func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, err error) {
-	// ✅ PROTECCIÓN: NO permitir eliminar SKU REJECT (ID=0)
+	// PROTECCIÓN: NO permitir eliminar SKU REJECT (ID=0)
 	if skuID == 0 {
 		return "", "", "", 0, fmt.Errorf("no se puede eliminar SKU REJECT (ID=0), está protegida")
 	}
@@ -100,7 +269,88 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 
 	s.UpdateSKUs(s.assignedSKUs)
 
+	// Si es salida automática, ejecutar secuencia de vaciado
+	// Normalizar: tanto "automatico" como "automatica" son válidos
+	tipoSalida := s.Salidas[salidaIndex].Tipo
+	if tipoSalida == "automatico" || tipoSalida == "automatica" {
+		log.Printf("🔄 Sorter #%d: Iniciando secuencia de vaciado para salida automática %d", s.ID, salidaID)
+		go s.SecuenciaVaciado(targetSalida)
+	}
+
 	return removedSKU.Calibre, removedSKU.Variedad, removedSKU.Embalaje, removedSKU.Dark, nil
+}
+
+func (s *Sorter) SecuenciaVaciado(salida *shared.Salida) {
+	log.Printf("🔄 Sorter #%d: Iniciando secuencia de vaciado para salida %d (mesa %d, tipo: %s)",
+		s.ID, salida.ID, salida.MesaID, salida.Tipo)
+
+	// Validar que tenemos lo necesario
+	if s.plcManager == nil {
+		log.Printf("❌ Sorter #%d: No se puede ejecutar secuencia - PLCManager no disponible", s.ID)
+		return
+	}
+
+	if salida.BloqueoNode == "" {
+		log.Printf("⚠️  Sorter #%d: Salida %d no tiene nodo de bloqueo configurado, continuando sin bloqueo PLC",
+			s.ID, salida.ID)
+	}
+
+	// Crear cliente de paletizado
+	client := pallet.NewClient(s.PaletHost, s.PaletPort, 10*time.Second)
+	defer client.Close()
+
+	// PASO 1: Bloquear salida en PLC
+	if salida.BloqueoNode != "" {
+		log.Printf("🔒 Sorter #%d: Bloqueando salida %d (nodo: %s)", s.ID, salida.ID, salida.BloqueoNode)
+		err := s.plcManager.LockSalida(s.ID, salida.BloqueoNode)
+		if err != nil {
+			log.Printf("❌ Sorter #%d: Error al bloquear salida %d en PLC: %v", s.ID, salida.ID, err)
+			log.Printf("⚠️  Sorter #%d: Continuando secuencia a pesar del error de bloqueo", s.ID)
+		} else {
+			salida.SetBloqueo(true) // Actualizar estado en memoria
+			log.Printf("✅ Sorter #%d: Salida %d bloqueada exitosamente", s.ID, salida.ID)
+		}
+	}
+
+	// PASO 2: Esperar 2 segundos para que entren las últimas cajas
+	log.Printf("⏳ Sorter #%d: Esperando 2 segundos para que entren últimas cajas...", s.ID)
+	time.Sleep(2 * time.Second)
+
+	// PASO 3: Vaciar mesa en servidor de paletizado (modo 2 = finalizar orden)
+	log.Printf("🧹 Sorter #%d: Enviando orden de vaciado a mesa %d (modo 2: finalizar orden)",
+		s.ID, salida.MesaID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := client.VaciarMesa(ctx, salida.MesaID, 2)
+	if err != nil {
+		log.Printf("❌ Sorter #%d: Error al vaciar mesa %d: %v", s.ID, salida.MesaID, err)
+		log.Printf("⚠️  Sorter #%d: La mesa podría no haberse vaciado correctamente", s.ID)
+	} else {
+		log.Printf("✅ Sorter #%d: Mesa %d vaciada exitosamente (orden finalizada)", s.ID, salida.MesaID)
+	}
+
+	// PASO 4: Esperar 3 segundos para que el paletizador procese
+	log.Printf("⏳ Sorter #%d: Esperando 3 segundos para que paletizador procese...", s.ID)
+	time.Sleep(3 * time.Second)
+
+	// PASO 5: Desbloquear salida en PLC
+	if salida.BloqueoNode != "" {
+		log.Printf("🔓 Sorter #%d: Desbloqueando salida %d (nodo: %s)", s.ID, salida.ID, salida.BloqueoNode)
+		err := s.plcManager.UnlockSalida(s.ID, salida.BloqueoNode)
+		if err != nil {
+			log.Printf("❌ Sorter #%d: Error al desbloquear salida %d en PLC: %v", s.ID, salida.ID, err)
+			log.Printf("🚨 Sorter #%d: CRÍTICO - Salida %d quedó bloqueada, requiere intervención manual",
+				s.ID, salida.ID)
+		} else {
+			salida.SetBloqueo(false) // Actualizar estado en memoria
+			log.Printf("✅ Sorter #%d: Salida %d desbloqueada exitosamente", s.ID, salida.ID)
+		}
+	}
+
+	log.Printf("✅ Sorter #%d: Secuencia de vaciado completada para salida %d (total: 5 segundos)",
+		s.ID, salida.ID)
 }
 
 // RemoveAllSKUsFromSalida elimina TODAS las SKUs de una salida específica
