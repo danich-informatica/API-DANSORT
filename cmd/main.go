@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"API-GREENEX/internal/communication/pallet"
 	"API-GREENEX/internal/communication/plc"
 	"API-GREENEX/internal/config"
 	"API-GREENEX/internal/db"
@@ -264,6 +265,14 @@ func main() {
 
 					log.Printf("           ✅ FX6Manager vinculado (DataMatrix habilitado)")
 					log.Printf("           📦 %d números de caja configurados", len(boxNumbers))
+				}
+
+				// Vincular cliente de pallet para salidas automáticas
+				if tipo == "automatico" && sorterCfg.PaletAutomatico.Host != "" && sorterCfg.PaletAutomatico.Port > 0 {
+					palletClient := pallet.NewClient(sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port, 10*time.Second)
+					salida.SetPalletClient(palletClient)
+					log.Printf("           ✅ Cliente Serfruit vinculado (Host: %s:%d)",
+						sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port)
 				}
 
 				// Importante: añadir la salida después de configurarla completamente

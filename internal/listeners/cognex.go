@@ -431,7 +431,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		case <-time.After(2 * time.Second):
 			log.Printf("   ⚠️  Timeout enviando evento DataMatrix (canal lleno?)")
 		}
-
+		
 		// Enviar confirmación inmediata a la cámara
 		response := "ACK\r\n"
 		if _, err := conn.Write([]byte(response)); err != nil {

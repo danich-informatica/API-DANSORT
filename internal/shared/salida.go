@@ -4,7 +4,6 @@ import (
 	"API-GREENEX/internal/models"
 	"context"
 	"log"
-	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -33,8 +32,12 @@ type Salida struct {
 	EstadoNode  string `json:"estado_node"`  // Nodo OPC UA para estado
 	BloqueoNode string `json:"bloqueo_node"` // Nodo OPC UA para bloqueo
 
+	// Orden de fabricación activa
+	IDOrdenActiva int `json:"id_orden_activa"` // ID de la última orden de fabricación activa en esta salida/mesa
+
 	// Campos para DataMatrix (FX6)
 	fx6Manager       interface{} // *db.FX6Manager (interface para evitar import cycle)
+	palletClient     interface{} // Cliente para comunicación con Serfruit (interface para evitar import cycle)
 	availableBoxNums []int       // Lista de números de caja disponibles
 	currentBoxIndex  int         // Índice actual en la lista de cajas
 	boxIndexMu       sync.Mutex  // Mutex para el índice
@@ -130,6 +133,11 @@ func (s *Salida) SetFX6Manager(fx6Manager interface{}) {
 	s.fx6Manager = fx6Manager
 }
 
+// SetPalletClient vincula el cliente de Serfruit a esta salida
+func (s *Salida) SetPalletClient(palletClient interface{}) {
+	s.palletClient = palletClient
+}
+
 // InitializeBoxNumbers inicializa la lista de números de caja disponibles
 func (s *Salida) InitializeBoxNumbers(boxNumbers []int) {
 	s.boxIndexMu.Lock()
@@ -168,7 +176,7 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 			err := fx6.InsertLecturaDataMatrix(
 				ctx,
 				s.SealerPhysicalID,
-				rand.Int63n(99999999999999999999999999999999999999999),
+				int64(s.IDOrdenActiva),
 				numeroCaja,
 				fechaLectura,
 			)
@@ -178,8 +186,28 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 				log.Printf("❌ [Salida %d] Error al insertar DataMatrix en FX6 (Correlativo=%d, Caja=%d): %v",
 					s.SealerPhysicalID, correlativo, numeroCaja, err)
 			} else {
-				log.Printf("✅ [Salida %d] DataMatrix registrado: Correlativo=%d → Caja=%d",
+				log.Printf("✅ [Salida %d] DataMatrix registrado en FX6: Correlativo=%d → Caja=%d",
 					s.SealerPhysicalID, correlativo, numeroCaja)
+			}
+		}
+	}
+
+	// Enviar nueva caja a Serfruit (solo para salidas automáticas con mesa)
+	if s.Tipo == "automatico" && s.MesaID > 0 && s.palletClient != nil {
+		// Type assertion para usar el método RegistrarNuevaCaja
+		type PalletCajaRegistrar interface {
+			RegistrarNuevaCaja(ctx context.Context, idMesa int, idCaja string) error
+		}
+
+		if pallet, ok := s.palletClient.(PalletCajaRegistrar); ok {
+			err := pallet.RegistrarNuevaCaja(ctx, s.MesaID, correlativoStr)
+			if err != nil {
+				// Solo logear, no detener el proceso
+				log.Printf("⚠️  [Salida %d] Error al enviar caja a Serfruit (Mesa=%d, IDCaja=%s): %v",
+					s.SealerPhysicalID, s.MesaID, correlativoStr, err)
+			} else {
+				log.Printf("✅ [Salida %d] Caja enviada a Serfruit: Mesa=%d, IDCaja=%s",
+					s.SealerPhysicalID, s.MesaID, correlativoStr)
 			}
 		}
 	}

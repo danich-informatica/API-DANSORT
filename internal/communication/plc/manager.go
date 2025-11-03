@@ -440,15 +440,15 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		variant := ua.MustVariant(laneNumber) // laneNumber ya es int16
 		inputArgs := []*ua.Variant{variant}
 
-		// 🔁 REINTENTOS: Hasta 2 intentos para manejar errores de sesión OPC UA
-		maxRetries := 2
+		// 🔁 REINTENTOS: Hasta 3 intentos con política del PLC (25ms entre intentos)
+		maxRetries := 3
 		var outputValues []interface{}
 		var lastErr error
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			if attempt > 1 {
 				logTs("🔄 [Sorter %d] Reintento %d/%d para Lane %d...", sorterID, attempt, maxRetries, laneNumber)
-				time.Sleep(2 * time.Second) // Esperar antes de reintentar
+				time.Sleep(25 * time.Millisecond) // Política del PLC: 25ms entre reintentos
 			}
 
 			outputValues, lastErr = m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
@@ -457,25 +457,26 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 			if lastErr == nil {
 				// Validar que hay output (algunos PLCs retornan valores de confirmación)
 				if len(outputValues) > 0 {
-					logTs("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
+					logTs("✅ [Sorter %d] Método ejecutado - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
 				} else {
-					logTs("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado (sin output)", sorterID, laneNumber)
+					logTs("✅ [Sorter %d] Método ejecutado - Lane %d asignado (sin output)", sorterID, laneNumber)
 				}
 				return nil
 			}
 
-			// ⚠️  ERROR: Si es el primer intento y es error de sesión, reintentar
-			if attempt == 1 && isSessionError(lastErr) {
-				logTs("⚠️  [Sorter %d] Error de sesión OPC UA detectado, reintentando...", sorterID)
-				continue
+			// ⚠️ ERROR DE SESIÓN: Reintentar en cualquier intento
+			if isSessionError(lastErr) {
+				logTs("⚠️ [Sorter %d] Error de sesión OPC UA en intento %d/%d, reintentando...", sorterID, attempt, maxRetries)
+				continue // Continuar al siguiente intento
 			}
 
-			// ❌ ERROR: No es error de sesión o ya agotamos reintentos
+			// ❌ ERROR NO RECUPERABLE: Salir inmediatamente
+			logTs("❌ [Sorter %d] Error no recuperable en intento %d: %v", sorterID, attempt, lastErr)
 			break
 		}
 
-		// Si llegamos aquí, todos los intentos fallaron
-		logTs("❌ [Sorter %d] Método falló después de %d intentos: %v", sorterID, maxRetries, lastErr)
+		// Si llegamos aquí, todos los intentos fallaron - ignorar envío según política del PLC
+		logTs("❌ [Sorter %d] Lane %d NO asignado después de %d intentos - IGNORADO", sorterID, laneNumber, maxRetries)
 		return fmt.Errorf("error llamando método PLC para lane %d en sorter %d (intentos: %d): %w", laneNumber, sorterID, maxRetries, lastErr)
 	}
 

@@ -206,13 +206,44 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 	log.Printf("📋 Sorter #%d: Creando orden en mesa %d: %d palés × %d cajas (envase: %s, palé: %s)",
 		s.ID, salida.MesaID, orden.NumeroPales, orden.CajasPerPale, orden.CodigoTipoEnvase, orden.CodigoTipoPale)
 
+	// 1. Enviar orden a Serfruit
 	err := client.CrearOrdenFabricacion(ctx, salida.MesaID, orden)
 	if err != nil {
 		log.Printf("❌ Sorter #%d: Error al crear orden en mesa %d: %v", s.ID, salida.MesaID, err)
 		return
 	}
 
-	log.Printf("✅ Sorter #%d: Orden de fabricación creada exitosamente en mesa %d", s.ID, salida.MesaID)
+	log.Printf("✅ Sorter #%d: Orden de fabricación creada exitosamente en mesa %d (Serfruit)", s.ID, salida.MesaID)
+
+	// 2. Insertar orden en PostgreSQL y obtener ID
+	if s.dbManager != nil {
+		// Type assertion para acceder al método InsertOrdenFabricacion
+		type OrdenInserter interface {
+			InsertOrdenFabricacion(ctx context.Context, mesaID, numeroPales, cajasPerPale, cajasPerCapa int, codigoEnvase, codigoPale string, idProgramaFlejado int) (int, error)
+		}
+
+		if psql, ok := s.dbManager.(OrdenInserter); ok {
+			ordenID, err := psql.InsertOrdenFabricacion(
+				ctx,
+				salida.MesaID,
+				orden.NumeroPales,
+				orden.CajasPerPale,
+				orden.CajasPerCapa,
+				orden.CodigoTipoEnvase,
+				orden.CodigoTipoPale,
+				orden.IDProgramaFlejado,
+			)
+
+			if err != nil {
+				// Solo logear el error, no detener el proceso
+				log.Printf("⚠️  Sorter #%d: Error al registrar orden en PostgreSQL (mesa %d): %v", s.ID, salida.MesaID, err)
+			} else {
+				// Guardar ID de orden en la salida
+				salida.IDOrdenActiva = ordenID
+				log.Printf("✅ Sorter #%d: Orden ID=%d registrada en PostgreSQL y guardada en salida #%d", s.ID, ordenID, salida.ID)
+			}
+		}
+	}
 }
 
 // RemoveSKUFromSalida elimina una SKU específica de una salida
@@ -263,7 +294,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 			break
 		}
 	}
-
+	
 	log.Printf("🗑️  Sorter #%d: SKU '%s' (ID=%d) eliminada de salida '%s' (ID=%d)",
 		s.ID, removedSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID)
 

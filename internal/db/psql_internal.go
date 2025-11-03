@@ -255,6 +255,33 @@ func (m *PostgresManager) InsertMesa(ctx context.Context, mesaID int, salidaID i
 	return nil
 }
 
+// InsertOrdenFabricacion inserta una orden de fabricación en PostgreSQL y retorna el ID generado
+func (m *PostgresManager) InsertOrdenFabricacion(ctx context.Context, mesaID, numeroPales, cajasPerPale, cajasPerCapa int, codigoEnvase, codigoPale string, idProgramaFlejado int) (int, error) {
+	if m == nil || m.pool == nil {
+		return 0, fmt.Errorf("manager no inicializado")
+	}
+
+	var ordenID int
+	err := m.pool.QueryRow(ctx, INSERT_ORDEN_FABRICACION_INTERNAL_DB,
+		mesaID,
+		numeroPales,
+		cajasPerPale,
+		cajasPerCapa,
+		codigoEnvase,
+		codigoPale,
+		idProgramaFlejado,
+	).Scan(&ordenID)
+
+	if err != nil {
+		return 0, fmt.Errorf("error al insertar orden de fabricación: %w", err)
+	}
+
+	log.Printf("✅ Orden de fabricación ID=%d insertada en PostgreSQL (mesa=%d, palés=%d, cajas/palé=%d)",
+		ordenID, mesaID, numeroPales, cajasPerPale)
+
+	return ordenID, nil
+}
+
 func (m *PostgresManager) GetActiveSKUs(ctx context.Context) ([]models.SKU, error) {
 	if m == nil || m.pool == nil {
 		return nil, fmt.Errorf("manager no inicializado")

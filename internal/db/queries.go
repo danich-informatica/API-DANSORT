@@ -42,6 +42,20 @@ const INSERT_MESA_INTERNAL_DB = `
 	ON CONFLICT (idmesa) DO NOTHING
 `
 
+const INSERT_ORDEN_FABRICACION_INTERNAL_DB = `
+	INSERT INTO orden_fabricacion (
+		id_mesa,
+		numeropales,
+		cajasporpale,
+		cajasporcapa,
+		codigoenvase,
+		codigopale,
+		idprogramaflejado,
+		fecha_orden
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+	RETURNING id
+`
+
 // Query para obtener datos de orden de fabricación desde vista V_Danish en FX_Sync
 const SELECT_V_DANISH_BY_CODIGO_EMBALAJE = `
 	SELECT 
