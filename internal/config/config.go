@@ -139,6 +139,7 @@ type Salida struct {
 	Tipo       string          `yaml:"tipo"`        // "manual", "automatico", "automatica", "descarte"
 	PhysicalID int             `yaml:"physical_id"` // ID físico relativo del sorter (1, 2, 3, etc.)
 	MesaID     int             `yaml:"mesa_id"`     // ID de la mesa de paletizado (solo para salidas automáticas)
+	CognexID   int             `yaml:"cognex_id"`   // ID de la cámara Cognex DataMatrix asignada a esta salida
 	BatchSize  int             `yaml:"batch_size"`  // Tamaño del lote para balance round-robin
 	PLC        SalidaPLCConfig `yaml:"plc"`
 }

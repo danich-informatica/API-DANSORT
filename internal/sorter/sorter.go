@@ -13,12 +13,13 @@ import (
 
 // Sorter representa un sistema sorter con sus salidas y configuración
 type Sorter struct {
-	ID            int                       `json:"id"`
-	Ubicacion     string                    `json:"ubicacion"`
-	PLCInputNode  string                    `json:"plc_input_node"`
-	PLCOutputNode string                    `json:"plc_output_node"`
-	Salidas       []shared.Salida           `json:"salidas"`
-	Cognex        *listeners.CognexListener `json:"cognex"`
+	ID            int                               `json:"id"`
+	Ubicacion     string                            `json:"ubicacion"`
+	PLCInputNode  string                            `json:"plc_input_node"`
+	PLCOutputNode string                            `json:"plc_output_node"`
+	Salidas       []shared.Salida                   `json:"salidas"`
+	Cognex        *listeners.CognexListener         `json:"cognex"` // Cognex principal para QR/SKU
+	CognexDevices map[int]*listeners.CognexListener `json:"-"`      // Múltiples cámaras DataMatrix (key=cognexID)
 	ctx           context.Context
 	cancel        context.CancelFunc
 
@@ -89,7 +90,7 @@ func (s *Sorter) GetSalidas() []shared.Salida {
 }
 
 // GetNewSorter crea una nueva instancia de Sorter
-func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, paletHost string, paletPort int, salidas []shared.Salida, cognex *listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}, plcManager *plc.Manager, fxSyncManager interface{}) *Sorter {
+func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, paletHost string, paletPort int, salidas []shared.Salida, cognex *listeners.CognexListener, cognexDevices map[int]*listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}, plcManager *plc.Manager, fxSyncManager interface{}) *Sorter {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	channelMgr := shared.GetChannelManager()
@@ -106,6 +107,7 @@ func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode s
 		PaletPort:           paletPort,
 		Salidas:             salidas,
 		Cognex:              cognex,
+		CognexDevices:       cognexDevices, // Mapa de cámaras DataMatrix
 		ctx:                 ctx,
 		cancel:              cancel,
 		plcManager:          plcManager,
@@ -149,14 +151,22 @@ func (s *Sorter) Start() error {
 	// Iniciar procesamiento de eventos QR/SKU (canal original)
 	go s.procesarEventosCognex()
 
-	// Iniciar procesamiento de eventos DataMatrix (nuevo canal dedicado)
-	go s.procesarEventosDataMatrix()
+	// Iniciar listeners de cámaras DataMatrix
+	for cognexID, cognexListener := range s.CognexDevices {
+		log.Printf("🎯 [Sorter #%d] Iniciando cámara DataMatrix Cognex #%d", s.ID, cognexID)
+		if err := cognexListener.Start(); err != nil {
+			log.Printf("❌ [Sorter #%d] Error iniciando Cognex #%d: %v", s.ID, cognexID, err)
+			return err
+		}
+		// Iniciar procesamiento de eventos DataMatrix para cada cámara
+		go s.procesarEventosDataMatrixCognex(cognexListener)
+	}
 
 	if s.plcManager != nil {
 		s.startPLCSubscriptions()
 	}
 
-	log.Printf("✅ Sorter #%d: Iniciado y escuchando eventos (QR/SKU + DataMatrix)", s.ID)
+	log.Printf("✅ Sorter #%d: Iniciado y escuchando eventos (QR/SKU + %d cámaras DataMatrix)", s.ID, len(s.CognexDevices))
 
 	return nil
 }

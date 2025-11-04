@@ -207,7 +207,7 @@ func main() {
 				log.Printf("     ✅ Sorter #%d insertado en DB (o ya existía)", sorterCfg.ID)
 			}
 
-			// Buscar el CognexListener correspondiente (asumiendo 1 Cognex por sorter)
+			// Buscar el CognexListener correspondiente para QR/SKU (asumiendo 1 Cognex principal por sorter)
 			var cognexListener *listeners.CognexListener
 			if sorterCfg.ID > 0 && sorterCfg.ID <= len(cognexListeners) {
 				cognexListener = cognexListeners[sorterCfg.ID-1]
@@ -216,6 +216,36 @@ func main() {
 			if cognexListener == nil && len(cognexListeners) > 0 {
 				log.Printf("     ⚠️  Usando primer Cognex disponible para Sorter #%d", sorterCfg.ID)
 				cognexListener = cognexListeners[0]
+			}
+
+			// Crear mapa de cámaras DataMatrix para este sorter (basado en cognex_id en salidas)
+			cognexDevices := make(map[int]*listeners.CognexListener)
+			for _, salidaCfg := range sorterCfg.Salidas {
+				if salidaCfg.CognexID > 0 {
+					// Esta salida tiene una cámara DataMatrix asignada
+					// Buscar la configuración del Cognex correspondiente
+					for _, cognexCfg := range cfg.CognexDevices {
+						if cognexCfg.ID == salidaCfg.CognexID && cognexCfg.ScanMethod == "DATAMATRIX" {
+							// Crear listener solo si no existe ya en el mapa
+							if _, exists := cognexDevices[cognexCfg.ID]; !exists {
+								dmListener := listeners.NewCognexListener(
+									cognexCfg.ID,
+									cognexCfg.Host,
+									cognexCfg.Port,
+									cognexCfg.ScanMethod,
+									dbManager,
+								)
+								cognexDevices[cognexCfg.ID] = dmListener
+								log.Printf("     📷 Cámara DataMatrix Cognex #%d → Salida #%d (%s:%d)",
+									cognexCfg.ID, salidaCfg.ID, cognexCfg.Host, cognexCfg.Port)
+							}
+							break
+						}
+					}
+				}
+			}
+			if len(cognexDevices) > 0 {
+				log.Printf("     ✅ %d cámara(s) DataMatrix configurada(s) para Sorter #%d", len(cognexDevices), sorterCfg.ID)
 			}
 
 			// Crear salidas desde config YAML e insertarlas en la base de datos
@@ -236,12 +266,12 @@ func main() {
 					tipo = "automatico"
 				}
 
-				// Crear salida con todos los parámetros incluyendo CognexID si está disponible
+				// Crear salida con todos los parámetros incluyendo CognexID desde config
 				var salida shared.Salida
-				if cognexListener != nil {
-					// Obtener el ID del Cognex del listener
-					cognexID := sorterCfg.ID // Asumimos que el CognexID coincide con el SorterID
-					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, cognexID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize)
+				if salidaCfg.CognexID > 0 {
+					// Usar el CognexID especificado en el config
+					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, salidaCfg.CognexID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize)
+					log.Printf("           📷 CognexID=%d asignado a salida", salidaCfg.CognexID)
 				} else {
 					salida = shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize)
 				}
@@ -330,7 +360,7 @@ func main() {
 				log.Printf("        ↳ Output Node: %s", sorterCfg.PLC.OutputNodeID)
 			}
 
-			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Name, sorterCfg.PLC.InputNodeID, sorterCfg.PLC.OutputNodeID, sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager, plcManager, fxSyncManager)
+			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Name, sorterCfg.PLC.InputNodeID, sorterCfg.PLC.OutputNodeID, sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port, salidas, cognexListener, cognexDevices, httpService.GetWebSocketHub(), dbManager, plcManager, fxSyncManager)
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)

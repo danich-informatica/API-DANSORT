@@ -37,8 +37,8 @@ type NuevaCajaRequest struct {
 // OrdenFabricacionRequest representa la solicitud para crear una orden de fabricación
 type OrdenFabricacionRequest struct {
 	NumeroPales       int    `json:"numeroPales"`       // Cantidad de palés a hacer
-	CajasPerPale      int    `json:"cajasPerPale"`      // Número de cajas por palé
-	CajasPerCapa      int    `json:"cajasPerCapa"`      // Cuántas cajas habrá en cada capa
+	CajasPerPale      int    `json:"cajasPorPale"`      // Número de cajas por palé
+	CajasPerCapa      int    `json:"cajasPorCapa"`      // Cuántas cajas habrá en cada capa
 	CodigoTipoEnvase  string `json:"codigoTipoEnvase"`  // Código del tipo de envase
 	CodigoTipoPale    string `json:"codigoTipoPale"`    // Código del tipo de palé
 	IDProgramaFlejado int    `json:"idProgramaFlejado"` // ID del programa de flejado

@@ -78,6 +78,11 @@ func (c *CognexListener) String() string {
 	return fmt.Sprintf("CognexListener{remote: %s, port: %d}", c.remoteHost, c.port)
 }
 
+// GetID retorna el ID del Cognex
+func (c *CognexListener) GetID() int {
+	return c.id
+}
+
 // insertWorker procesa inserciones a la base de datos de forma asíncrona
 func (c *CognexListener) insertWorker() {
 	for {
@@ -431,7 +436,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		case <-time.After(2 * time.Second):
 			log.Printf("   ⚠️  Timeout enviando evento DataMatrix (canal lleno?)")
 		}
-		
+
 		// Enviar confirmación inmediata a la cámara
 		response := "ACK\r\n"
 		if _, err := conn.Write([]byte(response)); err != nil {

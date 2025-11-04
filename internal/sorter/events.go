@@ -38,9 +38,13 @@ func (s *Sorter) procesarEventosCognex() {
 	}
 }
 
-// procesarEventosDataMatrix procesa eventos de lectura DataMatrix de Cognex (flujo separado)
+// procesarEventosDataMatrix procesa eventos de lectura DataMatrix de Cognex principal (legacy)
 func (s *Sorter) procesarEventosDataMatrix() {
-	log.Printf("📊 [Sorter #%d] Escuchando eventos DataMatrix de Cognex...", s.ID)
+	if s.Cognex == nil {
+		return
+	}
+
+	log.Printf("📊 [Sorter #%d] Escuchando eventos DataMatrix de Cognex principal...", s.ID)
 
 	for {
 		select {
@@ -55,6 +59,28 @@ func (s *Sorter) procesarEventosDataMatrix() {
 			}
 
 			log.Printf("📥 [Sorter #%d] DataMatrix recibido: %s", s.ID, dmEvent.String())
+			s.processDataMatrixEvent(dmEvent)
+		}
+	}
+}
+
+// procesarEventosDataMatrixCognex procesa eventos de una cámara DataMatrix específica
+func (s *Sorter) procesarEventosDataMatrixCognex(cognexListener *listeners.CognexListener) {
+	log.Printf("📊 [Sorter #%d] Escuchando eventos DataMatrix de Cognex #%d...", s.ID, cognexListener.GetID())
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			log.Printf("🛑 [Sorter #%d] Deteniendo procesamiento DataMatrix Cognex #%d", s.ID, cognexListener.GetID())
+			return
+
+		case dmEvent, ok := <-cognexListener.DataMatrixChan:
+			if !ok {
+				log.Printf("⚠️  [Sorter #%d] Canal DataMatrix cerrado para Cognex #%d", s.ID, cognexListener.GetID())
+				return
+			}
+
+			log.Printf("📥 [Sorter #%d] DataMatrix de Cognex #%d: %s", s.ID, cognexListener.GetID(), dmEvent.String())
 			s.processDataMatrixEvent(dmEvent)
 		}
 	}
