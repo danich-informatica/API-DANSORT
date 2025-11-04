@@ -433,7 +433,7 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		} else {
 			// Fallback: Si no hay trigger configurado, usar sleep fijo
 			log.Printf("⚠️  [Sorter %d] No hay trigger_node_id, usando sleep fijo de 0ms", sorterID)
-			time.Sleep(0 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		}
 
 		// CRÍTICO: El método espera int16 con el número de salida, NO un NodeID
