@@ -27,8 +27,9 @@ type Sorter struct {
 	PaletHost string `json:"palet_host"` // Host del servidor de paletizado
 	PaletPort int    `json:"palet_port"` // Puerto del servidor de paletizado
 
-	plcManager          *plc.Manager
-	fxSyncManager       interface{} // *db.FXSyncManager (interface para evitar import cycle)
+	plcManager          *plc.Manager // Cliente PLC para método AssignLaneToBox
+	plcMonitorManager   *plc.Manager // Cliente PLC para leer/escribir nodos de salidas (opcional)
+	fxSyncManager       interface{}  // *db.FXSyncManager (interface para evitar import cycle)
 	cancelSubscriptions []func()
 	subscriptionMutex   sync.Mutex
 
@@ -90,7 +91,7 @@ func (s *Sorter) GetSalidas() []shared.Salida {
 }
 
 // GetNewSorter crea una nueva instancia de Sorter
-func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, paletHost string, paletPort int, salidas []shared.Salida, cognex *listeners.CognexListener, cognexDevices map[int]*listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}, plcManager *plc.Manager, fxSyncManager interface{}) *Sorter {
+func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode string, paletHost string, paletPort int, salidas []shared.Salida, cognex *listeners.CognexListener, cognexDevices map[int]*listeners.CognexListener, wsHub *listeners.WebSocketHub, dbManager interface{}, plcManager *plc.Manager, plcMonitorManager *plc.Manager, fxSyncManager interface{}) *Sorter {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	channelMgr := shared.GetChannelManager()
@@ -110,7 +111,8 @@ func GetNewSorter(ID int, ubicacion string, plcInputNode string, plcOutputNode s
 		CognexDevices:       cognexDevices, // Mapa de cámaras DataMatrix
 		ctx:                 ctx,
 		cancel:              cancel,
-		plcManager:          plcManager,
+		plcManager:          plcManager,        // Cliente PLC para método
+		plcMonitorManager:   plcMonitorManager, // Cliente PLC para monitoreo (puede ser nil si usa mismo endpoint)
 		fxSyncManager:       fxSyncManager,
 		cancelSubscriptions: make([]func(), 0),
 		skuChannel:          skuChannel,

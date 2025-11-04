@@ -111,13 +111,14 @@ type CognexDevice struct {
 }
 
 type Sorter struct {
-	ID              int                   `yaml:"id"`
-	Name            string                `yaml:"name"`
-	PLCEndpoint     string                `yaml:"plc_endpoint"` // Endpoint OPC UA (ej: "opc.tcp://192.168.120.100:4840")
-	PLC             SorterPLCConfig       `yaml:"plc"`
-	PaletAutomatico PaletAutomaticoConfig `yaml:"palet_automatico"`
-	Salidas         []Salida              `yaml:"salidas"`
-	DefaultSalida   int                   `yaml:"default_salida"`
+	ID                 int                   `yaml:"id"`
+	Name               string                `yaml:"name"`
+	PLCEndpoint        string                `yaml:"plc_endpoint"`         // Endpoint OPC UA para método AssignLaneToBox (ej: "opc.tcp://192.168.120.100:4840")
+	PLCMonitorEndpoint string                `yaml:"plc_monitor_endpoint"` // Endpoint OPC UA para leer/escribir nodos de salidas (opcional, si vacío usa PLCEndpoint)
+	PLC                SorterPLCConfig       `yaml:"plc"`
+	PaletAutomatico    PaletAutomaticoConfig `yaml:"palet_automatico"`
+	Salidas            []Salida              `yaml:"salidas"`
+	DefaultSalida      int                   `yaml:"default_salida"`
 }
 
 type PaletAutomaticoConfig struct {

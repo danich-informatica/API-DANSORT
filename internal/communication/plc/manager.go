@@ -40,6 +40,10 @@ func (m *Manager) ConnectAll(ctx context.Context) error {
 		if sorter.PLCEndpoint != "" {
 			endpoints[sorter.PLCEndpoint] = true
 		}
+		// Agregar endpoint de monitoreo si existe y es diferente
+		if sorter.PLCMonitorEndpoint != "" && sorter.PLCMonitorEndpoint != sorter.PLCEndpoint {
+			endpoints[sorter.PLCMonitorEndpoint] = true
+		}
 	}
 
 	if len(endpoints) == 0 {
@@ -97,7 +101,7 @@ func (m *Manager) CloseAll(ctx context.Context) {
 	m.clients = make(map[string]*Client)
 }
 
-// getClientForSorter busca el cliente OPC UA para un sorter específico.
+// getClientForSorter busca el cliente OPC UA para método (AssignLaneToBox) de un sorter específico.
 func (m *Manager) getClientForSorter(sorterID int) (*Client, *config.Sorter, error) {
 	var sorterCfg *config.Sorter
 	for i := range m.config.Sorters {
@@ -119,9 +123,49 @@ func (m *Manager) getClientForSorter(sorterID int) (*Client, *config.Sorter, err
 	return client, sorterCfg, nil
 }
 
+// getMonitorClientForSorter busca el cliente OPC UA para monitoreo (leer/escribir nodos de salidas).
+// Si no existe PLCMonitorEndpoint configurado, retorna el cliente del método.
+func (m *Manager) getMonitorClientForSorter(sorterID int) (*Client, *config.Sorter, error) {
+	var sorterCfg *config.Sorter
+	for i := range m.config.Sorters {
+		if m.config.Sorters[i].ID == sorterID {
+			sorterCfg = &m.config.Sorters[i]
+			break
+		}
+	}
+	if sorterCfg == nil {
+		return nil, nil, fmt.Errorf("sorter %d no encontrado", sorterID)
+	}
+
+	m.clientsMutex.RLock()
+	defer m.clientsMutex.RUnlock()
+
+	// Si tiene endpoint de monitoreo separado, usarlo
+	endpoint := sorterCfg.PLCEndpoint
+	if sorterCfg.PLCMonitorEndpoint != "" {
+		endpoint = sorterCfg.PLCMonitorEndpoint
+	}
+
+	client, exists := m.clients[endpoint]
+	if !exists {
+		return nil, nil, fmt.Errorf("no hay cliente conectado para el endpoint de monitoreo %s del sorter %d", endpoint, sorterID)
+	}
+	return client, sorterCfg, nil
+}
+
+// readPLCNode lee un nodo del PLC (no de salidas) usando el cliente de método.
+// Útil para leer trigger_node_id y otros nodos del PLC.
+func (m *Manager) readPLCNode(ctx context.Context, sorterID int, nodeID string) (*NodeInfo, error) {
+	client, _, err := m.getClientForSorter(sorterID)
+	if err != nil {
+		return nil, err
+	}
+	return client.ReadNode(ctx, nodeID)
+}
+
 // ReadNode lee un nodo específico de un sorter
 func (m *Manager) ReadNode(ctx context.Context, sorterID int, nodeID string) (*NodeInfo, error) {
-	client, _, err := m.getClientForSorter(sorterID)
+	client, _, err := m.getMonitorClientForSorter(sorterID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,16 +174,16 @@ func (m *Manager) ReadNode(ctx context.Context, sorterID int, nodeID string) (*N
 
 // WriteNode escribe en un nodo específico de un sorter
 func (m *Manager) WriteNode(ctx context.Context, sorterID int, nodeID string, value interface{}) error {
-	client, _, err := m.getClientForSorter(sorterID)
+	client, _, err := m.getMonitorClientForSorter(sorterID)
 	if err != nil {
 		return err
 	}
 	return client.WriteNode(ctx, nodeID, value)
 }
 
-// WriteNodeTyped escribe en un nodo con conversión de tipo explícita (como dantrack)
+// WriteNodeTyped escribe en un nodo con un tipo de dato específico en un sorter (usa cliente de monitoreo)
 func (m *Manager) WriteNodeTyped(ctx context.Context, sorterID int, nodeID string, value interface{}, dataType string) error {
-	client, _, err := m.getClientForSorter(sorterID)
+	client, _, err := m.getMonitorClientForSorter(sorterID)
 	if err != nil {
 		return err
 	}
@@ -206,42 +250,69 @@ func (m *Manager) ReadAllSorterNodes(ctx context.Context) ([]SorterNodes, error)
 	}
 
 	for _, sorterCfg := range m.config.Sorters {
-		client, ok := m.clients[sorterCfg.PLCEndpoint]
+		methodClient, ok := m.clients[sorterCfg.PLCEndpoint]
 		if !ok {
 			log.Printf("Advertencia: No se encontró cliente para el endpoint %s del sorter %d", sorterCfg.PLCEndpoint, sorterCfg.ID)
 			continue
 		}
 
-		// 1. Recopilar todos los NodeIDs y sus metadatos para este sorter
-		var metas []nodeMeta
+		// Determinar si hay un endpoint separado para monitoreo
+		monitorEndpoint := sorterCfg.PLCMonitorEndpoint
+		if monitorEndpoint == "" {
+			monitorEndpoint = sorterCfg.PLCEndpoint // Usar mismo endpoint si no está configurado
+		}
+
+		monitorClient, ok := m.clients[monitorEndpoint]
+		if !ok {
+			log.Printf("Advertencia: No se encontró cliente para el endpoint de monitoreo %s del sorter %d", monitorEndpoint, sorterCfg.ID)
+			monitorClient = methodClient // Fallback al cliente de método
+		}
+
+		// 1. Recopilar nodos del PLC (usan methodClient)
+		var plcMetas []nodeMeta
 		if sorterCfg.PLC.InputNodeID != "" {
-			metas = append(metas, nodeMeta{sorterCfg.PLC.InputNodeID, "Input", true, -1})
+			plcMetas = append(plcMetas, nodeMeta{sorterCfg.PLC.InputNodeID, "Input", true, -1})
 		}
 		if sorterCfg.PLC.OutputNodeID != "" {
-			metas = append(metas, nodeMeta{sorterCfg.PLC.OutputNodeID, "Output", true, -1})
+			plcMetas = append(plcMetas, nodeMeta{sorterCfg.PLC.OutputNodeID, "Output", true, -1})
 		}
+
+		// 2. Recopilar nodos de salidas (usan monitorClient)
+		var salidaMetas []nodeMeta
 		for _, salidaCfg := range sorterCfg.Salidas {
 			if salidaCfg.PLC.EstadoNodeID != "" {
-				metas = append(metas, nodeMeta{salidaCfg.PLC.EstadoNodeID, "Estado", false, salidaCfg.ID})
+				salidaMetas = append(salidaMetas, nodeMeta{salidaCfg.PLC.EstadoNodeID, "Estado", false, salidaCfg.ID})
 			}
 			if salidaCfg.PLC.BloqueoNodeID != "" {
-				metas = append(metas, nodeMeta{salidaCfg.PLC.BloqueoNodeID, "Bloqueo", false, salidaCfg.ID})
+				salidaMetas = append(salidaMetas, nodeMeta{salidaCfg.PLC.BloqueoNodeID, "Bloqueo", false, salidaCfg.ID})
 			}
 		}
 
-		if len(metas) == 0 {
+		if len(plcMetas) == 0 && len(salidaMetas) == 0 {
 			continue // No hay nodos que leer para este sorter
 		}
 
-		nodeIDs := make([]string, len(metas))
-		for i, meta := range metas {
-			nodeIDs[i] = meta.id
+		// 3. Leer nodos del PLC (método)
+		var plcNodeInfos []*NodeInfo
+		if len(plcMetas) > 0 {
+			plcNodeIDs := make([]string, len(plcMetas))
+			for i, meta := range plcMetas {
+				plcNodeIDs[i] = meta.id
+			}
+			plcNodeInfos, _ = methodClient.ReadNodes(ctx, plcNodeIDs)
 		}
 
-		// 2. Leer todos los nodos en una sola llamada
-		nodeInfos, _ := client.ReadNodes(ctx, nodeIDs) // Ignoramos el error general para procesar resultados parciales
+		// 4. Leer nodos de salidas (monitoreo)
+		var salidaNodeInfos []*NodeInfo
+		if len(salidaMetas) > 0 {
+			salidaNodeIDs := make([]string, len(salidaMetas))
+			for i, meta := range salidaMetas {
+				salidaNodeIDs[i] = meta.id
+			}
+			salidaNodeInfos, _ = monitorClient.ReadNodes(ctx, salidaNodeIDs)
+		}
 
-		// 3. Construir la estructura de datos con los resultados
+		// 5. Construir la estructura de datos con los resultados
 		sorterData := SorterNodes{
 			SorterID:   sorterCfg.ID,
 			SorterName: sorterCfg.Name,
@@ -260,14 +331,22 @@ func (m *Manager) ReadAllSorterNodes(ctx context.Context) ([]SorterNodes, error)
 			salidaMap[s.ID] = &sorterData.Salidas[i]
 		}
 
-		for i, meta := range metas {
-			info := nodeInfos[i] // info es un puntero a NodeInfo
-			info.Name = meta.name
-			info.IsPLCNode = meta.isPLCNode
-
-			if meta.isPLCNode {
+		// Procesar nodos del PLC
+		for i, meta := range plcMetas {
+			if i < len(plcNodeInfos) {
+				info := plcNodeInfos[i]
+				info.Name = meta.name
+				info.IsPLCNode = true
 				sorterData.Nodes = append(sorterData.Nodes, *info)
-			} else {
+			}
+		}
+
+		// Procesar nodos de salidas
+		for i, meta := range salidaMetas {
+			if i < len(salidaNodeInfos) {
+				info := salidaNodeInfos[i]
+				info.Name = meta.name
+				info.IsPLCNode = false
 				if salida, ok := salidaMap[meta.salidaID]; ok {
 					salida.Nodes = append(salida.Nodes, *info)
 				}
@@ -294,11 +373,14 @@ func (m *Manager) GetCacheStats() map[string]int {
 
 // MonitorNode crea una suscripción para monitorear cambios en un nodo de un sorter específico
 func (m *Manager) MonitorNode(ctx context.Context, sorterID int, nodeID string, interval time.Duration) (<-chan *NodeInfo, func(), error) {
-	// Buscar endpoint del sorter
+	// Buscar endpoint del sorter (usa cliente de monitoreo)
 	var endpoint string
 	for _, sorter := range m.config.Sorters {
 		if sorter.ID == sorterID {
-			endpoint = sorter.PLCEndpoint
+			endpoint = sorter.PLCMonitorEndpoint
+			if endpoint == "" {
+				endpoint = sorter.PLCEndpoint // Fallback al endpoint de método
+			}
 			break
 		}
 	}
@@ -321,11 +403,14 @@ func (m *Manager) MonitorNode(ctx context.Context, sorterID int, nodeID string, 
 // MonitorMultipleNodes crea UNA suscripción para monitorear MÚLTIPLES nodos de un sorter
 // Esto evita el error "StatusBadTooManySubscriptions"
 func (m *Manager) MonitorMultipleNodes(ctx context.Context, sorterID int, nodeIDs []string, interval time.Duration) (<-chan *NodeInfo, func(), error) {
-	// Buscar endpoint del sorter
+	// Buscar endpoint del sorter (usa cliente de monitoreo)
 	var endpoint string
 	for _, sorter := range m.config.Sorters {
 		if sorter.ID == sorterID {
-			endpoint = sorter.PLCEndpoint
+			endpoint = sorter.PLCMonitorEndpoint
+			if endpoint == "" {
+				endpoint = sorter.PLCEndpoint // Fallback al endpoint de método
+			}
 			break
 		}
 	}
@@ -410,8 +495,8 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 					triggerReady = true
 
 				case <-ticker.C:
-					// Leer el estado actual del trigger
-					nodeInfo, err := m.ReadNode(ctx, sorterID, sorterConfig.PLC.TriggerNodeID)
+					// Leer el estado actual del trigger (usa cliente de método PLC)
+					nodeInfo, err := m.readPLCNode(ctx, sorterID, sorterConfig.PLC.TriggerNodeID)
 					if err != nil {
 						log.Printf("⚠️  [Sorter %d] Error leyendo trigger: %v", sorterID, err)
 						continue // Seguir intentando
@@ -433,7 +518,7 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		} else {
 			// Fallback: Si no hay trigger configurado, usar sleep fijo
 			log.Printf("⚠️  [Sorter %d] No hay trigger_node_id, usando sleep fijo de 0ms", sorterID)
-			time.Sleep(500 * time.Millisecond)
+			//time.Sleep(500 * time.Millisecond)
 		}
 
 		// CRÍTICO: El método espera int16 con el número de salida, NO un NodeID
@@ -524,8 +609,8 @@ func (m *Manager) WaitForSorterReady(ctx context.Context, sorterID int, timeout 
 			return fmt.Errorf("timeout esperando trigger del sorter %d después de %v", sorterID, elapsed)
 
 		case <-ticker.C:
-			// Leer el valor del trigger
-			nodeInfo, err := m.ReadNode(ctx, sorterID, sorterConfig.PLC.TriggerNodeID)
+			// Leer el valor del trigger (usa cliente de método PLC)
+			nodeInfo, err := m.readPLCNode(ctx, sorterID, sorterConfig.PLC.TriggerNodeID)
 			if err != nil {
 				log.Printf("⚠️  [Sorter %d] Error leyendo trigger: %v", sorterID, err)
 				continue // Reintentar en el siguiente tick
