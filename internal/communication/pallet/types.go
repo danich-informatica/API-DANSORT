@@ -31,7 +31,7 @@ type DatosPaletizado struct {
 
 // NuevaCajaRequest representa la solicitud para registrar una nueva caja
 type NuevaCajaRequest struct {
-	IDCaja string `json:"idCaja"` // Código de la caja leída
+	IDCaja int `json:"idCaja"` // Código de la caja leída
 }
 
 // OrdenFabricacionRequest representa la solicitud para crear una orden de fabricación

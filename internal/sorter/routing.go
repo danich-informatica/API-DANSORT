@@ -52,6 +52,10 @@ func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
 		if todasLasSalidas[0].IsAvailable() {
 			return todasLasSalidas[0]
 		}
+		// 🚨 LOG CRÍTICO: Por qué la salida NO está disponible
+		log.Printf("🚨 [Sorter %d] Salida ID=%d NO disponible para SKU '%s' (Estado=%d, Bloqueo=%t)",
+			s.ID, todasLasSalidas[0].ID, sku,
+			todasLasSalidas[0].GetEstado(), todasLasSalidas[0].GetBloqueo())
 		return nil
 	}
 
@@ -94,10 +98,14 @@ func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
 
 			return salida
 		}
+		// 🚨 LOG: Por qué esta salida no está disponible
+		log.Printf("⚠️  [Sorter %d] Salida ID=%d NO disponible (intento %d/%d) para SKU '%s' (Estado=%d, Bloqueo=%t)",
+			s.ID, salida.ID, attempts+1, len(todasLasSalidas), sku,
+			salida.GetEstado(), salida.GetBloqueo())
 	}
 
 	// Ninguna salida disponible
-	log.Printf("[Sorter %d] ⚠️ SKU '%s': Ninguna de las %d salidas está disponible", s.ID, sku, len(todasLasSalidas))
+	log.Printf("🚨 [Sorter %d] SKU '%s': Ninguna de las %d salidas está disponible (todas bloqueadas/llenas)", s.ID, sku, len(todasLasSalidas))
 	return nil
 } // getSalidaDescarte obtiene salida de descarte como último recurso
 // SOLO usa la salida con SKU "REJECT" asignado, no cualquier salida manual

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -109,8 +110,23 @@ func (c *Client) GetEstadoMesa(ctx context.Context, idMesa int) ([]EstadoMesa, e
 func (c *Client) RegistrarNuevaCaja(ctx context.Context, idMesa int, idCaja string) error {
 	url := fmt.Sprintf("%s%s?idMesa=%d", c.baseURL, EndpointPostNuevaCaja, idMesa)
 
+	// Parsear el código de caja a int
+	// Remover prefijos comunes primero
+	idCajaClean := idCaja
+	if len(idCaja) > 2 {
+		// Intentar remover prefijos DM, QR, etc.
+		if idCaja[:2] == "DM" || idCaja[:2] == "QR" {
+			idCajaClean = idCaja[2:]
+		}
+	}
+
+	idCajaInt, err := strconv.Atoi(idCajaClean)
+	if err != nil {
+		return fmt.Errorf("error parseando idCaja '%s' a int: %w", idCaja, err)
+	}
+
 	payload := NuevaCajaRequest{
-		IDCaja: idCaja,
+		IDCaja: idCajaInt,
 	}
 
 	jsonData, err := json.Marshal(payload)
