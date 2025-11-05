@@ -181,9 +181,9 @@ func (cs *CognexSimulator) Start() error {
 		return fmt.Errorf("simulador ya está corriendo")
 	}
 
-	// Conectar al listener
-	address := fmt.Sprintf("%s:%d", cs.Host, cs.Port)
-	log.Printf("📡 [Cognex #%d] Conectando a %s...", cs.ID, address)
+	// Conectar al listener (siempre localhost porque el simulador corre en el mismo servidor que api-greenex)
+	address := fmt.Sprintf("localhost:%d", cs.Port)
+	log.Printf("📡 [Cognex #%d] Conectando a %s (cámara virtual: %s)...", cs.ID, address, cs.Host)
 
 	conn, err := net.Dial("tcp", address)
 	if err != nil {

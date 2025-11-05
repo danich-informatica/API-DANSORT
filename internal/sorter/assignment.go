@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"strings"
 	"time"
 
 	"API-GREENEX/internal/communication/pallet"
@@ -160,8 +161,8 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 			if ofGetter, ok := ofDataRaw.(OFDataGetter); ok {
 				cajasPerPale = ofGetter.GetCajasPerPale()
 				cajasPerCapa = ofGetter.GetCajasPerCapa()
-				codigoTipoEnvase = ofGetter.GetCodigoTipoEnvase()
-				codigoTipoPale = ofGetter.GetCodigoTipoPale()
+				codigoTipoEnvase = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(ofGetter.GetCodigoTipoEnvase(), "\n", ""), "\r", ""))
+				codigoTipoPale = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(ofGetter.GetCodigoTipoPale(), "\n", ""), "\r", ""))
 			} else {
 				// Fallback: usar reflection para extraer campos
 				// Esto funciona con cualquier struct que tenga los campos correctos
@@ -178,8 +179,8 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 
 				cajasPerPale = int(v.FieldByName("CajasPerPale").Int())
 				cajasPerCapa = int(v.FieldByName("CajasPerCapa").Int())
-				codigoTipoEnvase = v.FieldByName("CodigoTipoEnvase").String()
-				codigoTipoPale = v.FieldByName("CodigoTipoPale").String()
+				codigoTipoEnvase = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(v.FieldByName("CodigoTipoEnvase").String(), "\n", ""), "\r", ""))
+				codigoTipoPale = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(v.FieldByName("CodigoTipoPale").String(), "\n", ""), "\r", ""))
 			}
 
 			log.Printf("📊 Sorter #%d: Datos obtenidos de FX_Sync para '%s': %d cajas/palé, %d cajas/capa, envase='%s', palé='%s'",
@@ -294,7 +295,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 			break
 		}
 	}
-	
+
 	log.Printf("🗑️  Sorter #%d: SKU '%s' (ID=%d) eliminada de salida '%s' (ID=%d)",
 		s.ID, removedSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID)
 

@@ -113,6 +113,7 @@ type CognexDevice struct {
 type Sorter struct {
 	ID              int                   `yaml:"id"`
 	Name            string                `yaml:"name"`
+	CognexID        int                   `yaml:"cognex_id"`    // ID de la cámara Cognex QR/SKU principal del sorter
 	PLCEndpoint     string                `yaml:"plc_endpoint"` // Endpoint OPC UA (ej: "opc.tcp://192.168.120.100:4840")
 	PLC             SorterPLCConfig       `yaml:"plc"`
 	PaletAutomatico PaletAutomaticoConfig `yaml:"palet_automatico"`

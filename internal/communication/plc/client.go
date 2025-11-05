@@ -13,10 +13,11 @@ import (
 
 // Client encapsula la conexión a un servidor OPC UA
 type Client struct {
-	endpoint string
-	client   *opcua.Client
-	config   PLCConfig
-	cache    *LRUCache // Cache LRU para lecturas frecuentes
+	endpoint        string
+	client          *opcua.Client
+	config          PLCConfig
+	cache           *LRUCache          // Cache LRU para lecturas frecuentes
+	heartbeatCancel context.CancelFunc // Para detener el heartbeat
 }
 
 // NewClient crea un nuevo cliente OPC UA sin conectar
@@ -30,25 +31,32 @@ func NewClient(config PLCConfig) *Client {
 
 // Connect establece la conexión con el servidor OPC UA y activa la sesión
 func (c *Client) Connect(ctx context.Context) error {
+	t0 := time.Now()
+
 	opts := []opcua.Option{
 		opcua.SecurityMode(ua.MessageSecurityModeNone),
 		opcua.SecurityPolicy(ua.SecurityPolicyURINone),
 		opcua.AutoReconnect(true),
 	}
 
+	t1 := time.Now()
 	client, err := opcua.NewClient(c.endpoint, opts...)
 	if err != nil {
 		return fmt.Errorf("error creando cliente para %s: %w", c.endpoint, err)
 	}
+	log.Printf("⏱️  [Connect] NewClient: %dms", t1.Sub(t0).Milliseconds())
 
+	t2 := time.Now()
 	if err := client.Connect(ctx); err != nil {
 		return fmt.Errorf("error al conectar a %s: %w", c.endpoint, err)
 	}
+	log.Printf("⏱️  [Connect] ⚡ client.Connect(): %dms", time.Since(t2).Milliseconds())
 
 	c.client = client
 
 	// Activar la sesión haciendo una lectura dummy del nodo Server (garantiza sesión activa)
 	// Esto evita el error "StatusBadSessionNotActivated" en operaciones posteriores
+	t3 := time.Now()
 	dummyNodeID, _ := ua.ParseNodeID("i=2253") // Server.ServerStatus node
 	req := &ua.ReadRequest{
 		MaxAge:             2000,
@@ -58,18 +66,63 @@ func (c *Client) Connect(ctx context.Context) error {
 	if _, err := client.Read(ctx, req); err != nil {
 		log.Printf("⚠️ Advertencia: no se pudo activar sesión con lectura dummy: %v", err)
 		// No retornamos error porque la conexión básica funciona
+	} else {
+		log.Printf("⏱️  [Connect] Session activation (dummy read): %dms", time.Since(t3).Milliseconds())
 	}
 
-	log.Printf("✅ Conexión establecida a %s", c.endpoint)
+	// ⚡ NUEVO: Iniciar heartbeat para mantener sesión activa
+	heartbeatCtx, cancel := context.WithCancel(context.Background())
+	c.heartbeatCancel = cancel
+	go c.startHeartbeat(heartbeatCtx, 15*time.Second) // Ping cada 15s
+
+	log.Printf("✅ Conexión establecida a %s (total: %dms)", c.endpoint, time.Since(t0).Milliseconds())
 	return nil
 }
 
 // Close cierra la conexión con el servidor OPC UA
 func (c *Client) Close(ctx context.Context) error {
+	// Detener heartbeat si está activo
+	if c.heartbeatCancel != nil {
+		c.heartbeatCancel()
+	}
+
 	if c.client != nil {
 		return c.client.Close(ctx)
 	}
 	return nil
+}
+
+// startHeartbeat mantiene la sesión activa enviando lecturas periódicas
+func (c *Client) startHeartbeat(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	log.Printf("💓 Heartbeat OPC UA iniciado para %s (intervalo: %v)", c.endpoint, interval)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("🛑 Heartbeat detenido para %s", c.endpoint)
+			return
+
+		case <-ticker.C:
+			// Leer Server.ServerStatus para mantener sesión activa
+			dummyNodeID, _ := ua.ParseNodeID("i=2253") // Server.ServerStatus
+			req := &ua.ReadRequest{
+				MaxAge:             2000,
+				NodesToRead:        []*ua.ReadValueID{{NodeID: dummyNodeID}},
+				TimestampsToReturn: ua.TimestampsToReturnBoth,
+			}
+
+			_, err := c.client.Read(ctx, req)
+			if err != nil {
+				log.Printf("⚠️  Heartbeat falló para %s: %v (intentando reconectar)", c.endpoint, err)
+				// La próxima operación detectará el problema y reconectará
+			} else {
+				log.Printf("💓 Heartbeat OK para %s", c.endpoint)
+			}
+		}
+	}
 }
 
 // ReadNode lee el valor de un nodo específico
@@ -164,14 +217,18 @@ func contains(s, substr string) bool {
 
 // reconnect cierra la conexión actual y establece una nueva
 func (c *Client) reconnect(ctx context.Context) error {
+	t0 := time.Now()
 	log.Printf("🔄 Reconectando a %s...", c.endpoint)
 
 	// Cerrar conexión anterior si existe
+	t1 := time.Now()
 	if c.client != nil {
 		_ = c.client.Close(ctx)
 	}
+	log.Printf("⏱️  [Reconnect] Close old connection: %dms", time.Since(t1).Milliseconds())
 
 	// Crear nueva conexión
+	t2 := time.Now()
 	opts := []opcua.Option{
 		opcua.SecurityMode(ua.MessageSecurityModeNone),
 		opcua.SecurityPolicy(ua.SecurityPolicyURINone),
@@ -182,14 +239,18 @@ func (c *Client) reconnect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error creando cliente: %w", err)
 	}
+	log.Printf("⏱️  [Reconnect] NewClient: %dms", time.Since(t2).Milliseconds())
 
+	t3 := time.Now()
 	if err := client.Connect(ctx); err != nil {
 		return fmt.Errorf("error al conectar: %w", err)
 	}
+	log.Printf("⏱️  [Reconnect] ⚡ client.Connect(): %dms", time.Since(t3).Milliseconds())
 
 	c.client = client
 
 	// Activar la sesión con lectura dummy (igual que en Connect())
+	t4 := time.Now()
 	dummyNodeID, _ := ua.ParseNodeID("i=2253")
 	req := &ua.ReadRequest{
 		MaxAge:             2000,
@@ -198,11 +259,21 @@ func (c *Client) reconnect(ctx context.Context) error {
 	}
 	if _, err := client.Read(ctx, req); err != nil {
 		log.Printf("⚠️ Advertencia en reconexión: no se pudo activar sesión: %v", err)
+	} else {
+		log.Printf("⏱️  [Reconnect] Session activation: %dms", time.Since(t4).Milliseconds())
 	}
 
 	c.cache.Clear() // Invalidar cache después de reconexión
 
-	log.Printf("✅ Reconexión exitosa a %s", c.endpoint)
+	// ⚡ Reiniciar heartbeat después de reconectar
+	if c.heartbeatCancel != nil {
+		c.heartbeatCancel() // Detener el anterior
+	}
+	heartbeatCtx, cancel := context.WithCancel(context.Background())
+	c.heartbeatCancel = cancel
+	go c.startHeartbeat(heartbeatCtx, 15*time.Second)
+
+	log.Printf("✅ Reconexión exitosa a %s (total: %dms)", c.endpoint, time.Since(t0).Milliseconds())
 	return nil
 }
 
@@ -504,38 +575,60 @@ func (c *Client) BrowseNode(ctx context.Context, nodeID string) ([]BrowseResult,
 
 // CallMethod invoca un método OPC UA en el servidor
 func (c *Client) CallMethod(ctx context.Context, objectID string, methodID string, inputArgs []*ua.Variant) ([]interface{}, error) {
+	// ⏱️ TIMING: Inicio
+	t0 := time.Now()
+
 	if c.client == nil {
 		return nil, fmt.Errorf("cliente no conectado")
 	}
 
-	// Parsear IDs
+	// ⏱️ TIMING: Parsear ObjectID
+	t1 := time.Now()
 	objID, err := ua.ParseNodeID(objectID)
 	if err != nil {
 		return nil, fmt.Errorf("objectID inválido '%s': %w", objectID, err)
 	}
+	t2 := time.Now()
+	log.Printf("⏱️  [CallMethod] Parse ObjectID: %dus", t2.Sub(t1).Microseconds())
 
+	// ⏱️ TIMING: Parsear MethodID
 	methID, err := ua.ParseNodeID(methodID)
 	if err != nil {
 		return nil, fmt.Errorf("methodID inválido '%s': %w", methodID, err)
 	}
+	t3 := time.Now()
+	log.Printf("⏱️  [CallMethod] Parse MethodID: %dus", t3.Sub(t2).Microseconds())
 
-	// Crear request de llamada a método
+	// ⏱️ TIMING: Crear request
 	req := &ua.CallMethodRequest{
 		ObjectID:       objID,
 		MethodID:       methID,
 		InputArguments: inputArgs,
 	}
+	t4 := time.Now()
+	log.Printf("⏱️  [CallMethod] Create Request: %dus", t4.Sub(t3).Microseconds())
 
+	// ⏱️ TIMING: Llamada al PLC (CRÍTICO - aquí está el delay probable)
+	log.Printf("⏱️  [CallMethod] Iniciando Call() al PLC...")
 	resp, err := c.client.Call(ctx, req)
+	t5 := time.Now()
+	log.Printf("⏱️  [CallMethod] ⚡ PLC Call() completado: %dms (%dus)",
+		t5.Sub(t4).Milliseconds(), t5.Sub(t4).Microseconds())
+
 	if err != nil {
 		// Detectar error de sesión inválida y reconectar
 		if isSessionError(err) {
 			log.Printf("⚠️ Sesión inválida en CallMethod, reconectando...")
+			tReconnect := time.Now()
 			if reconnectErr := c.reconnect(ctx); reconnectErr != nil {
 				return nil, fmt.Errorf("error al reconectar: %w", reconnectErr)
 			}
+			log.Printf("⏱️  [CallMethod] Reconnect: %dms", time.Since(tReconnect).Milliseconds())
+
 			// Reintentar después de reconectar
+			tRetry := time.Now()
 			resp, err = c.client.Call(ctx, req)
+			log.Printf("⏱️  [CallMethod] Retry Call(): %dms", time.Since(tRetry).Milliseconds())
 			if err != nil {
 				return nil, fmt.Errorf("error al llamar método %s después de reconexión: %w", methodID, err)
 			}
@@ -544,7 +637,8 @@ func (c *Client) CallMethod(ctx context.Context, objectID string, methodID strin
 		}
 	}
 
-	// Log detallado de la respuesta del PLC
+	// ⏱️ TIMING: Procesar respuesta
+	t6 := time.Now()
 	log.Printf("🔍 PLC Response: método=%s | statusCode=%s | numOutputs=%d",
 		methodID, resp.StatusCode, len(resp.OutputArguments))
 
@@ -559,6 +653,14 @@ func (c *Client) CallMethod(ctx context.Context, objectID string, methodID strin
 		outputValues = append(outputValues, value)
 		log.Printf("🔍 PLC Output[%d]: tipo=%T | valor=%v", i, value, value)
 	}
+	t7 := time.Now()
+	log.Printf("⏱️  [CallMethod] Process Response: %dus", t7.Sub(t6).Microseconds())
+
+	// ⏱️ TIMING: Total
+	log.Printf("⏱️  [CallMethod] 🎯 TOTAL: %dms (%dus) | PLC Call fue %d%% del total",
+		t7.Sub(t0).Milliseconds(),
+		t7.Sub(t0).Microseconds(),
+		(t5.Sub(t4).Microseconds()*100)/t7.Sub(t0).Microseconds())
 
 	return outputValues, nil
 }

@@ -185,6 +185,15 @@ func (c *CognexListener) acceptConnections() {
 func (c *CognexListener) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
+	// ⚡ OPTIMIZACIÓN: TCP Keepalive + NoDelay para latencia mínima
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		tcpConn.SetNoDelay(true) // Deshabilitar algoritmo de Nagle
+		tcpConn.SetReadBuffer(256 * 1024)
+		tcpConn.SetWriteBuffer(256 * 1024)
+	}
+
 	buffer := make([]byte, 4096) // Buffer para lectura directa
 
 	for {
@@ -193,15 +202,10 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 			log.Printf("Cerrando conexión con %s\n", conn.RemoteAddr().String())
 			return
 		default:
-			// Establecer timeout de lectura
-			conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-
-			// Leer datos del socket
+			// ⚡ SIN TIMEOUT - TCP Keepalive detecta conexiones muertas
+			// La goroutine NUNCA se cierra por inactividad
 			n, err := conn.Read(buffer)
 			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue
-				}
 				log.Printf("Conexión cerrada o error de lectura: %v\n", err)
 				return
 			}

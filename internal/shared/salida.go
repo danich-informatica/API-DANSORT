@@ -149,8 +149,8 @@ func (s *Salida) InitializeBoxNumbers(boxNumbers []int) {
 }
 
 // ProcessDataMatrix procesa una lectura de DataMatrix
-// Correlativo: Número aleatorio que termina en 1 (viene del DataMatrix)
-// Número de Caja: Se asigna de la lista disponible (rotación)
+// Correlativo: Código de orden de fabricación (del ID de orden activa)
+// Número de Caja: Código correlativo leído por el DataMatrix
 // Retorna el número de caja asignado y error si hubo
 func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (int, error) {
 	// Convertir correlativo string a int64
@@ -177,7 +177,7 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 				ctx,
 				s.SealerPhysicalID,
 				int64(s.IDOrdenActiva),
-				numeroCaja,
+				correlativo,
 				fechaLectura,
 			)
 
