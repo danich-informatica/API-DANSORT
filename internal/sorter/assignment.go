@@ -236,13 +236,14 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 			)
 
 			if err != nil {
-				// Solo logear el error, no detener el proceso
-				log.Printf("⚠️  Sorter #%d: Error al registrar orden en PostgreSQL (mesa %d): %v", s.ID, salida.MesaID, err)
-			} else {
-				// Guardar ID de orden en la salida
-				salida.IDOrdenActiva = ordenID
-				log.Printf("✅ Sorter #%d: Orden ID=%d registrada en PostgreSQL y guardada en salida #%d", s.ID, ordenID, salida.ID)
+				// CRÍTICO: Si no se puede registrar la orden, no continuar.
+				log.Printf("❌ CRÍTICO: Sorter #%d: Error al registrar orden en PostgreSQL (mesa %d): %v. La orden no se procesará.", s.ID, salida.MesaID, err)
+				return // Detener la ejecución de esta goroutine.
 			}
+
+			// Guardar ID de orden en la salida
+			salida.IDOrdenActiva = ordenID
+			log.Printf("✅ Sorter #%d: Orden ID=%d registrada en PostgreSQL y guardada en salida #%d", s.ID, ordenID, salida.ID)
 		}
 	}
 }

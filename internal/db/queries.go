@@ -59,14 +59,14 @@ const INSERT_ORDEN_FABRICACION_INTERNAL_DB = `
 // Query para obtener datos de orden de fabricación desde vista V_Danish en FX_Sync
 const SELECT_V_DANISH_BY_CODIGO_EMBALAJE = `
 	SELECT 
-		CANTIDAD_CAJAS AS CajasPerPale,
-		[CAJAS POR CAPA] AS CajasPerCapa,
-		[CODIGO ENVASE] AS CodigoTipoEnvase,
+		TRIM(CANTIDAD_CAJAS) AS CajasPerPale,
+		TRIM([CAJAS POR CAPA]) AS CajasPerCapa,
+		TRIM([CODIGO ENVASE]) AS CodigoTipoEnvase,
 		ANCHOC,
 		LARGOC,
 		ALTOC,
 		[NOMBRE ENVASE],
-		[CODIGO PALLET] AS CodigoTipoPale,
+		TRIM([CODIGO PALLET]) AS CodigoTipoPale,
 		ANCHOP,
 		LARGOP,
 		ALTOP

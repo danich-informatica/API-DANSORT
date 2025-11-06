@@ -6,7 +6,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
-	"time"
+	//"time"
 )
 
 type Salida struct {
@@ -163,8 +163,8 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 	// Obtener siguiente número de caja del pool
 	numeroCaja := correlativo % int64(len(s.availableBoxNums))
 
-	fechaLectura := time.Now()
-
+	//fechaLectura := time.Now()
+	/*LOGICA VIEJA
 	// Insertar en SQL Server FX6 solo si hay manager disponible
 	if s.fx6Manager != nil {
 		// Type assertion para usar el método
@@ -191,7 +191,7 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 			}
 		}
 	}
-
+	*/
 	// Enviar nueva caja a Serfruit (solo para salidas automáticas con mesa)
 	if s.Tipo == "automatico" && s.MesaID > 0 && s.palletClient != nil {
 		// Type assertion para usar el método RegistrarNuevaCaja
