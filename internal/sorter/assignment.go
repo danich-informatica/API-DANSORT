@@ -122,8 +122,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 
 	// Valores fijos
 	const (
-		NumeroPalesFijo       = 0 // Fijo
-		IDProgramaFlejadoFijo = 1 // Fijo
+		NumeroPalesFijo = 0 // Fijo
 	)
 
 	// Obtener datos dinámicos de FX_Sync usando el código de embalaje
@@ -131,6 +130,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 	var cajasPerCapa int
 	var codigoTipoEnvase string
 	var codigoTipoPale string
+	var flejado int
 
 	if s.fxSyncManager != nil {
 		// Type assertion para usar el método
@@ -155,6 +155,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 				GetCajasPerCapa() int
 				GetCodigoTipoEnvase() string
 				GetCodigoTipoPale() string
+				GetFlejado() int64
 			}
 
 			// Intentar con interface de métodos
@@ -163,6 +164,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 				cajasPerCapa = ofGetter.GetCajasPerCapa()
 				codigoTipoEnvase = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(ofGetter.GetCodigoTipoEnvase(), "\n", ""), "\r", ""))
 				codigoTipoPale = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(ofGetter.GetCodigoTipoPale(), "\n", ""), "\r", ""))
+				flejado = int(ofGetter.GetFlejado())
 			} else {
 				// Fallback: usar reflection para extraer campos
 				// Esto funciona con cualquier struct que tenga los campos correctos
@@ -181,6 +183,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 				cajasPerCapa = int(v.FieldByName("CajasPerCapa").Int())
 				codigoTipoEnvase = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(v.FieldByName("CodigoTipoEnvase").String(), "\n", ""), "\r", ""))
 				codigoTipoPale = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(v.FieldByName("CodigoTipoPale").String(), "\n", ""), "\r", ""))
+				flejado = int(v.FieldByName("Flejado").Int())
 			}
 
 			log.Printf("📊 Sorter #%d: Datos obtenidos de FX_Sync para '%s': %d cajas/palé, %d cajas/capa, envase='%s', palé='%s'",
@@ -196,12 +199,12 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 
 	// Crear orden con datos obtenidos
 	orden := pallet.OrdenFabricacionRequest{
-		NumeroPales:       NumeroPalesFijo,       // FIJO: 5
-		CajasPerPale:      cajasPerPale,          // DINÁMICO: de FX_Sync
-		CajasPerCapa:      cajasPerCapa,          // DINÁMICO: de FX_Sync
-		CodigoTipoEnvase:  codigoTipoEnvase,      // DINÁMICO: de FX_Sync
-		CodigoTipoPale:    codigoTipoPale,        // DINÁMICO: de FX_Sync
-		IDProgramaFlejado: IDProgramaFlejadoFijo, // FIJO: 1
+		NumeroPales:       NumeroPalesFijo,  // FIJO: 5
+		CajasPerPale:      cajasPerPale,     // DINÁMICO: de FX_Sync
+		CajasPerCapa:      cajasPerCapa,     // DINÁMICO: de FX_Sync
+		CodigoTipoEnvase:  codigoTipoEnvase, // DINÁMICO: de FX_Sync
+		CodigoTipoPale:    codigoTipoPale,   // DINÁMICO: de FX_Sync
+		IDProgramaFlejado: flejado,          // DINAMICO: de FX_Sync
 	}
 
 	log.Printf("📋 Sorter #%d: Creando orden en mesa %d: %d palés × %d cajas (envase: %s, palé: %s)",

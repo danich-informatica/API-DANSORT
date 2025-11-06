@@ -57,6 +57,8 @@ func (m *FXSyncManager) GetOFData(ctx context.Context, codigoEmbalaje string) (i
 	var data OrdenFabricacionData
 	var nombreEnvase sql.NullString
 	var anchoCaja, largoCaja, altoCaja, anchoPallet, largoPallet, altoPallet sql.NullFloat64
+	// integer para flejado
+	var Flejado sql.NullInt64
 
 	err := m.Manager.QueryRow(ctx, SELECT_V_DANISH_BY_CODIGO_EMBALAJE,
 		sql.Named("p1", codigoEmbalaje),
@@ -72,6 +74,7 @@ func (m *FXSyncManager) GetOFData(ctx context.Context, codigoEmbalaje string) (i
 		&anchoPallet,
 		&largoPallet,
 		&altoPallet,
+		&Flejado,
 	)
 
 	if err == sql.ErrNoRows {
