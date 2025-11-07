@@ -607,7 +607,6 @@ func (c *Client) CallMethod(ctx context.Context, objectID string, methodID strin
 	}
 	t4 := time.Now()
 	log.Printf("⏱️  [CallMethod] Create Request: %dus", t4.Sub(t3).Microseconds())
-
 	// ⏱️ TIMING: Llamada al PLC (CRÍTICO - aquí está el delay probable)
 	log.Printf("⏱️  [CallMethod] Iniciando Call() al PLC...")
 	resp, err := c.client.Call(ctx, req)
@@ -616,21 +615,20 @@ func (c *Client) CallMethod(ctx context.Context, objectID string, methodID strin
 		t5.Sub(t4).Milliseconds(), t5.Sub(t4).Microseconds())
 
 	if err != nil {
-		// Detectar error de sesión inválida y reconectar
+		// Si es un error de sesión, la librería debería estar intentando reconectar en background.
+		// Le damos una pequeña pausa y reintentamos una vez para darle tiempo a actuar.
 		if isSessionError(err) {
-			log.Printf("⚠️ Sesión inválida en CallMethod, reconectando...")
-			tReconnect := time.Now()
-			if reconnectErr := c.reconnect(ctx); reconnectErr != nil {
-				return nil, fmt.Errorf("error al reconectar: %w", reconnectErr)
-			}
-			log.Printf("⏱️  [CallMethod] Reconnect: %dms", time.Since(tReconnect).Milliseconds())
+			log.Printf("⚠️ Sesión inválida en CallMethod. Pausando 100ms y reintentando...")
+			time.Sleep(10 * time.Millisecond)
 
-			// Reintentar después de reconectar
+			// Reintentar la llamada
 			tRetry := time.Now()
 			resp, err = c.client.Call(ctx, req)
-			log.Printf("⏱️  [CallMethod] Retry Call(): %dms", time.Since(tRetry).Milliseconds())
+			log.Printf("⏱️  [CallMethod] Retry Call() después de pausa: %dms", time.Since(tRetry).Milliseconds())
+
+			// Si el reintento también falla, ahora sí devolvemos el error.
 			if err != nil {
-				return nil, fmt.Errorf("error al llamar método %s después de reconexión: %w", methodID, err)
+				return nil, fmt.Errorf("error al llamar método %s después de reintento: %w", methodID, err)
 			}
 		} else {
 			return nil, fmt.Errorf("error al llamar método %s: %w", methodID, err)
