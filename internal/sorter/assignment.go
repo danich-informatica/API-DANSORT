@@ -15,6 +15,8 @@ import (
 
 // AssignSKUToSalida asigna una SKU a una salida específica
 func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, err error) {
+	log.Printf("🔵 Sorter #%d: Iniciando asignación de SKU ID=%d a salida ID=%d", s.ID, skuID, salidaID)
+
 	targetSalida := s.findSalidaByID(salidaID)
 	if targetSalida == nil {
 		return "", "", "", 0, fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
@@ -43,6 +45,7 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 
 	// logica para asignar SKU en paletizaje automatico en produccion
 	// Normalizar: tanto "automatico" como "automatica" son válidos
+	log.Printf("ℹ️ Sorter #%d: Verificando tipo de salida. Salida ID=%d es tipo '%s'", s.ID, salidaID, targetSalida.Tipo)
 	if targetSalida.Tipo == "automatico" || targetSalida.Tipo == "automatica" {
 		// Usar configuración del sorter para conectar al servidor de paletizado
 		client := pallet.NewClient(s.PaletHost, s.PaletPort, 10*time.Second)
@@ -69,6 +72,7 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 		log.Printf("✅ Sorter #%d: mesa %d disponible, orden de paletizaje factible para salida %d", s.ID, targetSalida.MesaID, targetSalida.ID)
 
 		// creamos orden de paletizaje en una go rutine
+		log.Printf("🚀 Sorter #%d: Lanzando goroutine SendFrabricationOrder para salida %d", s.ID, targetSalida.ID)
 		go s.SendFrabricationOrder(targetSalida, sku, client)
 	}
 
@@ -132,6 +136,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 	var codigoTipoPale string
 	var flejado int
 
+	log.Printf("ℹ️ Sorter #%d: Verificando FXSyncManager...", s.ID)
 	if s.fxSyncManager != nil {
 		// Type assertion para usar el método
 		// Usamos interface{} genérica ya que OrdenFabricacionData está en package db
@@ -140,11 +145,12 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 		}
 
 		if fxSync, ok := s.fxSyncManager.(FXSyncQuerier); ok {
+			log.Printf("🔍 Sorter #%d: Consultando V_Danish en FX_Sync con embalaje '%s'", s.ID, sku.Embalaje)
 			ofDataRaw, err := fxSync.GetOFData(ctx, sku.Embalaje)
 			if err != nil {
-				log.Printf("❌ Sorter #%d: Error al obtener datos de FX_Sync para embalaje '%s': %v",
+				log.Printf("❌ Sorter #%d: Error al obtener datos de V_Danish para embalaje '%s': %v",
 					s.ID, sku.Embalaje, err)
-				log.Printf("⚠️  Sorter #%d: No se puede crear orden sin datos de FX_Sync", s.ID)
+				log.Printf("⚠️  Sorter #%d: No se puede crear orden sin datos de V_Danish", s.ID)
 				return
 			}
 
@@ -186,10 +192,10 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 				flejado = int(v.FieldByName("Flejado").Int())
 			}
 
-			log.Printf("📊 Sorter #%d: Datos obtenidos de FX_Sync para '%s': %d cajas/palé, %d cajas/capa, envase='%s', palé='%s'",
-				s.ID, sku.Embalaje, cajasPerPale, cajasPerCapa, codigoTipoEnvase, codigoTipoPale)
+			log.Printf("📊 Sorter #%d: Datos obtenidos de V_Danish para '%s': %d cajas/palé, %d cajas/capa, envase='%s', palé='%s', flejado=%d",
+				s.ID, sku.Embalaje, cajasPerPale, cajasPerCapa, codigoTipoEnvase, codigoTipoPale, flejado)
 		} else {
-			log.Printf("❌ Sorter #%d: FXSyncManager no implementa interfaz correcta", s.ID)
+			log.Printf("❌ Sorter #%d: FXSyncManager no implementa la interfaz FXSyncQuerier", s.ID)
 			return
 		}
 	} else {
@@ -207,10 +213,11 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 		IDProgramaFlejado: flejado,          // DINAMICO: de FX_Sync
 	}
 
-	log.Printf("📋 Sorter #%d: Creando orden en mesa %d: %d palés × %d cajas (envase: %s, palé: %s)",
-		s.ID, salida.MesaID, orden.NumeroPales, orden.CajasPerPale, orden.CodigoTipoEnvase, orden.CodigoTipoPale)
+	log.Printf("📋 Sorter #%d: Creando orden en mesa %d: %d palés × %d cajas (envase: %s, palé: %s, flejado: %d)",
+		s.ID, salida.MesaID, orden.NumeroPales, orden.CajasPerPale, orden.CodigoTipoEnvase, orden.CodigoTipoPale, orden.IDProgramaFlejado)
 
 	// 1. Enviar orden a Serfruit
+	log.Printf("➡️  Sorter #%d: Enviando orden a Serfruit para mesa %d...", s.ID, salida.MesaID)
 	err := client.CrearOrdenFabricacion(ctx, salida.MesaID, orden)
 	if err != nil {
 		log.Printf("❌ Sorter #%d: Error al crear orden en mesa %d: %v", s.ID, salida.MesaID, err)
@@ -220,6 +227,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 	log.Printf("✅ Sorter #%d: Orden de fabricación creada exitosamente en mesa %d (Serfruit)", s.ID, salida.MesaID)
 
 	// 2. Insertar orden en PostgreSQL y obtener ID
+	log.Printf("ℹ️ Sorter #%d: Verificando dbManager para registrar orden...", s.ID)
 	if s.dbManager != nil {
 		// Type assertion para acceder al método InsertOrdenFabricacion
 		type OrdenInserter interface {
@@ -227,6 +235,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 		}
 
 		if psql, ok := s.dbManager.(OrdenInserter); ok {
+			log.Printf("✍️  Sorter #%d: Registrando orden en PostgreSQL para mesa %d...", s.ID, salida.MesaID)
 			ordenID, err := psql.InsertOrdenFabricacion(
 				ctx,
 				salida.MesaID,
@@ -247,7 +256,11 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 			// Guardar ID de orden en la salida
 			salida.IDOrdenActiva = ordenID
 			log.Printf("✅ Sorter #%d: Orden ID=%d registrada en PostgreSQL y guardada en salida #%d", s.ID, ordenID, salida.ID)
+		} else {
+			log.Printf("❌ Sorter #%d: dbManager no implementa la interfaz OrdenInserter", s.ID)
 		}
+	} else {
+		log.Printf("❌ Sorter #%d: dbManager no está inicializado, no se puede registrar la orden.", s.ID)
 	}
 }
 

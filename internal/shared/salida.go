@@ -1,8 +1,11 @@
 package shared
 
 import (
+	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/models"
 	"context"
+	"database/sql"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -160,9 +163,15 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 		return 0, err
 	}
 
+	// Guardar y validar pool de cajas
+	if len(s.availableBoxNums) == 0 {
+		err := fmt.Errorf("no hay números de caja inicializados para la salida %d", s.ID)
+		log.Printf("❌ [Salida %d] %v", s.SealerPhysicalID, err)
+		return 0, err
+	}
+
 	// Obtener siguiente número de caja del pool
 	numeroCaja := correlativo % int64(len(s.availableBoxNums))
-
 	//fechaLectura := time.Now()
 	/*LOGICA VIEJA
 	// Insertar en SQL Server FX6 solo si hay manager disponible
@@ -192,8 +201,45 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 		}
 	}
 	*/
+
+	// creamos un nuevo ssms manager
+	cajaCorrecta := false
+	ssmsManager, mgrErr := db.GetManager(ctx)
+	if mgrErr != nil {
+		log.Printf("⚠️  [Salida %d] No fue posible obtener SSMS manager: %v", s.SealerPhysicalID, mgrErr)
+	} else {
+		// Ejecutar la consulta en la DB de Unitec
+		rows, err := ssmsManager.Query(ctx, db.SELECT_BOX_DATA_FROM_UNITEC_DB, sql.Named("p1", correlativoStr))
+		if err != nil {
+			log.Printf("❌ [Salida %d] Error ejecutando consulta SELECT_BOX_DATA_FROM_UNITEC_DB: %v", s.SealerPhysicalID, err)
+		} else {
+			defer func() {
+				if cerr := rows.Close(); cerr != nil {
+					log.Printf("⚠️  [Salida %d] Error cerrando resultados de consulta Unitec: %v", s.SealerPhysicalID, cerr)
+				}
+			}()
+			var calibre, variedad, embalaje sql.NullString
+			if rows.Next() {
+				if err := rows.Scan(&calibre, &variedad, &embalaje); err != nil {
+					log.Printf("❌ [Salida %d] Error leyendo resultado de consulta Unitec: %v", s.SealerPhysicalID, err)
+				} else {
+					log.Printf("✅ [Salida %d] Datos caja desde Unitec -> calibre=%s variedad=%s embalaje=%s", s.SealerPhysicalID, calibre.String, variedad.String, embalaje.String)
+					for _, sku := range s.SKUs_Actuales {
+						if sku.Calibre == calibre.String && sku.Variedad == variedad.String {
+							log.Printf("📦 [Salida %d] La caja con codCaja=%s corresponde a la SKU %s", s.SealerPhysicalID, correlativoStr, sku.SKU)
+							cajaCorrecta = true
+							break // Si encuentras una coincidencia, puedes salir del bucle
+						}
+					}
+				}
+			} else {
+				log.Printf("⚠️  [Salida %d] No se encontraron datos en Unitec para codCaja=%s", s.SealerPhysicalID, correlativoStr)
+			}
+		}
+	}
+
 	// Enviar nueva caja a Serfruit (solo para salidas automáticas con mesa)
-	if s.Tipo == "automatico" && s.MesaID > 0 && s.palletClient != nil {
+	if s.Tipo == "automatico" && s.MesaID > 0 && s.palletClient != nil && cajaCorrecta {
 		// Type assertion para usar el método RegistrarNuevaCaja
 		type PalletCajaRegistrar interface {
 			RegistrarNuevaCaja(ctx context.Context, idMesa int, idCaja string) error

@@ -30,6 +30,12 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
 	  AND VIE_CodConfezione IS NOT NULL;
 `
 
+const SELECT_BOX_DATA_FROM_UNITEC_DB = `
+	SELECT dc.CalibreTimbrado as calibre, dc.VariedadTimbrada as variedad, dc.codEmbalaje as embalaje
+	FROM DatosCajas dc
+	WHERE dc.codCaja = @p1;
+`
+
 const INSERT_LECTURA_DATAMATRIX_SSMS = `
 	INSERT INTO PKG_Pallets_Externos 
 	(Salida, Correlativo, Numero_Caja, Fecha_Lectura, Terminado)
@@ -59,8 +65,8 @@ const INSERT_ORDEN_FABRICACION_INTERNAL_DB = `
 // Query para obtener datos de orden de fabricación desde vista V_Danish en FX_Sync
 const SELECT_V_DANISH_BY_CODIGO_EMBALAJE = `
 	SELECT 
-		TRIM(CANTIDAD_CAJAS) AS CajasPerPale,
-		TRIM([CAJAS POR CAPA]) AS CajasPerCapa,
+		ROUND(CAST(CANTIDAD_CAJAS AS FLOAT), 0) AS CajasPerPale,
+		ROUND(CAST([CAJAS POR CAPA] AS FLOAT), 0) AS CajasPerCapa,
 		TRIM([CODIGO ENVASE]) AS CodigoTipoEnvase,
 		ANCHOC,
 		LARGOC,
@@ -70,9 +76,10 @@ const SELECT_V_DANISH_BY_CODIGO_EMBALAJE = `
 		ANCHOP,
 		LARGOP,
 		ALTOP,
-		FLEJADO as Flejado
+		ROUND(CAST(FLEJADO AS FLOAT), 0) as Flejado
 	FROM V_Danish
 	WHERE CODIGO_EMBALAJE = @p1
+
 `
 
 const INSERT_SKU_INTERNAL_DB = `
