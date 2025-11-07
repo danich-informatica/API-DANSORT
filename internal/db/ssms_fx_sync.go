@@ -44,6 +44,7 @@ type OrdenFabricacionData struct {
 	CajasPerCapa     int    // CAJAS POR CAPA
 	CodigoTipoEnvase string // CODIGO ENVASE
 	CodigoTipoPale   string // CODIGO PALLET
+	Flejado          int    // FLEJADO
 }
 
 // GetOFData obtiene los datos de una orden de fabricación desde la vista V_Danish
@@ -100,6 +101,13 @@ func (m *FXSyncManager) GetOFData(ctx context.Context, codigoEmbalaje string) (i
 
 	if data.CodigoTipoPale == "" {
 		return nil, fmt.Errorf("CodigoTipoPale vacío para código de embalaje '%s'", codigoEmbalaje)
+	}
+
+	// Asignar valor de Flejado a la estructura
+	if Flejado.Valid {
+		data.Flejado = int(Flejado.Int64)
+	} else {
+		data.Flejado = 0 // Valor por defecto si es NULL
 	}
 
 	return &data, nil

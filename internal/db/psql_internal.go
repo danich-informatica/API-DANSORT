@@ -261,8 +261,21 @@ func (m *PostgresManager) InsertOrdenFabricacion(ctx context.Context, mesaID, nu
 		return 0, fmt.Errorf("manager no inicializado")
 	}
 
+	// Primero, asegurarse de que el código de envase existe en la tabla codigoenvase
+	// Si no existe, insertarlo
+	_, err := m.pool.Exec(ctx,
+		`INSERT INTO codigoenvase (codigo, descripcion) 
+		 VALUES ($1, $2) 
+		 ON CONFLICT (codigo) DO NOTHING`,
+		codigoEnvase,
+		"Código de envase: "+codigoEnvase,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("error al insertar código de envase: %w", err)
+	}
+
 	var ordenID int
-	err := m.pool.QueryRow(ctx, INSERT_ORDEN_FABRICACION_INTERNAL_DB,
+	err = m.pool.QueryRow(ctx, INSERT_ORDEN_FABRICACION_INTERNAL_DB,
 		mesaID,
 		numeroPales,
 		cajasPerPale,

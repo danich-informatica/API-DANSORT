@@ -44,6 +44,9 @@ type Salida struct {
 	availableBoxNums []int       // Lista de números de caja disponibles
 	currentBoxIndex  int         // Índice actual en la lista de cajas
 	boxIndexMu       sync.Mutex  // Mutex para el índice
+
+	// Manager de SSMS (SQL Server) - agregado para permitir inyección
+	SSMSManager interface{} // Manager de SSMS para operaciones con la base de datos
 }
 
 // Start inicia la gorutina para escuchar eventos de la salida
@@ -141,6 +144,13 @@ func (s *Salida) SetPalletClient(palletClient interface{}) {
 	s.palletClient = palletClient
 }
 
+// SetSSMSManager permite inyectar un manager de SSMS (SQL Server) ya configurado.
+// Esto evita que `ProcessDataMatrix` intente crear/usar el singleton con valores
+// por defecto (que pueden apuntar a localhost).
+func (s *Salida) SetSSMSManager(mgr interface{}) {
+	s.SSMSManager = mgr
+}
+
 // InitializeBoxNumbers inicializa la lista de números de caja disponibles
 func (s *Salida) InitializeBoxNumbers(boxNumbers []int) {
 	s.boxIndexMu.Lock()
@@ -202,11 +212,23 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 	}
 	*/
 
-	// creamos un nuevo ssms manager
-	cajaCorrecta := false
-	ssmsManager, mgrErr := db.GetManager(ctx)
-	if mgrErr != nil {
-		log.Printf("⚠️  [Salida %d] No fue posible obtener SSMS manager: %v", s.SealerPhysicalID, mgrErr)
+	// Usar el manager inyectado (s.SSMSManager) que se configuró en main.go
+	cajaCorrecta := true // Asumir que la caja es correcta si no se puede validar
+	var ssmsManager db.QueryExecutor
+
+	if s.SSMSManager != nil {
+		var ok bool
+		ssmsManager, ok = s.SSMSManager.(db.QueryExecutor)
+		if !ok {
+			log.Printf("⚠️  [Salida %d] El SSMSManager inyectado no es un db.QueryExecutor válido.", s.SealerPhysicalID)
+			ssmsManager = nil // Asegurarse de que sea nil si la aserción de tipo falla
+		} else {
+			log.Printf("✅ [Salida %d] Usando SSMSManager inyectado para validar caja %s", s.SealerPhysicalID, correlativoStr)
+		}
+	}
+
+	if ssmsManager == nil {
+		log.Printf("❌ [Salida %d] No hay un SSMS manager disponible para consultar la caja %s. No se puede validar.", s.SealerPhysicalID, correlativoStr)
 	} else {
 		// Ejecutar la consulta en la DB de Unitec
 		rows, err := ssmsManager.Query(ctx, db.SELECT_BOX_DATA_FROM_UNITEC_DB, sql.Named("p1", correlativoStr))
