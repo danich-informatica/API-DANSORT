@@ -33,6 +33,12 @@ statistics:
   flow_calculation_interval: 1s # Cada cuántos segundos se calcula y publica el %
   flow_window_duration: 20s # Ventana de tiempo para el cálculo (últimos X segundos)
 
+# Caché de cajas para optimización ID-DB (búsqueda binaria en memoria)
+box_cache:
+  enabled: true           # Activar/desactivar caché (true = ultra rápido, false = query directa)
+  size: 500               # Número de cajas a cachear (ajustar según necesidad)
+  refresh_interval: "5s"  # Polling cada 5 segundos (ajustar: "3s", "10s", etc.)
+
 # Dispositivos Cognex (múltiples)
 # IMPORTANTE:
 #   - Siempre escuchan en 0.0.0.0 (todas las interfaces)

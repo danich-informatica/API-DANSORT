@@ -12,6 +12,7 @@ type Config struct {
 	Database      DatabaseConfig   `yaml:"database"`
 	HTTP          HTTPConfig       `yaml:"http"`
 	Statistics    StatisticsConfig `yaml:"statistics"`
+	BoxCache      BoxCacheConfig   `yaml:"box_cache"` // NUEVO: Configuración del caché de cajas
 	CognexDevices []CognexDevice   `yaml:"cognex_devices"`
 	Sorters       []Sorter         `yaml:"sorters"`
 }
@@ -19,6 +20,22 @@ type Config struct {
 type StatisticsConfig struct {
 	FlowCalculationInterval string `yaml:"flow_calculation_interval"` // ej: "10s"
 	FlowWindowDuration      string `yaml:"flow_window_duration"`      // ej: "60s"
+}
+
+// BoxCacheConfig configuración del caché de cajas para optimizar lecturas ID-DB
+type BoxCacheConfig struct {
+	Enabled         bool   `yaml:"enabled"`          // Activar/desactivar caché
+	Size            int    `yaml:"size"`             // Número de cajas a cachear (ej: 500)
+	RefreshInterval string `yaml:"refresh_interval"` // Intervalo de polling (ej: "5s")
+}
+
+// GetRefreshInterval retorna la duración del intervalo de refresh
+func (b *BoxCacheConfig) GetRefreshInterval() time.Duration {
+	duration, err := time.ParseDuration(b.RefreshInterval)
+	if err != nil || duration <= 0 {
+		return 5 * time.Second // default 5 segundos
+	}
+	return duration
 }
 
 // GetFlowCalculationInterval retorna la duración del intervalo de cálculo

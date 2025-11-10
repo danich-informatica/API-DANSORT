@@ -8,16 +8,16 @@ import (
 	"os"
 	"time"
 
-	"API-GREENEX/internal/communication/pallet"
-	"API-GREENEX/internal/communication/plc"
-	"API-GREENEX/internal/config"
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/flow"
-	"API-GREENEX/internal/listeners"
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/monitoring"
-	"API-GREENEX/internal/shared"
-	"API-GREENEX/internal/sorter"
+	"API-DANSORT/internal/communication/pallet"
+	"API-DANSORT/internal/communication/plc"
+	"API-DANSORT/internal/config"
+	"API-DANSORT/internal/db"
+	"API-DANSORT/internal/flow"
+	"API-DANSORT/internal/listeners"
+	"API-DANSORT/internal/models"
+	"API-DANSORT/internal/monitoring"
+	"API-DANSORT/internal/shared"
+	"API-DANSORT/internal/sorter"
 
 	"github.com/joho/godotenv"
 )
@@ -29,12 +29,14 @@ func main() {
 
 	// Tu hermoso banner ASCII
 	log.Println("")
-	log.Println("    ░█████╗░██████╗░██╗░░░░░░░██████╗░██████╗░███████╗███████╗███╗░░██╗███████╗██╗░░██╗")
-	log.Println("    ██╔══██╗██╔══██╗██║░░░░░░██╔════╝░██╔══██╗██╔════╝██╔════╝████╗░██║██╔════╝╚██╗██╔╝")
-	log.Println("    ███████║██████╔╝██║█████╗██║░░██╗░██████╔╝█████╗░░█████╗░░██╔██╗██║█████╗░░░╚███╔╝░")
-	log.Println("    ██╔══██║██╔═══╝░██║╚════╝██║░░╚██╗██╔══██╗██╔══╝░░██╔══╝░░██║╚████║██╔══╝░░░██╔██╗░")
-	log.Println("    ██║░░██║██║░░░░░██║░░░░░░╚██████╔╝██║░░██║███████╗███████╗██║░╚███║███████╗██╔╝╚██╗")
-	log.Println("    ╚═╝░░╚═╝╚═╝░░░░░╚═╝░░░░░░░╚═════╝░╚═╝░░╚═╝╚══════╝╚══════╝╚═╝░░╚══╝╚══════╝╚═╝░░╚═╝")
+	log.Println(`
+		░█████╗░██████╗░██╗░░░░░░██████╗░░█████╗░███╗░░██╗░██████╗░█████╗░██████╗░████████╗
+		██╔══██╗██╔══██╗██║░░░░░░██╔══██╗██╔══██╗████╗░██║██╔════╝██╔══██╗██╔══██╗╚══██╔══╝
+		███████║██████╔╝██║█████╗██║░░██║███████║██╔██╗██║╚█████╗░██║░░██║██████╔╝░░░██║░░░
+		██╔══██║██╔═══╝░██║╚════╝██║░░██║██╔══██║██║╚████║░╚═══██╗██║░░██║██╔══██╗░░░██║░░░
+		██║░░██║██║░░░░░██║░░░░░░██████╔╝██║░░██║██║░╚███║██████╔╝╚█████╔╝██║░░██║░░░██║░░░
+		╚═╝░░╚═╝╚═╝░░░░░╚═╝░░░░░░╚═════╝░╚═╝░░╚═╝╚═╝░░╚══╝╚═════╝░░╚════╝░╚═╝░░╚═╝░░░╚═╝░░░
+	`)
 	log.Println("")
 	log.Println("Iniciando API-Greenex...")
 	log.Println("")
@@ -147,6 +149,28 @@ func main() {
 	log.Printf("📷 Configurando %d dispositivo(s) Cognex...", len(cfg.CognexDevices))
 	var cognexListeners []*listeners.CognexListener
 	ssmsManager, _ := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
+
+	// Inicializar BoxCacheManager para optimizar lecturas ID-DB
+	var boxCacheManager *flow.BoxCacheManager
+	if cfg.BoxCache.Enabled {
+		log.Println("")
+		log.Println("📦 Inicializando BoxCacheManager (optimización ID-DB)...")
+		cacheSize := cfg.BoxCache.Size
+		if cacheSize <= 0 {
+			cacheSize = 500 // Default
+		}
+		refreshInterval := cfg.BoxCache.GetRefreshInterval()
+
+		boxCacheManager = flow.NewBoxCacheManager(ctx, ssmsManager, cacheSize, refreshInterval)
+		boxCacheManager.Start()
+		defer boxCacheManager.Stop()
+		log.Println("✅ BoxCacheManager iniciado correctamente")
+		log.Println("")
+	} else {
+		log.Println("⚠️  BoxCache desactivado en configuración (se usarán queries directas)")
+		log.Println("")
+	}
+
 	for _, cognexCfg := range cfg.CognexDevices {
 		log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		log.Printf("  📌 Cognex #%d: %s", cognexCfg.ID, cognexCfg.Name)
@@ -161,6 +185,7 @@ func main() {
 			cognexCfg.ScanMethod,
 			dbManager,
 			ssmsManager,
+			boxCacheManager, // NUEVO: Pasar caché de cajas
 		)
 
 		cognexListeners = append(cognexListeners, cognexListener)
@@ -237,6 +262,7 @@ func main() {
 									cognexCfg.ScanMethod,
 									dbManager,
 									ssms_manager,
+									nil, // DataMatrix no usa boxCache (solo para ID-DB)
 								)
 								cognexDevices[cognexCfg.ID] = dmListener
 								log.Printf("     📷 Cámara DataMatrix Cognex #%d → Salida #%d (%s:%d)",

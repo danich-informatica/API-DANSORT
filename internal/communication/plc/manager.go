@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"API-GREENEX/internal/config"
+	"API-DANSORT/internal/config"
 
 	"github.com/gopcua/opcua/ua"
 )

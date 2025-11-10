@@ -1,7 +1,7 @@
 package sorter
 
 import (
-	"API-GREENEX/internal/shared"
+	"API-DANSORT/internal/shared"
 	"log"
 	"time"
 )

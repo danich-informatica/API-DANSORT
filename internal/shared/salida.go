@@ -1,8 +1,8 @@
 package shared
 
 import (
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/models"
+	"API-DANSORT/internal/db"
+	"API-DANSORT/internal/models"
 	"context"
 	"database/sql"
 	"fmt"

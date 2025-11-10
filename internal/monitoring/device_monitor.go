@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"API-GREENEX/internal/models"
+	"API-DANSORT/internal/models"
 )
 
 // DeviceMonitor gestiona el monitoreo de dispositivos con heartbeat

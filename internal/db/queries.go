@@ -24,6 +24,20 @@ const SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA = `
 	WHERE dc.codCaja = @p1;
 `
 
+// Query optimizada para caché: últimas N cajas del proceso actual ordenadas DESC
+const SELECT_TOP_N_BOXES_FROM_CURRENT_PROCESO = `
+	SELECT TOP (@p1)
+		dc.codEspecie AS especie,
+		dc.CalibreTimbrado AS calibre,
+		dc.codVariedadTimbrada AS variedad,
+		dc.codConfeccion AS embalaje,
+		0 AS dark,
+		dc.codCaja
+	FROM DatosCajas dc
+	WHERE dc.proceso = (SELECT MAX(proceso) FROM DatosCajas)
+	ORDER BY dc.codCaja DESC;
+`
+
 // Query SIN VIE_Dark (fallback si la columna no existe)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
 	SELECT DISTINCT

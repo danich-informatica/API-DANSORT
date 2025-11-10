@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/models"
+	"API-DANSORT/internal/db"
+	"API-DANSORT/internal/models"
 )
 
 func main() {

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"API-GREENEX/internal/config"
+	"API-DANSORT/internal/config"
 
 	"github.com/joho/godotenv"
 	_ "github.com/microsoft/go-mssqldb"

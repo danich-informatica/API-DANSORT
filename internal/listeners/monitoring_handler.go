@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"API-GREENEX/internal/monitoring"
+	"API-DANSORT/internal/monitoring"
 
 	"github.com/gin-gonic/gin"
 )

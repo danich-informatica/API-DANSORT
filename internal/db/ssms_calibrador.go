@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"API-GREENEX/internal/config"
+	"API-DANSORT/internal/config"
 )
 
 // QueryExecutor expone el subconjunto mínimo necesario para ejecutar la consulta

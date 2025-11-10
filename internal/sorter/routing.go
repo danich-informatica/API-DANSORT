@@ -1,27 +1,38 @@
 package sorter
 
 import (
-	"API-GREENEX/internal/shared"
+	"API-DANSORT/internal/shared"
 	"log"
+	"time"
 )
 
 // determinarSalida determina a qué salida debe ir la caja según el SKU/Calibre
 func (s *Sorter) determinarSalida(sku, calibre string) shared.Salida {
+	startRouting := time.Now() // ⏱️ Medición de routing completo
+
 	// Buscar salida con balance
 	if salida := s.getSalidaConBatchDistribution(sku); salida != nil {
+		routingDuration := time.Since(startRouting)
+		log.Printf("⏱️  [Sorter %d] ROUTING completado en %.3fms (SKU encontrado)", s.ID, routingDuration.Seconds()*1000)
 		return *salida
 	}
 
 	// Si no encuentra el SKU específico, buscar REJECT
 	if salida := s.getSalidaConBatchDistribution("REJECT"); salida != nil {
+		routingDuration := time.Since(startRouting)
+		log.Printf("⏱️  [Sorter %d] ROUTING completado en %.3fms (usando REJECT)", s.ID, routingDuration.Seconds()*1000)
 		return *salida
 	}
 
+	routingDuration := time.Since(startRouting)
+	log.Printf("⏱️  [Sorter %d] ROUTING completado en %.3fms (usando DESCARTE)", s.ID, routingDuration.Seconds()*1000)
 	return s.getSalidaDescarte(sku)
 }
 
 // getSalidaConBatchDistribution obtiene salida usando round-robin con validación de disponibilidad
 func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
+	startSearch := time.Now() // ⏱️ Medición de búsqueda de SKU
+
 	// Buscar TODAS las salidas que tienen este SKU en SKUs_Actuales
 	var todasLasSalidas []*shared.Salida
 
@@ -34,9 +45,12 @@ func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
 		}
 	}
 
+	searchDuration := time.Since(startSearch)
+
 	// DEBUG: Ver qué encontró
 	if len(todasLasSalidas) == 0 {
-		log.Printf("[Sorter %d] ⚠️ SKU '%s' NOT FOUND in any salida's SKUs_Actuales", s.ID, sku)
+		log.Printf("[Sorter %d] ⚠️ SKU '%s' NOT FOUND in any salida's SKUs_Actuales (búsqueda: %.3fms)",
+			s.ID, sku, searchDuration.Seconds()*1000)
 		return nil
 	}
 
@@ -45,7 +59,8 @@ func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
 	for i, sal := range todasLasSalidas {
 		salidaIDs[i] = sal.ID
 	}
-	log.Printf("[Sorter %d] ✓ SKU '%s' found in %d salida(s): %v", s.ID, sku, len(todasLasSalidas), salidaIDs)
+	log.Printf("[Sorter %d] ✓ SKU '%s' found in %d salida(s): %v (búsqueda: %.3fms)",
+		s.ID, sku, len(todasLasSalidas), salidaIDs, searchDuration.Seconds()*1000)
 
 	// Si solo hay una salida, retornarla si está disponible
 	if len(todasLasSalidas) == 1 {

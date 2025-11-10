@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"API-GREENEX/internal/communication/pallet"
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"API-DANSORT/internal/communication/pallet"
+	"API-DANSORT/internal/models"
+	"API-DANSORT/internal/shared"
 )
 
 // AssignSKUToSalida asigna una SKU a una salida específica

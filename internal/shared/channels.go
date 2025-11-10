@@ -3,7 +3,7 @@ package shared
 import (
 	"sync"
 
-	"API-GREENEX/internal/models"
+	"API-DANSORT/internal/models"
 )
 
 // ChannelManager gestiona todos los canales compartidos de la aplicación usando patrón Singleton

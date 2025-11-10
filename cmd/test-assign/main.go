@@ -1,40 +1,40 @@
 package main
 
 import (
-"context"
-"log"
-"time"
+	"context"
+	"log"
+	"time"
 
-"API-GREENEX/internal/communication/plc"
-"API-GREENEX/internal/config"
+	"API-DANSORT/internal/communication/plc"
+	"API-DANSORT/internal/config"
 )
 
 func main() {
-log.Println("🔧 Test de AssignLaneToBox (estilo Rust)")
+	log.Println("🔧 Test de AssignLaneToBox (estilo Rust)")
 
-cfg, err := config.LoadConfig("config/config.yaml")
-if err != nil {
-log.Fatalf("❌ Error cargando config: %v", err)
-}
+	cfg, err := config.LoadConfig("config/config.yaml")
+	if err != nil {
+		log.Fatalf("❌ Error cargando config: %v", err)
+	}
 
-manager := plc.NewManager(cfg)
-ctx := context.Background()
+	manager := plc.NewManager(cfg)
+	ctx := context.Background()
 
-if err := manager.ConnectAll(ctx); err != nil {
-log.Fatalf("❌ Error conectando: %v", err)
-}
+	if err := manager.ConnectAll(ctx); err != nil {
+		log.Fatalf("❌ Error conectando: %v", err)
+	}
 
-log.Println("✅ Conexión establecida\n")
+	log.Println("✅ Conexión establecida\n")
 
-log.Println("═══════════════════════════════════════")
-log.Println("TEST: Asignar caja a salida 5")
-log.Println("═══════════════════════════════════════")
+	log.Println("═══════════════════════════════════════")
+	log.Println("TEST: Asignar caja a salida 5")
+	log.Println("═══════════════════════════════════════")
 
-err = manager.AssignLaneToBox(context.Background(), 1, 5)
-if err != nil {
-log.Printf("❌ Error final: %v\n", err)
-}
+	err = manager.AssignLaneToBox(context.Background(), 1, 5)
+	if err != nil {
+		log.Printf("❌ Error final: %v\n", err)
+	}
 
-time.Sleep(1 * time.Second)
-log.Println("\n✅ Test completado")
+	time.Sleep(1 * time.Second)
+	log.Println("\n✅ Test completado")
 }

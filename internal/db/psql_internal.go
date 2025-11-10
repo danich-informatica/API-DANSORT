@@ -1,7 +1,7 @@
 package db
 
 import (
-	"API-GREENEX/internal/models"
+	"API-DANSORT/internal/models"
 	"context"
 	"fmt"
 	"log"

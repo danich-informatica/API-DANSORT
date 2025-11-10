@@ -1,8 +1,9 @@
 package listeners
 
 import (
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/models"
+	"API-DANSORT/internal/db"
+	"API-DANSORT/internal/flow"
+	"API-DANSORT/internal/models"
 	"context"
 	"fmt"
 	"log"
@@ -44,7 +45,8 @@ type CognexListener struct {
 	Port           int
 	ScanMethod     string
 	dbManager      *db.PostgresManager
-	ssmsManager    *db.Manager // Restaurado para consultas a UNITEC
+	ssmsManager    *db.Manager           // Restaurado para consultas a UNITEC
+	boxCache       *flow.BoxCacheManager // NUEVO: Caché optimizado para ID-DB
 	conn           net.Conn
 	mu             sync.Mutex
 	isRunning      bool
@@ -60,7 +62,7 @@ type CognexListener struct {
 	messageChannel chan string
 }
 
-func NewCognexListener(id int, remoteHost string, port int, scanMethod string, dbManager *db.PostgresManager, ssmsManager *db.Manager) *CognexListener {
+func NewCognexListener(id int, remoteHost string, port int, scanMethod string, dbManager *db.PostgresManager, ssmsManager *db.Manager, boxCache *flow.BoxCacheManager) *CognexListener {
 	log.Printf("[Cognex-%d] NewCognexListener creado con método: %s", id, scanMethod)
 	ctx, cancel := context.WithCancel(context.Background())
 	dispositivo := fmt.Sprintf("Cognex-%d:%d", id, port)
@@ -74,6 +76,7 @@ func NewCognexListener(id int, remoteHost string, port int, scanMethod string, d
 		cancel:         cancel,
 		dbManager:      dbManager,
 		ssmsManager:    ssmsManager, // Asignar el gestor de SQL Server
+		boxCache:       boxCache,    // NUEVO: Asignar caché de cajas
 		EventChan:      make(chan models.LecturaEvent, 100),
 		DataMatrixChan: make(chan models.DataMatrixEvent, 100),
 		insertChan:     make(chan insertRequest, 200),
@@ -103,6 +106,47 @@ func (c *CognexListener) fetchSKUFromUnitec(ctx context.Context, codCaja string)
 	if err != nil {
 		return "", "", "", "", 0, fmt.Errorf("error al escanear el resultado de la consulta: %w", err)
 	}
+
+	return especie, calibre, variedad, embalaje, dark, nil
+}
+
+// fetchSKUFromCache intenta búsqueda en caché primero, con fallback a query directa
+// Incluye logs detallados de tiempos para observabilidad
+func (c *CognexListener) fetchSKUFromCache(ctx context.Context, codCaja string) (string, string, string, string, int, error) {
+	startTotal := time.Now()
+
+	// Si no hay caché configurado, usar método directo
+	if c.boxCache == nil {
+		log.Printf("⚠️  [Cognex-%d] BoxCache no configurado, usando query directa", c.ID)
+		return c.fetchSKUFromUnitec(ctx, codCaja)
+	}
+
+	// Intentar búsqueda en caché
+	boxData, found := c.boxCache.GetBoxData(codCaja)
+
+	if found {
+		// CACHE HIT - Retornar inmediatamente
+		totalDuration := time.Since(startTotal)
+		log.Printf("⚡ [Cognex-%d] Fetch completado vía CACHÉ en %.3fms", c.ID, totalDuration.Seconds()*1000)
+		return boxData.Especie, boxData.Calibre, boxData.Variedad, boxData.Embalaje, boxData.Dark, nil
+	}
+
+	// CACHE MISS - Fallback a query directa
+	log.Printf("🔄 [Cognex-%d] Fallback a query directa...", c.ID)
+	startQuery := time.Now()
+
+	especie, calibre, variedad, embalaje, dark, err := c.fetchSKUFromUnitec(ctx, codCaja)
+
+	queryDuration := time.Since(startQuery)
+	totalDuration := time.Since(startTotal)
+
+	if err != nil {
+		log.Printf("❌ [Cognex-%d] Query directa falló en %.2fms: %v", c.ID, queryDuration.Seconds()*1000, err)
+		return "", "", "", "", 0, err
+	}
+
+	log.Printf("✅ [Cognex-%d] Query directa completada en %.2fms", c.ID, queryDuration.Seconds()*1000)
+	log.Printf("⚡ [Cognex-%d] Fetch completado vía QUERY en %.2fms total", c.ID, totalDuration.Seconds()*1000)
 
 	return especie, calibre, variedad, embalaje, dark, nil
 }
@@ -155,7 +199,10 @@ func (c *CognexListener) insertWorker() {
 
 // processInsert realiza la inserción real en la base de datos
 func (c *CognexListener) processInsert(req insertRequest) {
+	startInsert := time.Now() // ⏱️ Medición completa de inserción
 	ctx := context.Background()
+
+	startDB := time.Now()
 	correlativo, err := c.dbManager.InsertNewBox(
 		ctx,
 		req.especie,
@@ -164,8 +211,10 @@ func (c *CognexListener) processInsert(req insertRequest) {
 		req.embalaje,
 		req.dark,
 	)
+	dbDuration := time.Since(startDB)
 
 	// Obtener nombre de variedad para construir SKU correctamente
+	startVariedad := time.Now()
 	nombreVariedad := ""
 	if err == nil {
 		nombreVar, errNombre := c.dbManager.GetNombreVariedad(ctx, req.variedad)
@@ -175,6 +224,14 @@ func (c *CognexListener) processInsert(req insertRequest) {
 			// Si no se encuentra nombre, usar código
 			nombreVariedad = req.variedad
 		}
+	}
+	variedadDuration := time.Since(startVariedad)
+
+	totalInsertDuration := time.Since(startInsert)
+
+	if err == nil {
+		log.Printf("⏱️  [Cognex-%d] INSERCIÓN DB: InsertBox=%.2fms + GetVariedad=%.2fms = TOTAL %.2fms",
+			c.ID, dbDuration.Seconds()*1000, variedadDuration.Seconds()*1000, totalInsertDuration.Seconds()*1000)
 	}
 
 	req.resultCh <- insertResult{
@@ -469,6 +526,8 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			)
 		}
 	case "ID-DB":
+		startTotal := time.Now() // ⏱️ INICIO medición flujo completo
+
 		if message == "" {
 			log.Printf("❌ Mensaje vacío recibido")
 			response := "NACK\r\n"
@@ -480,7 +539,10 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		}
 
 		// El mensaje es un ID de caja, lo usamos para consultar la DB
-		especie, calibre, variedad, embalaje, dark, err := c.fetchSKUFromUnitec(context.Background(), message)
+		startFetch := time.Now()
+		especie, calibre, variedad, embalaje, dark, err := c.fetchSKUFromCache(context.Background(), message)
+		fetchDuration := time.Since(startFetch)
+
 		if err != nil {
 			log.Printf("❌ Error al obtener SKU de UNITEC desde ID: %v", err)
 			response := "NACK\r\n"
@@ -490,7 +552,10 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		}
 
 		// A partir de aquí, el flujo es idéntico al de los otros métodos
+		startSKU := time.Now()
 		sku, err := models.RequestSKU(variedad, calibre, embalaje, dark)
+		skuDuration := time.Since(startSKU)
+
 		if err != nil {
 			log.Printf("❌ SKU inválido generado desde datos de UNITEC ID: %s | Error: %v", message, err)
 			response := "NACK\r\n"
@@ -498,6 +563,8 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			conn.Write([]byte(response))
 			return
 		}
+
+		log.Printf("🔧 [Cognex-%d] Validación SKU completada en %.3fms", c.ID, skuDuration.Seconds()*1000)
 
 		resultCh := make(chan insertResult, 1)
 		insertReq := insertRequest{
@@ -514,20 +581,29 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		select {
 		case c.insertChan <- insertReq:
 			response := "ACK\r\n"
+			startACK := time.Now()
 			conn.Write([]byte(response))
-			logTs("✅ ACK enviado (async insert en cola para ID-DB)")
+			ackDuration := time.Since(startACK)
+
+			totalDuration := time.Since(startTotal)
+			logTs(fmt.Sprintf("✅ ACK enviado en %.3fms (async insert en cola para ID-DB)", ackDuration.Seconds()*1000))
+			log.Printf("⏱️  [Cognex-%d] FLUJO COMPLETO ID-DB: Fetch=%.3fms + SKU=%.3fms + ACK=%.3fms = TOTAL %.3fms",
+				c.ID, fetchDuration.Seconds()*1000, skuDuration.Seconds()*1000, ackDuration.Seconds()*1000, totalDuration.Seconds()*1000)
 
 			go func() {
+				startInsert := time.Now() // ⏱️ Medición de inserción async
 				result := <-resultCh
+				insertDuration := time.Since(startInsert)
+
 				if result.err != nil {
-					log.Printf("❌ Error al insertar caja en DB desde ID-DB: %s | Error: %v", message, result.err)
+					log.Printf("❌ Error al insertar caja en DB desde ID-DB: %s | Error: %v (tardó %.2fms)", message, result.err, insertDuration.Seconds()*1000)
 					c.EventChan <- models.NewLecturaFallidaConDatos(
 						fmt.Errorf("error al insertar: %w", result.err),
 						especie, calibre, variedad, embalaje, message, c.dispositivo,
 					)
 				} else {
 					skuFinal := fmt.Sprintf("%s-%s-%s-%d", calibre, strings.ToUpper(result.nombreVariedad), embalaje, dark)
-					log.Printf("📦 Correlativo de caja insertado: %s", result.correlativo)
+					log.Printf("📦 Correlativo de caja insertado: %s (inserción DB: %.2fms)", result.correlativo, insertDuration.Seconds()*1000)
 					log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", result.correlativo, skuFinal, especie)
 					c.EventChan <- models.NewLecturaExitosa(
 						skuFinal, especie, calibre, variedad, embalaje, result.correlativo, message, c.dispositivo,

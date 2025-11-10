@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"API-DANSORT/internal/db"
+	"API-DANSORT/internal/models"
+	"API-DANSORT/internal/shared"
 )
 
 // SKUSyncWorker sincroniza periódicamente SKUs desde SQL Server a PostgreSQL
