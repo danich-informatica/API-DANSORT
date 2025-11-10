@@ -1,7 +1,7 @@
 package sorter
 
 import (
-	"API-GREENEX/internal/models"
+	"api-dansort/internal/models"
 	"log"
 	"time"
 )

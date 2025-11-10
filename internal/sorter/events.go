@@ -1,9 +1,9 @@
 package sorter
 
 import (
-	"API-GREENEX/internal/listeners"
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"api-dansort/internal/listeners"
+	"api-dansort/internal/models"
+	"api-dansort/internal/shared"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,10 +11,13 @@ import (
 	"time"
 )
 
-// procesarEventosCognex procesa eventos de lectura QR/SKU de Cognex
+// procesarEventosCognex procesa los eventos del Cognex principal (QR/SKU)
 func (s *Sorter) procesarEventosCognex() {
-	log.Println("👂 Sorter: Escuchando eventos QR/SKU de Cognex...")
+	if s.Cognex == nil {
+		return // No hacer nada si no hay Cognex principal
+	}
 
+	log.Println("👂 Sorter: Escuchando eventos QR/SKU de Cognex...")
 	for {
 		select {
 		case <-s.ctx.Done():

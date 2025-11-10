@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
-	"API-GREENEX/internal/models"
-	. "API-GREENEX/internal/shared"
+	"api-dansort/internal/models"
+	. "api-dansort/internal/shared"
 )
 
 // WebSocketMessage representa un mensaje enviado a través del WebSocket

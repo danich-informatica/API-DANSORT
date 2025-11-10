@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"API-GREENEX/internal/config"
-	"API-GREENEX/internal/db"
+	"api-dansort/internal/config"
+	"api-dansort/internal/db"
 
 	"github.com/joho/godotenv"
 )

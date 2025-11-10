@@ -14,6 +14,7 @@ type Config struct {
 	Statistics    StatisticsConfig `yaml:"statistics"`
 	CognexDevices []CognexDevice   `yaml:"cognex_devices"`
 	Sorters       []Sorter         `yaml:"sorters"`
+	SKUFormat     string           `yaml:"sku_format"`
 }
 
 type StatisticsConfig struct {
@@ -67,6 +68,7 @@ type SQLServerConfig struct {
 	MaxConnLifetime string `yaml:"max_conn_lifetime"`
 	MaxConnIdleTime string `yaml:"max_conn_idle_time"`
 	SKUSyncInterval string `yaml:"sku_sync_interval"` // Intervalo de sincronización de SKUs
+	SKUFormat       string `yaml:"sku_format"`        // FORMATO PARA CONSTRUIR SKU: CALIBRE, VARIEDAD, EMBALAJE, DARK
 }
 
 // GetSKUSyncInterval retorna la duración del intervalo de sincronización de SKUs
@@ -105,28 +107,28 @@ type CognexDevice struct {
 	Host          string `yaml:"host"`            // Host remoto informativo (de dónde viene)
 	Port          int    `yaml:"port"`            // Puerto en el que escuchará (siempre 0.0.0.0)
 	ScanMethod    string `yaml:"scan_method"`     // Método de escaneo por defecto: "QR" o "DATAMATRIX"
+	SKUFormat     string `yaml:"sku_format"`      // FORMATO PARA CONSTRUIR SKU: CALIBRE, VARIEDAD, EMBALAJE, DARK
 	Ubicacion     string `yaml:"ubicacion"`       // Ubicación física del dispositivo
 	IntervalMs    int    `yaml:"interval_ms"`     // Intervalo entre lecturas (milisegundos) para simulador
 	NoReadPercent int    `yaml:"no_read_percent"` // Porcentaje de lecturas NO_READ para simulador
 }
 
 type Sorter struct {
-	ID              int                   `yaml:"id"`
-	Name            string                `yaml:"name"`
-	CognexID        int                   `yaml:"cognex_id"`    // ID de la cámara Cognex QR/SKU principal del sorter
-	PLCEndpoint     string                `yaml:"plc_endpoint"` // Endpoint OPC UA (ej: "opc.tcp://192.168.120.100:4840")
-	PLC             SorterPLCConfig       `yaml:"plc"`
-	PaletAutomatico PaletAutomaticoConfig `yaml:"palet_automatico"`
-	Salidas         []Salida              `yaml:"salidas"`
-	DefaultSalida   int                   `yaml:"default_salida"`
+	ID                int           `yaml:"id"`
+	Name              string        `yaml:"name"`
+	PLCEndpoint       string        `yaml:"plc_endpoint"`
+	CognexPrincipalID int           `yaml:"cognex_principal_id"`
+	PaletAutomatico   PaletConfig   `yaml:"palet_automatico"`
+	PLC               PLCNodeConfig `yaml:"plc_nodes"`
+	Salidas           []Salida      `yaml:"salidas"`
 }
 
-type PaletAutomaticoConfig struct {
+type PaletConfig struct {
 	Host string `yaml:"host"` // IP del servidor de paletizado (ej: "127.0.0.1")
 	Port int    `yaml:"port"` // Puerto del servidor de paletizado (ej: 9093)
 }
 
-type SorterPLCConfig struct {
+type PLCNodeConfig struct {
 	InputNodeID   string `yaml:"input_node_id"`
 	OutputNodeID  string `yaml:"output_node_id"`
 	ObjectID      string `yaml:"object_id"`

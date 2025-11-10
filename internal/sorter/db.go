@@ -1,10 +1,10 @@
 package sorter
 
 import (
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/listeners"
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"api-dansort/internal/db"
+	"api-dansort/internal/listeners"
+	"api-dansort/internal/models"
+	"api-dansort/internal/shared"
 	"context"
 	"encoding/json"
 	"fmt"

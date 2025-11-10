@@ -22,6 +22,7 @@ database:
     max_conn_lifetime: "30m"
     max_conn_idle_time: "5m"
     sku_sync_interval: "2s" # Intervalo de sincronización de SKUs desde vista (tiempo real)
+    sku_format: "CALIBRE-VARIEDAD-EMBALAJE-DARK" # Formato global de SKU
 
 # Servidor HTTP
 http:
@@ -44,6 +45,7 @@ cognex_devices:
     host: "192.168.121.50" # IP informativa de la cámara física
     port: 9050 # Puerto ÚNICO donde escuchará (0.0.0.0:9050)
     scan_method: "QR" # Método por defecto: QR o DATAMATRIX
+    sku_format: "CALIBRE-VARIEDAD-EMBALAJE"
     ubicacion: "Línea Principal"
     interval_ms: 1000 # Para simulador: 5 segundos entre lecturas
     no_read_percent: 5 # Para simulador: 5% de errores
@@ -53,17 +55,10 @@ cognex_devices:
     host: "192.168.121.101" # IP informativa de la cámara física
     port: 8086 # Puerto ÚNICO donde escuchará (0.0.0.0:8086)
     scan_method: "QR" # Método por defecto: QR o DATAMATRIX
+    sku_format: "CALIBRE-VARIEDAD-EMBALAJE"
     ubicacion: "Línea Secundaria"
     interval_ms: 100 # Para simulador: 10 lecturas/segundo
     no_read_percent: 1 # Para simulador: 1% de errores
-  - id: 3
-    name: "Cognex salida 1"
-    host: "127.0.0.1" # IP informativa de la cámara física
-    port: 8087 # Puerto ÚNICO donde escuchará (0.0.0.0:8087)
-    scan_method: "DATAMATRIX" # Método por defecto: QR o DATAMATRIX
-    ubicacion: "Salida 1"
-    interval_ms: 1000 # Para simulador: 1 segundo entre lecturas
-    no_read_percent: 5 # Para simulador: 5% de errores
 
 # Sorters (múltiples)
 sorters:
@@ -122,55 +117,49 @@ sorters:
           bloqueo_node_id: "ns=4;i=49"
       - id: 6
         physical_id: 6
-        nombre: "Salida automatica"
-        tipo: "automatica"
-        mesa_id: 1
+        nombre: "Salida manual"
+        tipo: "manual"
         batch_size: 1
         plc:
           estado_node_id: "ns=4;i=52"
           bloqueo_node_id: "ns=4;i=53"
       - id: 7
         physical_id: 7
-        nombre: "Salida automatica"
-        tipo: "automatica"
+        nombre: "Salida manual"
+        tipo: "manual"
         batch_size: 1
-        mesa_id: 2
         plc:
           estado_node_id: "ns=4;i=57"
           bloqueo_node_id: "ns=4;i=58"
       - id: 8
         physical_id: 8
-        nombre: "Salida automatica"
-        tipo: "automatica"
+        nombre: "Salida manual"
+        tipo: "manual"
         batch_size: 1
-        mesa_id: 3
         plc:
           estado_node_id: "ns=4;i=62"
           bloqueo_node_id: "ns=4;i=63"
       - id: 9
         physical_id: 9
-        nombre: "Salida automatica"
-        tipo: "automatica"
+        nombre: "Salida manual"
+        tipo: "manual"
         batch_size: 1
-        mesa_id: 4
         plc:
           estado_node_id: "ns=4;i=67"
           bloqueo_node_id: "ns=4;i=68"
       - id: 10
         physical_id: 10
-        nombre: "Salida automatica"
-        tipo: "automatica"
+        nombre: "Salida manual"
+        tipo: "manual"
         batch_size: 1
-        mesa_id: 5
         plc:
           estado_node_id: "ns=4;i=72"
           bloqueo_node_id: "ns=4;i=73"
       - id: 11
         physical_id: 11
-        nombre: "Salida automatica"
-        tipo: "automatica"
+        nombre: "Salida manual"
+        tipo: "manual"
         batch_size: 1
-        mesa_id: 6
         plc:
           estado_node_id: "ns=4;i=77"
           bloqueo_node_id: "ns=4;i=78"

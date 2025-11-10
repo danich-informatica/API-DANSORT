@@ -341,7 +341,7 @@ import (
     "log"
     "time"
     
-    "API-GREENEX/internal/communication/pallet"
+    "api-dansort/internal/communication/pallet"
 )
 
 func main() {

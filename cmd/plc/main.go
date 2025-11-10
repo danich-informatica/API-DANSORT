@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"API-GREENEX/internal/communication/plc"
-	"API-GREENEX/internal/config"
+	"api-dansort/internal/communication/plc"
+	"api-dansort/internal/config"
 
 	"github.com/gopcua/opcua/ua"
 )

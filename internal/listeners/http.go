@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"api-dansort/internal/models"
+	"api-dansort/internal/shared"
 )
 
 // SKUStreamer es una interfaz para streaming de SKUs sin crear import cycle

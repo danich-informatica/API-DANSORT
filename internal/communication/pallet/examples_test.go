@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"API-GREENEX/internal/communication/pallet"
+	"api-dansort/internal/communication/pallet"
 )
 
 // ExampleClient_GetEstadoMesa demuestra cómo consultar el estado de una mesa

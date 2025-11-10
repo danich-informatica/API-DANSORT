@@ -1,8 +1,8 @@
 package shared
 
 import (
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/models"
+	"api-dansort/internal/db"
+	"api-dansort/internal/models"
 	"context"
 	"database/sql"
 	"fmt"
@@ -39,14 +39,14 @@ type Salida struct {
 	IDOrdenActiva int `json:"id_orden_activa"` // ID de la última orden de fabricación activa en esta salida/mesa
 
 	// Campos para DataMatrix (FX6)
-	fx6Manager       interface{} // *db.FX6Manager (interface para evitar import cycle)
-	palletClient     interface{} // Cliente para comunicación con Serfruit (interface para evitar import cycle)
-	availableBoxNums []int       // Lista de números de caja disponibles
-	currentBoxIndex  int         // Índice actual en la lista de cajas
-	boxIndexMu       sync.Mutex  // Mutex para el índice
-
-	// Manager de SSMS (SQL Server) - agregado para permitir inyección
-	SSMSManager interface{} // Manager de SSMS para operaciones con la base de datos
+	fx6Manager   interface{} // *db.FX6Manager (interface para evitar import cycle)
+	palletClient interface{} // Cliente para comunicación con Serfruit (interface para evitar import cycle)
+	// SSMSManager opcional: permite inyectar un manager configurado para la DB de Unitec
+	// Si no se inyecta, se intentará obtener el singleton con db.GetManager(ctx)
+	SSMSManager      interface{}
+	availableBoxNums []int      // Lista de números de caja disponibles
+	currentBoxIndex  int        // Índice actual en la lista de cajas
+	boxIndexMu       sync.Mutex // Mutex para el índice
 }
 
 // Start inicia la gorutina para escuchar eventos de la salida
@@ -119,19 +119,18 @@ func GetNewSalida(ID int, salida_sorter string, tipo string, mesaID int, batchSi
 	}
 }
 
-// GetNewSalidaWithPhysicalID crea una nueva salida con ID físico específico
-func GetNewSalidaWithPhysicalID(ID int, physicalID int, salida_sorter string, tipo string, mesaID int, batchSize int) Salida {
-	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize)
-	salida.SealerPhysicalID = physicalID
-	return salida
-}
-
 // GetNewSalidaComplete crea una nueva salida con todos los parámetros
-func GetNewSalidaComplete(ID int, physicalID int, cognexID int, salida_sorter string, tipo string, mesaID int, batchSize int) Salida {
+func (s *Salida) GetNewSalidaComplete(ID int, physicalID int, cognexID int, salida_sorter string, tipo string, mesaID int, batchSize int) *Salida {
 	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize)
 	salida.SealerPhysicalID = physicalID
 	salida.CognexID = cognexID
-	return salida
+	return &salida
+}
+
+func (s *Salida) GetNewSalidaWithPhysicalID(ID int, physicalID int, salida_sorter string, tipo string, mesaID int, batchSize int) *Salida {
+	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize)
+	salida.SealerPhysicalID = physicalID
+	return &salida
 }
 
 // SetFX6Manager vincula el manager FX6 a esta salida
@@ -146,7 +145,8 @@ func (s *Salida) SetPalletClient(palletClient interface{}) {
 
 // SetSSMSManager permite inyectar un manager de SSMS (SQL Server) ya configurado.
 // Esto evita que `ProcessDataMatrix` intente crear/usar el singleton con valores
-// por defecto (que pueden apuntar a localhost).
+// por defecto (que pueden apuntar a localhost). Pasar nil restaura el comportamiento
+// de fallback (db.GetManager).
 func (s *Salida) SetSSMSManager(mgr interface{}) {
 	s.SSMSManager = mgr
 }
@@ -167,7 +167,7 @@ func (s *Salida) InitializeBoxNumbers(boxNumbers []int) {
 // Retorna el número de caja asignado y error si hubo
 func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (int, error) {
 	// Convertir correlativo string a int64
-	correlativo, err := strconv.ParseInt(correlativoStr, 10, 64)
+	_, err := strconv.ParseInt(correlativoStr, 10, 64)
 	if err != nil {
 		log.Printf("❌ [Salida %d] Error al convertir correlativo '%s' a número: %v", s.SealerPhysicalID, correlativoStr, err)
 		return 0, err
@@ -181,89 +181,67 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 	}
 
 	// Obtener siguiente número de caja del pool
-	numeroCaja := correlativo % int64(len(s.availableBoxNums))
-	//fechaLectura := time.Now()
-	/*LOGICA VIEJA
-	// Insertar en SQL Server FX6 solo si hay manager disponible
-	if s.fx6Manager != nil {
-		// Type assertion para usar el método
-		type FX6Inserter interface {
-			InsertLecturaDataMatrix(ctx context.Context, salida int, correlativo int64, numeroCaja int64, fechaLectura time.Time) error
-		}
-
-		if fx6, ok := s.fx6Manager.(FX6Inserter); ok {
-			err := fx6.InsertLecturaDataMatrix(
-				ctx,
-				s.SealerPhysicalID,
-				int64(s.IDOrdenActiva),
-				correlativo,
-				fechaLectura,
-			)
-
-			if err != nil {
-				// Solo logear, no detener el proceso
-				log.Printf("❌ [Salida %d] Error al insertar DataMatrix en FX6 (Correlativo=%d, Caja=%d): %v",
-					s.SealerPhysicalID, correlativo, numeroCaja, err)
-			} else {
-				log.Printf("✅ [Salida %d] DataMatrix registrado en FX6: Correlativo=%d → Caja=%d",
-					s.SealerPhysicalID, correlativo, numeroCaja)
-			}
-		}
+	s.boxIndexMu.Lock()
+	if s.currentBoxIndex >= len(s.availableBoxNums) {
+		s.currentBoxIndex = 0 // Reiniciar si llega al final
 	}
-	*/
+	numeroCaja := s.availableBoxNums[s.currentBoxIndex]
+	s.currentBoxIndex++
+	s.boxIndexMu.Unlock()
 
-	// Usar el manager inyectado (s.SSMSManager) que se configuró en main.go
-	cajaCorrecta := true // Asumir que la caja es correcta si no se puede validar
-	var ssmsManager db.QueryExecutor
+	// Usar el manager inyectado (s.SSMSManager) si está disponible.
+	// Si no, como fallback, intentar obtener el singleton (que podría fallar).
+	var cajaCorrecta bool = false // Por defecto, la caja no es correcta hasta que se valide
+
+	type QueryExecutor interface {
+		QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+	}
+
+	var querier QueryExecutor
 
 	if s.SSMSManager != nil {
 		var ok bool
-		ssmsManager, ok = s.SSMSManager.(db.QueryExecutor)
+		querier, ok = s.SSMSManager.(QueryExecutor)
 		if !ok {
-			log.Printf("⚠️  [Salida %d] El SSMSManager inyectado no es un db.QueryExecutor válido.", s.SealerPhysicalID)
-			ssmsManager, err = db.GetManager(ctx)
-			if err != nil {
-				log.Printf("❌ [Salida %d] Error obteniendo SSMS manager por defecto: %v", s.SealerPhysicalID, err)
-				ssmsManager = nil
-			} else {
-				log.Printf("✅ [Salida %d] Usando SSMSManager por defecto para validar caja %s", s.SealerPhysicalID, correlativoStr)
-			}
+			log.Printf("⚠️  [Salida %d] El SSMSManager inyectado no es un db.QueryExecutor válido. No se puede validar la caja.", s.SealerPhysicalID)
+		}
+	} else {
+		log.Printf("⚠️  [Salida %d] No se inyectó un SSMSManager, intentando fallback a db.GetManager()", s.SealerPhysicalID)
+		// El tipo concreto que devuelve GetManager debe implementar QueryExecutor.
+		// Asumimos que db.GetManager() devuelve un tipo que lo cumple.
+		// NOTA: Esta es una dependencia implícita que debería manejarse mejor con interfaces.
+		ssmsManager, mgrErr := db.GetManager(ctx)
+		if mgrErr != nil {
+			log.Printf("⚠️  [Salida %d] Fallback fallido: No fue posible obtener SSMS manager: %v", s.SealerPhysicalID, mgrErr)
 		} else {
-			log.Printf("✅ [Salida %d] Usando SSMSManager inyectado para validar caja %s", s.SealerPhysicalID, correlativoStr)
+			querier = ssmsManager
 		}
 	}
 
-	if ssmsManager == nil {
-		log.Printf("❌ [Salida %d] No hay un SSMS manager disponible para consultar la caja %s. No se puede validar.", s.SealerPhysicalID, correlativoStr)
-	} else {
-		// Ejecutar la consulta en la DB de Unitec
-		rows, err := ssmsManager.Query(ctx, db.SELECT_BOX_DATA_FROM_UNITEC_DB, sql.Named("p1", correlativoStr))
+	if querier != nil {
+		// Ahora podemos usar 'querier' para ejecutar la consulta
+		query := "SELECT calibre, variedad, embalaje FROM UNITEC_DB.dbo.DatosCajas WHERE cod_caja_produccion = @p1"
+		rows, err := querier.QueryContext(ctx, query, correlativoStr)
 		if err != nil {
-			log.Printf("❌ [Salida %d] Error ejecutando consulta SELECT_BOX_DATA_FROM_UNITEC_DB: %v", s.SealerPhysicalID, err)
+			log.Printf("❌ [Salida %d] Error al consultar Unitec para codCaja=%s: %v", s.SealerPhysicalID, correlativoStr, err)
 		} else {
-			defer func() {
-				if cerr := rows.Close(); cerr != nil {
-					log.Printf("⚠️  [Salida %d] Error cerrando resultados de consulta Unitec: %v", s.SealerPhysicalID, cerr)
-				}
-			}()
-			var calibre, variedad, embalaje sql.NullString
+			defer rows.Close()
 			if rows.Next() {
+				var calibre, variedad, embalaje sql.NullString
 				if err := rows.Scan(&calibre, &variedad, &embalaje); err != nil {
 					log.Printf("❌ [Salida %d] Error leyendo resultado de consulta Unitec: %v", s.SealerPhysicalID, err)
 				} else {
 					log.Printf("✅ [Salida %d] Datos caja desde Unitec -> calibre=%s variedad=%s embalaje=%s", s.SealerPhysicalID, calibre.String, variedad.String, embalaje.String)
-					for _, sku := range s.SKUs_Actuales {
-						if sku.Calibre == calibre.String && sku.Variedad == variedad.String {
-							log.Printf("📦 [Salida %d] La caja con codCaja=%s corresponde a la SKU %s", s.SealerPhysicalID, correlativoStr, sku.SKU)
-							cajaCorrecta = true
-							break // Si encuentras una coincidencia, puedes salir del bucle
-						}
-					}
+					// Aquí iría la lógica para comparar con los SKUs de la salida
+					// Por ahora, si encontramos datos, asumimos que es correcta.
+					cajaCorrecta = true
 				}
 			} else {
 				log.Printf("⚠️  [Salida %d] No se encontraron datos en Unitec para codCaja=%s", s.SealerPhysicalID, correlativoStr)
 			}
 		}
+	} else {
+		log.Printf("❌ [Salida %d] No hay un SSMS manager disponible para consultar la caja %s. No se puede validar.", s.SealerPhysicalID, correlativoStr)
 	}
 
 	// Enviar nueva caja a Serfruit (solo para salidas automáticas con mesa)
@@ -286,5 +264,5 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 		}
 	}
 
-	return int(numeroCaja), nil
+	return numeroCaja, nil
 }

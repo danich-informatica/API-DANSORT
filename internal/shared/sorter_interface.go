@@ -3,7 +3,7 @@ package shared
 import (
 	"context"
 
-	"API-GREENEX/internal/models"
+	"api-dansort/internal/models"
 )
 
 type SorterInterface interface {

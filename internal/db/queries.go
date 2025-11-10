@@ -2,32 +2,28 @@ package db
 
 // Query CON VIE_Dark y VIE_Descrizione (intentar primero)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
-	SELECT 
-		VIE_CodVarieta AS variedad,
-		VIE_Classe AS calibre,
-		VIE_CodConfezione AS embalaje,
-		VIE_Dark AS dark,
-		VIE_Varieta AS nombre_variedad,
-		VIE_codLinea AS linea
-	FROM dbo.VW_INT_DANICH_ENVIVO
-	WHERE VIE_CodVarieta IS NOT NULL 
-	  AND VIE_Classe IS NOT NULL 
-	  AND VIE_CodConfezione IS NOT NULL;
+	SELECT DISTINCT 
+		dc.CalibreTimbrado as calibre, 
+		dc.codVariedadTimbrada as variedad, 
+		dc.codConfeccion as embalaje,
+		0 as dark,
+		dc.VariedadTimbrada AS nombre_variedad,
+		1 AS linea
+	FROM DatosCajas dc
+	WHERE dc.proceso = (SELECT MAX(proceso) FROM DatosCajas);
 `
 
 // Query SIN VIE_Dark (fallback si la columna no existe)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
-	SELECT 
-		VIE_CodVarieta AS variedad,
-		VIE_Classe AS calibre,
-		VIE_CodConfezione AS embalaje,
-		0 AS dark,
-		VIE_Varieta AS nombre_variedad,
-		VIE_codLinea AS linea
-	FROM dbo.VW_INT_DANICH_ENVIVO
-	WHERE VIE_CodVarieta IS NOT NULL 
-	  AND VIE_Classe IS NOT NULL 
-	  AND VIE_CodConfezione IS NOT NULL;
+	SELECT DISTINCT 
+		dc.CalibreTimbrado as calibre, 
+		dc.codVariedadTimbrada as variedad, 
+		dc.codConfeccion as embalaje,
+		0 as dark,
+		dc.VariedadTimbrada AS nombre_variedad,
+		1 AS linea
+	FROM DatosCajas dc
+	WHERE dc.proceso = (SELECT MAX(proceso) FROM DatosCajas);
 `
 
 const SELECT_BOX_DATA_FROM_UNITEC_DB = `

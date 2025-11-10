@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"API-GREENEX/internal/communication/pallet"
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"api-dansort/internal/communication/pallet"
+	"api-dansort/internal/models"
+	"api-dansort/internal/shared"
 )
 
 // AssignSKUToSalida asigna una SKU a una salida específica
@@ -119,25 +119,13 @@ func (s *Sorter) IsTableAvailable(ctx context.Context, mesaID int, client *palle
 
 // SendFrabricationOrder envía una orden de fabricación al sistema de paletizaje
 func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, client *pallet.Client) {
-	// Protección contra panics en la goroutine
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("🚨 PANIC en Sorter #%d SendFrabricationOrder: %v", s.ID, r)
-			log.Printf("🚨 Stack trace: %+v", r)
-			// Imprimir información de debug
-			log.Printf("🚨 Debug - Mesa: %d, SKU Embalaje: %s", salida.MesaID, sku.Embalaje)
-		}
-	}()
-
 	log.Printf("🚚 Sorter #%d: Iniciando envío de orden de fabricación para mesa %d", s.ID, salida.MesaID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// Valores fijos
-	const (
-		NumeroPalesFijo = 0 // Fijo
-	)
+	var NumeroPalesFijo = 0 // Fijo
 
 	// Obtener datos dinámicos de FX_Sync usando el código de embalaje
 	var cajasPerPale int
@@ -146,7 +134,7 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 	var codigoTipoPale string
 	var flejado int
 
-	log.Printf("ℹ️ Sorter #%d: Verificando FXSyncManager...", s.ID)
+	NumeroPalesFijo = 1 // Fijo (mínimo 1 para cumplir constraint de DB)
 	if s.fxSyncManager != nil {
 		// Type assertion para usar el método
 		// Usamos interface{} genérica ya que OrdenFabricacionData está en package db
@@ -164,8 +152,6 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 				return
 			}
 
-			log.Printf("✅ Sorter #%d: Consulta a V_Danish exitosa. Tipo de datos recibido: %T", s.ID, ofDataRaw)
-
 			// Extraer campos usando reflection ya que viene como interface{}
 			// Usamos interface con métodos getter para acceder a los campos
 			type OFDataGetter interface {
@@ -176,17 +162,14 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 				GetFlejado() int64
 			}
 
-			log.Printf("🔬 Sorter #%d: Intentando extraer datos con interface de métodos...", s.ID)
 			// Intentar con interface de métodos
 			if ofGetter, ok := ofDataRaw.(OFDataGetter); ok {
-				log.Printf("✅ Sorter #%d: Usando interface de métodos para extraer datos", s.ID)
 				cajasPerPale = ofGetter.GetCajasPerPale()
 				cajasPerCapa = ofGetter.GetCajasPerCapa()
 				codigoTipoEnvase = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(ofGetter.GetCodigoTipoEnvase(), "\n", ""), "\r", ""))
 				codigoTipoPale = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(ofGetter.GetCodigoTipoPale(), "\n", ""), "\r", ""))
 				flejado = int(ofGetter.GetFlejado())
 			} else {
-				log.Printf("🔬 Sorter #%d: Interface de métodos no disponible, usando reflection...", s.ID)
 				// Fallback: usar reflection para extraer campos
 				// Esto funciona con cualquier struct que tenga los campos correctos
 				v := reflect.ValueOf(ofDataRaw)
@@ -200,43 +183,11 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 					return
 				}
 
-				// Validar y extraer cada campo de forma segura
-				fieldCajasPerPale := v.FieldByName("CajasPerPale")
-				if !fieldCajasPerPale.IsValid() {
-					log.Printf("❌ Sorter #%d: Campo CajasPerPale no existe en la estructura", s.ID)
-					return
-				}
-				cajasPerPale = int(fieldCajasPerPale.Int())
-
-				fieldCajasPerCapa := v.FieldByName("CajasPerCapa")
-				if !fieldCajasPerCapa.IsValid() {
-					log.Printf("❌ Sorter #%d: Campo CajasPerCapa no existe en la estructura", s.ID)
-					return
-				}
-				cajasPerCapa = int(fieldCajasPerCapa.Int())
-
-				fieldCodigoTipoEnvase := v.FieldByName("CodigoTipoEnvase")
-				if !fieldCodigoTipoEnvase.IsValid() {
-					log.Printf("❌ Sorter #%d: Campo CodigoTipoEnvase no existe en la estructura", s.ID)
-					return
-				}
-				codigoTipoEnvase = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(fieldCodigoTipoEnvase.String(), "\n", ""), "\r", ""))
-
-				fieldCodigoTipoPale := v.FieldByName("CodigoTipoPale")
-				if !fieldCodigoTipoPale.IsValid() {
-					log.Printf("❌ Sorter #%d: Campo CodigoTipoPale no existe en la estructura", s.ID)
-					return
-				}
-				codigoTipoPale = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(fieldCodigoTipoPale.String(), "\n", ""), "\r", ""))
-
-				fieldFlejado := v.FieldByName("Flejado")
-				if !fieldFlejado.IsValid() {
-					log.Printf("❌ Sorter #%d: Campo Flejado no existe en la estructura", s.ID)
-					return
-				}
-				flejado = int(fieldFlejado.Int())
-
-				log.Printf("✅ Sorter #%d: Datos extraídos con reflection exitosamente", s.ID)
+				cajasPerPale = int(v.FieldByName("CajasPerPale").Int())
+				cajasPerCapa = int(v.FieldByName("CajasPerCapa").Int())
+				codigoTipoEnvase = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(v.FieldByName("CodigoTipoEnvase").String(), "\n", ""), "\r", ""))
+				codigoTipoPale = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(v.FieldByName("CodigoTipoPale").String(), "\n", ""), "\r", ""))
+				flejado = int(v.FieldByName("Flejado").Int())
 			}
 
 			log.Printf("📊 Sorter #%d: Datos obtenidos de V_Danish para '%s': %d cajas/palé, %d cajas/capa, envase='%s', palé='%s', flejado=%d",

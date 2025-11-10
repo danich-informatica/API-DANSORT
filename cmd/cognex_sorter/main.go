@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"API-GREENEX/internal/models"
+	"api-dansort/internal/models"
 )
 
 // Combinaciones válidas de SKUs basadas en la tabla de la base de datos

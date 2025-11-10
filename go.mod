@@ -1,4 +1,4 @@
-module API-GREENEX
+module api-dansort
 
 go 1.23.0
 

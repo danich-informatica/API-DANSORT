@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"API-GREENEX/internal/config"
+	"api-dansort/internal/config"
 )
 
 // ============================================================================

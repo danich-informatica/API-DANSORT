@@ -1,6 +1,7 @@
 package db
 
 import (
+	"api-dansort/internal/models"
 	"context"
 	"fmt"
 	"log"
@@ -184,6 +185,12 @@ func (m *PostgresManager) RunQuery(ctx context.Context, query string, args ...an
 
 func (m *PostgresManager) Ping(ctx context.Context) error {
 	return m.pool.Ping(ctx)
+}
+
+// SyncSKUs sincroniza los SKUs con la base de datos PostgreSQL
+func (m *PostgresManager) SyncSKUs(ctx context.Context, skus []models.SKU) (int, int, error) {
+	// Implementación para sincronizar SKUs
+	return 0, 0, fmt.Errorf("not implemented")
 }
 
 type pgConfig struct {

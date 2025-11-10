@@ -11,7 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"API-GREENEX/internal/config"
+	"api-dansort/internal/config"
+	"api-dansort/internal/models"
 
 	"github.com/joho/godotenv"
 	_ "github.com/microsoft/go-mssqldb"
@@ -195,26 +196,6 @@ func (m *Manager) DB() *sql.DB {
 	return m.db
 }
 
-// Exec ejecuta una sentencia SQL (INSERT/UPDATE/DELETE) y devuelve el resultado.
-func (m *Manager) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	return m.db.ExecContext(ctx, query, args...)
-}
-
-// Query ejecuta una consulta que devuelve filas múltiples.
-func (m *Manager) Query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	return m.db.QueryContext(ctx, query, args...)
-}
-
-// QueryRow ejecuta una consulta que espera exactamente una fila de resultado.
-func (m *Manager) QueryRow(ctx context.Context, query string, args ...any) *sql.Row {
-	return m.db.QueryRowContext(ctx, query, args...)
-}
-
-// Ping permite verificar el estado del pool contra la base de datos.
-func (m *Manager) Ping(ctx context.Context) error {
-	return m.db.PingContext(ctx)
-}
-
 type sqlServerConfig struct {
 	DSN             string
 	Host            string
@@ -226,6 +207,26 @@ type sqlServerConfig struct {
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
+}
+
+// Exec ejecuta una sentencia SQL (INSERT/UPDATE/DELETE) y devuelve el resultado.
+func (m *Manager) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return m.db.ExecContext(ctx, query, args...)
+}
+
+// QueryContext ejecuta una consulta que devuelve filas, típicamente un SELECT.
+func (m *Manager) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	return m.db.QueryContext(ctx, query, args...)
+}
+
+// Query ejecuta una consulta que devuelve filas múltiples.
+func (m *Manager) Query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return m.db.QueryContext(ctx, query, args...)
+}
+
+// QueryRow ejecuta una consulta que espera exactamente una fila de resultado.
+func (m *Manager) QueryRow(ctx context.Context, query string, args ...any) *sql.Row {
+	return m.db.QueryRowContext(ctx, query, args...)
 }
 
 func loadConfig() (*sqlServerConfig, error) {
@@ -280,6 +281,39 @@ func loadConfig() (*sqlServerConfig, error) {
 	)
 
 	return cfg, nil
+}
+
+// GetSKUsFromView obtiene los SKUs desde la vista de UNITEC DB.
+func (m *Manager) GetSKUsFromView(ctx context.Context) ([]models.SKU, error) {
+	rows, err := m.db.QueryContext(ctx, SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA)
+	if err != nil {
+		// Fallback a la query sin VIE_Dark
+		log.Printf("⚠️  Error con la query principal de SKUs, intentando fallback: %v", err)
+		rows, err = m.db.QueryContext(ctx, SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK)
+		if err != nil {
+			return nil, fmt.Errorf("error al consultar SKUs desde UNITEC (incluso con fallback): %w", err)
+		}
+	}
+	defer rows.Close()
+
+	var skus []models.SKU
+	for rows.Next() {
+		var sku models.SKU
+		var nombreVariedad sql.NullString
+		if err := rows.Scan(&sku.Calibre, &sku.Variedad, &sku.Embalaje, &sku.Dark, &nombreVariedad, &sku.Linea); err != nil {
+			log.Printf("⚠️  Error al escanear fila de SKU: %v", err)
+			continue
+		}
+		sku.Estado = true // Marcar como activo por defecto
+		skus = append(skus, sku)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error durante la iteración de filas de SKU: %w", err)
+	}
+
+	log.Printf("✅ %d SKUs obtenidos desde UNITEC", len(skus))
+	return skus, nil
 }
 
 func visibleDatabase(name string) string {

@@ -1,7 +1,7 @@
 package sorter
 
 import (
-	"API-GREENEX/internal/shared"
+	"api-dansort/internal/shared"
 	"log"
 )
 
@@ -24,12 +24,15 @@ func (s *Sorter) determinarSalida(sku, calibre string) shared.Salida {
 func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
 	// Buscar TODAS las salidas que tienen este SKU en SKUs_Actuales
 	var todasLasSalidas []*shared.Salida
-
 	for i := range s.Salidas {
-		for _, skuConfig := range s.Salidas[i].SKUs_Actuales {
-			if skuConfig.SKU == sku {
-				todasLasSalidas = append(todasLasSalidas, &s.Salidas[i])
-				break
+		// OPTIMIZACIÓN: Usar el estado en memoria en lugar de leer el PLC en cada llamada.
+		// El estado se actualiza en background por la suscripción OPC UA.
+		if s.Salidas[i].GetEstado() == 1 { // 1 = ANDANDO
+			for _, skuConfig := range s.Salidas[i].SKUs_Actuales {
+				if skuConfig.SKU == sku {
+					todasLasSalidas = append(todasLasSalidas, &s.Salidas[i])
+					break
+				}
 			}
 		}
 	}
@@ -107,7 +110,9 @@ func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
 	// Ninguna salida disponible
 	log.Printf("🚨 [Sorter %d] SKU '%s': Ninguna de las %d salidas está disponible (todas bloqueadas/llenas)", s.ID, sku, len(todasLasSalidas))
 	return nil
-} // getSalidaDescarte obtiene salida de descarte como último recurso
+}
+
+// getSalidaDescarte obtiene salida de descarte como último recurso
 // SOLO usa la salida con SKU "REJECT" asignado, no cualquier salida manual
 func (s *Sorter) getSalidaDescarte(sku string) shared.Salida {
 	// Buscar SOLO la salida que tiene "REJECT" asignado

@@ -6,8 +6,8 @@ import (
 	"log"
 	"sync"
 
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/models"
+	"api-dansort/internal/db"
+	"api-dansort/internal/models"
 )
 
 // SKUManager gestiona las operaciones relacionadas con los SKUs.

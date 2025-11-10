@@ -29,6 +29,37 @@ func (s *SKU) BuildSKU() string {
 	return fmt.Sprintf("%s-%s-%s-%d", s.Calibre, strings.ToUpper(variedad), s.Embalaje, s.Dark)
 }
 
+// BuildSKUFromFormat construye una SKU basada en un formato dinámico.
+// El formato es una cadena de texto con placeholders como "CALIBRE", "VARIEDAD", "EMBALAJE", "DARK".
+func (s *SKU) BuildSKUFromFormat(format string) (string, error) {
+	if format == "" {
+		// Si no hay formato, usamos el por defecto para mantener compatibilidad
+		return s.BuildSKU(), nil
+	}
+
+	variedad := s.NombreVariedad
+	if variedad == "" {
+		variedad = s.Variedad // Fallback al código si no hay nombre
+	}
+
+	r := strings.NewReplacer(
+		"CALIBRE", s.Calibre,
+		"VARIEDAD", strings.ToUpper(variedad),
+		"EMBALAJE", s.Embalaje,
+		"DARK", fmt.Sprintf("%d", s.Dark),
+	)
+
+	sku := r.Replace(format)
+
+	// Verificación simple para asegurar que todos los placeholders fueron reemplazados.
+	// Si aún queda algún placeholder, significa que faltó un dato.
+	if strings.Contains(sku, "CALIBRE") || strings.Contains(sku, "VARIEDAD") || strings.Contains(sku, "EMBALAJE") || strings.Contains(sku, "DARK") {
+		return "", fmt.Errorf("no se pudieron reemplazar todos los placeholders en el formato de SKU '%s'. Resultado parcial: '%s'", format, sku)
+	}
+
+	return sku, nil
+}
+
 // CleanSKU limpia el formato de SKU de la base de datos:
 // - Remueve paréntesis: (XXX,XXX,XXX) -> XXX,XXX,XXX
 // - Remueve ",t" al final

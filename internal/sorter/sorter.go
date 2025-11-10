@@ -1,10 +1,10 @@
 package sorter
 
 import (
-	"API-GREENEX/internal/communication/plc"
-	"API-GREENEX/internal/listeners"
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"api-dansort/internal/communication/plc"
+	"api-dansort/internal/listeners"
+	"api-dansort/internal/models"
+	"api-dansort/internal/shared"
 	"context"
 	"fmt"
 	"log"
@@ -82,6 +82,16 @@ func (bd *BatchDistributor) NextSalida() int {
 	}
 
 	return salidaID
+}
+
+// SetSSMSManagerForAllSalidas inyecta el manager de SSMS en todas las salidas del sorter.
+// Esto es crucial para que las consultas de DataMatrix a Unitec usen la conexión
+// correcta en lugar de la de localhost por defecto.
+func (s *Sorter) SetSSMSManagerForAllSalidas(ssmsManager interface{}) {
+	for i := range s.Salidas {
+		// Usamos el puntero para modificar la instancia original en el slice
+		s.Salidas[i].SetSSMSManager(ssmsManager)
+	}
 }
 
 // GetSalidas retorna todas las salidas del sorter

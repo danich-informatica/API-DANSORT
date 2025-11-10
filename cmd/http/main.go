@@ -7,12 +7,12 @@ import (
 	"os"
 	"time"
 
-	"API-GREENEX/internal/config"
-	"API-GREENEX/internal/db"
-	"API-GREENEX/internal/flow"
-	"API-GREENEX/internal/listeners"
-	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
+	"api-dansort/internal/config"
+	"api-dansort/internal/db"
+	"api-dansort/internal/flow"
+	"api-dansort/internal/listeners"
+	"api-dansort/internal/models"
+	"api-dansort/internal/shared"
 
 	"github.com/joho/godotenv"
 )
