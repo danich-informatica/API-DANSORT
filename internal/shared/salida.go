@@ -221,7 +221,13 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 		ssmsManager, ok = s.SSMSManager.(db.QueryExecutor)
 		if !ok {
 			log.Printf("⚠️  [Salida %d] El SSMSManager inyectado no es un db.QueryExecutor válido.", s.SealerPhysicalID)
-			ssmsManager = nil // Asegurarse de que sea nil si la aserción de tipo falla
+			ssmsManager, err = db.GetManager(ctx)
+			if err != nil {
+				log.Printf("❌ [Salida %d] Error obteniendo SSMS manager por defecto: %v", s.SealerPhysicalID, err)
+				ssmsManager = nil
+			} else {
+				log.Printf("✅ [Salida %d] Usando SSMSManager por defecto para validar caja %s", s.SealerPhysicalID, correlativoStr)
+			}
 		} else {
 			log.Printf("✅ [Salida %d] Usando SSMSManager inyectado para validar caja %s", s.SealerPhysicalID, correlativoStr)
 		}
