@@ -416,6 +416,190 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 				c.dispositivo,
 			)
 		}
+	case "ID-DB":
+		logTs("📊 ID detectado: %s", strings.TrimSpace(message))
+		message = strings.TrimSpace(message)
+
+		if message == "" {
+			log.Printf("❌ Mensaje vacío recibido")
+			response := "NACK\r\n"
+
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("mensaje vacío"), message, c.dispositivo)
+
+			conn.Write([]byte(response))
+			return
+		}
+
+		if strings.TrimSpace(message) == models.NO_READ_CODE {
+			log.Printf("❌ Código NO_READ recibido")
+			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("NO_READ"), message, c.dispositivo)
+			conn.Write([]byte(response))
+			return
+		}
+
+		// Extraer componentes (formato: Especie;Calibre;Dark;Embalaje;Variedad)
+		especie := strings.TrimSpace(message_splitted[0])
+		calibre := strings.TrimSpace(message_splitted[1])
+		darkStr := strings.TrimSpace(message_splitted[2])
+		embalaje := strings.TrimSpace(message_splitted[3])
+		// message_splitted[4] es etiqueta/marca (no se usa)
+		variedad := strings.TrimSpace(message_splitted[4])
+
+		// Validar que los componentes no estén vacíos
+		if especie == "" || calibre == "" || embalaje == "" || variedad == "" {
+			log.Printf("❌ Componentes vacíos en mensaje: %s", message)
+			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("componentes vacíos"), message, c.dispositivo)
+			conn.Write([]byte(response))
+			return
+		}
+
+		// Parsear el valor de dark (esperamos "0" o "1")
+		var dark int
+		if darkStr == "0" || darkStr == "" {
+			dark = 0
+		} else if darkStr == "1" {
+			dark = 1
+		} else {
+			log.Printf("⚠️  Valor dark inválido '%s', usando 0 por defecto", darkStr)
+			dark = 0
+		}
+
+		// Generar SKU para validación
+		sku, err := models.RequestSKU(variedad, calibre, embalaje, dark)
+		if err != nil {
+			log.Printf("❌ SKU inválido generado desde mensaje: %s | Error: %v", message, err)
+			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallidaConDatos(
+				err,
+				especie,
+				calibre,
+				variedad,
+				embalaje,
+				message,
+				c.dispositivo,
+			)
+			conn.Write([]byte(response))
+			return
+		}
+
+		// Inserción asíncrona en DB para máxima velocidad
+		resultCh := make(chan insertResult, 1)
+		insertReq := insertRequest{
+			especie:  especie,
+			variedad: variedad,
+			calibre:  calibre,
+			embalaje: embalaje,
+			dark:     dark, // Usar el dark extraído del QR
+			sku:      sku.SKU,
+			message:  message,
+			resultCh: resultCh,
+		}
+
+		// Enviar al worker (no bloqueante si hay buffer disponible)
+		select {
+		case c.insertChan <- insertReq:
+			// Enviado al worker, responder inmediatamente ACK
+			response := "ACK\r\n"
+			conn.Write([]byte(response))
+			logTs("✅ ACK enviado (async insert en cola)")
+
+			// Procesar resultado en goroutine para no bloquear
+			go func() {
+				result := <-resultCh
+				if result.err != nil {
+					log.Printf("❌ Error al insertar caja en DB desde mensaje: %s | Error: %v", message, result.err)
+					c.EventChan <- models.NewLecturaFallidaConDatos(
+						fmt.Errorf("error al insertar: %w", result.err),
+						especie,
+						calibre,
+						variedad,
+						embalaje,
+						message,
+						c.dispositivo,
+					)
+				} else {
+					// Reconstruir SKU con nombre de variedad en vez de código
+					skuFinal := fmt.Sprintf("%s-%s-%s-%d",
+						calibre,
+						strings.ToUpper(result.nombreVariedad),
+						embalaje,
+						dark)
+
+					log.Printf("📦 Correlativo de caja insertado: %s", result.correlativo)
+					log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", result.correlativo, skuFinal, especie)
+					c.EventChan <- models.NewLecturaExitosa(
+						skuFinal,
+						especie,
+						calibre,
+						variedad,
+						embalaje,
+						result.correlativo,
+						message,
+						c.dispositivo,
+					)
+				}
+			}()
+
+		default:
+			// Buffer lleno, responder NACK y procesar síncrono
+			log.Printf("⚠️  Buffer de inserciones lleno, procesando síncronamente")
+			ctx := context.Background()
+			correlativo, err := c.dbManager.InsertNewBox(
+				ctx,
+				especie,
+				variedad,
+				calibre,
+				embalaje,
+				dark, // Usar el dark extraído del QR
+			)
+
+			if err != nil {
+				log.Printf("❌ Error al insertar caja en DB desde mensaje: %s | Error: %v", message, err)
+				response := "NACK\r\n"
+				c.EventChan <- models.NewLecturaFallidaConDatos(
+					fmt.Errorf("error al insertar: %w", err),
+					especie,
+					calibre,
+					variedad,
+					embalaje,
+					message,
+					c.dispositivo,
+				)
+				conn.Write([]byte(response))
+				return
+			}
+
+			// Obtener nombre de variedad para construir SKU correctamente
+			nombreVariedad := variedad
+			nombreVar, errNombre := c.dbManager.GetNombreVariedad(ctx, variedad)
+			if errNombre == nil && nombreVar != "" {
+				nombreVariedad = nombreVar
+			}
+
+			// Reconstruir SKU con nombre de variedad en vez de código
+			skuFinal := fmt.Sprintf("%s-%s-%s-%d",
+				calibre,
+				strings.ToUpper(nombreVariedad),
+				embalaje,
+				dark)
+
+			response := "ACK\r\n"
+			conn.Write([]byte(response))
+			log.Printf("📦 Correlativo de caja insertado: %s", correlativo)
+			log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", correlativo, skuFinal, especie)
+			c.EventChan <- models.NewLecturaExitosa(
+				skuFinal,
+				especie,
+				calibre,
+				variedad,
+				embalaje,
+				correlativo,
+				message,
+				c.dispositivo,
+			)
+		}
 	case "DATAMATRIX":
 		logTs("📊 DataMatrix detectado: %s", strings.TrimSpace(message))
 		message = strings.TrimSpace(message)
