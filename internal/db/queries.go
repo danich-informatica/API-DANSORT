@@ -2,9 +2,9 @@ package db
 
 // Query CON VIE_Dark y VIE_Descrizione (intentar primero)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
-	SELECT DISTINCT 
-		dc.CalibreTimbrado as calibre, 
-		dc.codVariedadTimbrada as variedad, 
+	SELECT DISTINCT
+		dc.CalibreTimbrado as calibre,
+		dc.codVariedadTimbrada as variedad,
 		dc.codConfeccion as embalaje,
 		0 as dark,
 		dc.VariedadTimbrada AS nombre_variedad,
@@ -15,9 +15,9 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 
 // Query SIN VIE_Dark (fallback si la columna no existe)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
-	SELECT DISTINCT 
-		dc.CalibreTimbrado as calibre, 
-		dc.codVariedadTimbrada as variedad, 
+	SELECT DISTINCT
+		dc.CalibreTimbrado as calibre,
+		dc.codVariedadTimbrada as variedad,
 		dc.codConfeccion as embalaje,
 		0 as dark,
 		dc.VariedadTimbrada AS nombre_variedad,

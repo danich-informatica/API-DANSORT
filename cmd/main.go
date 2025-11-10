@@ -168,7 +168,6 @@ func main() {
 			cognexCfg.Host,
 			cognexCfg.Port,
 			cognexCfg.ScanMethod,
-			cfg.SKUFormat,
 			dbManager,
 		)
 
@@ -524,7 +523,6 @@ func startSKUSyncWorker(ctx context.Context, cfg *config.Config, dbManager *db.P
 		skuManager,
 		sorterInterfaces,
 		syncInterval,
-		cfg.SKUFormat,
 	)
 	go syncWorker.Start()
 	log.Printf("   ✅ Sync Worker iniciado (intervalo: %v)", syncInterval)

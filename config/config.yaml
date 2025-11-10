@@ -22,7 +22,7 @@ database:
     max_conn_lifetime: "30m"
     max_conn_idle_time: "5m"
     sku_sync_interval: "2s" # Intervalo de sincronización de SKUs desde vista (tiempo real)
-    sku_format: "CALIBRE-VARIEDAD-EMBALAJE-DARK" # Formato global de SKU
+    sku_format: "CALIBRE-VARIEDAD-EMBALAJE" # Formato global de SKU
 
 # Servidor HTTP
 http:

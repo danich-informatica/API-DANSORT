@@ -189,8 +189,43 @@ func (m *PostgresManager) Ping(ctx context.Context) error {
 
 // SyncSKUs sincroniza los SKUs con la base de datos PostgreSQL
 func (m *PostgresManager) SyncSKUs(ctx context.Context, skus []models.SKU) (int, int, error) {
-	// Implementación para sincronizar SKUs
-	return 0, 0, fmt.Errorf("not implemented")
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("error al iniciar transacción: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	insertedCount := 0
+	updatedCount := 0
+
+	for _, sku := range skus {
+		// Intentar insertar el SKU
+		_, err := tx.Exec(ctx,
+			`INSERT INTO sku (calibre, variedad, embalaje, dark, estado, linea)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (calibre, variedad, embalaje, dark) DO UPDATE SET
+			 estado = $5, linea = $6`,
+			sku.Calibre, sku.Variedad, sku.Embalaje, sku.Dark, sku.Estado, sku.Linea,
+		)
+
+		if err != nil {
+			// Comprobar si el error es por violación de unicidad para contar como actualización
+			if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
+				updatedCount++
+			} else {
+				log.Printf("Error al sincronizar SKU '%s': %v", sku.SKU, err)
+				// Decidir si continuar o abortar
+			}
+		} else {
+			insertedCount++
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, fmt.Errorf("error al confirmar transacción: %w", err)
+	}
+
+	return insertedCount, updatedCount, nil
 }
 
 type pgConfig struct {

@@ -319,20 +319,8 @@ func (c *Client) writePump() {
 				return
 			}
 
-			w, err := c.Conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			w.Write(message)
-
-			// Agregar mensajes en cola al frame actual
-			n := len(c.Send)
-			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.Send)
-			}
-
-			if err := w.Close(); err != nil {
+			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				log.Printf("❌ Error al escribir mensaje WebSocket: %v", err)
 				return
 			}
 

@@ -14,7 +14,6 @@ type Config struct {
 	Statistics    StatisticsConfig `yaml:"statistics"`
 	CognexDevices []CognexDevice   `yaml:"cognex_devices"`
 	Sorters       []Sorter         `yaml:"sorters"`
-	SKUFormat     string           `yaml:"sku_format"`
 }
 
 type StatisticsConfig struct {
@@ -68,7 +67,6 @@ type SQLServerConfig struct {
 	MaxConnLifetime string `yaml:"max_conn_lifetime"`
 	MaxConnIdleTime string `yaml:"max_conn_idle_time"`
 	SKUSyncInterval string `yaml:"sku_sync_interval"` // Intervalo de sincronización de SKUs
-	SKUFormat       string `yaml:"sku_format"`        // FORMATO PARA CONSTRUIR SKU: CALIBRE, VARIEDAD, EMBALAJE, DARK
 }
 
 // GetSKUSyncInterval retorna la duración del intervalo de sincronización de SKUs
@@ -107,7 +105,6 @@ type CognexDevice struct {
 	Host          string `yaml:"host"`            // Host remoto informativo (de dónde viene)
 	Port          int    `yaml:"port"`            // Puerto en el que escuchará (siempre 0.0.0.0)
 	ScanMethod    string `yaml:"scan_method"`     // Método de escaneo por defecto: "QR" o "DATAMATRIX"
-	SKUFormat     string `yaml:"sku_format"`      // FORMATO PARA CONSTRUIR SKU: CALIBRE, VARIEDAD, EMBALAJE, DARK
 	Ubicacion     string `yaml:"ubicacion"`       // Ubicación física del dispositivo
 	IntervalMs    int    `yaml:"interval_ms"`     // Intervalo entre lecturas (milisegundos) para simulador
 	NoReadPercent int    `yaml:"no_read_percent"` // Porcentaje de lecturas NO_READ para simulador

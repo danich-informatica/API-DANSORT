@@ -40,7 +40,6 @@ type CognexListener struct {
 	remoteHost     string // Host remoto de donde viene la cámara (solo informativo)
 	port           int
 	scan_method    string // "QR" o "DATAMATRIX"
-	skuFormat      string // Formato de SKU personalizado
 	listener       net.Listener
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -51,7 +50,7 @@ type CognexListener struct {
 	dispositivo    string
 }
 
-func NewCognexListener(id int, remoteHost string, port int, scan_method string, skuFormat string, dbManager *db.PostgresManager) *CognexListener {
+func NewCognexListener(id int, remoteHost string, port int, scan_method string, dbManager *db.PostgresManager) *CognexListener {
 	ctx, cancel := context.WithCancel(context.Background())
 	dispositivo := fmt.Sprintf("Cognex-%d:%d", id, port)
 	cl := &CognexListener{
@@ -60,7 +59,6 @@ func NewCognexListener(id int, remoteHost string, port int, scan_method string, 
 		port:           port,
 		ctx:            ctx,
 		scan_method:    scan_method,
-		skuFormat:      skuFormat,
 		cancel:         cancel,
 		dbManager:      dbManager,
 		EventChan:      make(chan models.LecturaEvent, 100),    // buffer para 100 eventos QR/SKU

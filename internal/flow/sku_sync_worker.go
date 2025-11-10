@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"api-dansort/internal/db"
+	"api-dansort/internal/listeners"
 	"api-dansort/internal/models"
 	"api-dansort/internal/shared"
 )
@@ -20,7 +21,7 @@ type SKUSyncWorker struct {
 	skuManager   *SKUManager
 	sorters      []shared.SorterInterface // Lista de sorters a notificar
 	interval     time.Duration
-	skuFormat    string // Formato de SKU global
+	wsHub        interface{}
 }
 
 // NewSKUSyncWorker crea una nueva instancia del worker de sincronización
@@ -31,7 +32,7 @@ func NewSKUSyncWorker(
 	skuManager *SKUManager,
 	sorters []shared.SorterInterface,
 	interval time.Duration,
-	skuFormat string,
+	wsHub interface{},
 ) *SKUSyncWorker {
 	workerCtx, cancel := context.WithCancel(ctx)
 	return &SKUSyncWorker{
@@ -42,7 +43,7 @@ func NewSKUSyncWorker(
 		skuManager:   skuManager,
 		sorters:      sorters,
 		interval:     interval,
-		skuFormat:    skuFormat,
+		wsHub:        wsHub,
 	}
 }
 
@@ -104,7 +105,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 	log.Println("🔄 Iniciando sincronización de SKUs desde UNITEC...")
 
 	// 1. Obtener SKUs desde SQL Server (fuente de verdad)
-	skusFromSQLServer, err := w.sqlServerMgr.GetSKUsFromView(ctx, w.skuFormat)
+	skusFromSQLServer, err := w.sqlServerMgr.GetSKUsFromView(ctx)
 	if err != nil {
 		log.Printf("❌ Error al obtener SKUs desde SQL Server: %v", err)
 		return
@@ -136,8 +137,17 @@ func (w *SKUSyncWorker) syncSKUs() {
 
 	log.Printf("📤 Sync SKU: Propagando %d SKUs (REJECT + %d activos) a sorters...", len(assignableSKUs), len(activeSKUs))
 
+	// Notificar a los sorters para que actualicen sus listas internas
 	for _, sorter := range w.sorters {
 		sorter.UpdateSKUs(assignableSKUs)
+	}
+	log.Printf("📤 Sync SKU: Propagando %d SKUs (REJECT + %d activos) a sorters...", len(assignableSKUs), len(activeSKUs))
+
+	// Forzar notificación al WebSocket
+	for _, sorter := range w.sorters {
+		if hub, ok := w.wsHub.(*listeners.WebSocketHub); ok {
+			hub.NotifySKUAssigned(sorter)
+		}
 	}
 
 	log.Printf("✅ Sincronización de SKUs completada en %v", time.Since(startTime))
