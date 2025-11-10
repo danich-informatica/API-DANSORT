@@ -171,20 +171,6 @@ func (s *Sorter) Start() error {
 	return nil
 }
 
-// Stop detiene el sorter
-func (s *Sorter) Stop() error {
-	log.Printf("🛑 Deteniendo Sorter #%d", s.ID)
-
-	s.stopPLCSubscriptions()
-	s.cancel()
-
-	if s.Cognex != nil {
-		return s.Cognex.Stop()
-	}
-
-	return nil
-}
-
 // GetID retorna el ID del sorter
 func (s *Sorter) GetID() int {
 	return s.ID

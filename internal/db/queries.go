@@ -15,6 +15,7 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 
 const SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA = `
 	SELECT 
+	    dc.codEspecie as especie,
 		dc.CalibreTimbrado as calibre, 
 		dc.codVariedadTimbrada as variedad, 
 		dc.codConfeccion as embalaje,

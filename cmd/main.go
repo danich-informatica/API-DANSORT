@@ -146,7 +146,7 @@ func main() {
 	log.Println("")
 	log.Printf("📷 Configurando %d dispositivo(s) Cognex...", len(cfg.CognexDevices))
 	var cognexListeners []*listeners.CognexListener
-
+	ssmsManager, _ := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
 	for _, cognexCfg := range cfg.CognexDevices {
 		log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		log.Printf("  📌 Cognex #%d: %s", cognexCfg.ID, cognexCfg.Name)
@@ -160,6 +160,7 @@ func main() {
 			cognexCfg.Port,
 			cognexCfg.ScanMethod,
 			dbManager,
+			ssmsManager,
 		)
 
 		cognexListeners = append(cognexListeners, cognexListener)
@@ -220,6 +221,7 @@ func main() {
 
 			// Crear mapa de cámaras DataMatrix para este sorter (basado en cognex_id en salidas)
 			cognexDevices := make(map[int]*listeners.CognexListener)
+			ssms_manager, _ := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
 			for _, salidaCfg := range sorterCfg.Salidas {
 				if salidaCfg.CognexID > 0 {
 					// Esta salida tiene una cámara DataMatrix asignada
@@ -234,6 +236,7 @@ func main() {
 									cognexCfg.Port,
 									cognexCfg.ScanMethod,
 									dbManager,
+									ssms_manager,
 								)
 								cognexDevices[cognexCfg.ID] = dmListener
 								log.Printf("     📷 Cámara DataMatrix Cognex #%d → Salida #%d (%s:%d)",
@@ -535,9 +538,6 @@ func main() {
 	defer func() {
 		for _, cl := range cognexListeners {
 			cl.Stop()
-		}
-		for _, s := range sorters {
-			s.Stop()
 		}
 	}()
 

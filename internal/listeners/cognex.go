@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -35,36 +36,51 @@ type insertResult struct {
 	err            error
 }
 
+// CognexListener maneja la conexión y el procesamiento de datos para un dispositivo Cognex.
 type CognexListener struct {
-	id             int    // ID numérico del Cognex (del config)
-	remoteHost     string // Host remoto de donde viene la cámara (solo informativo)
-	port           int
-	scan_method    string // "QR" o "DATAMATRIX"
-	listener       net.Listener
+	ID             int
+	Name           string
+	RemoteHost     string
+	Port           int
+	ScanMethod     string
+	dbManager      *db.PostgresManager
+	ssmsManager    *db.Manager // Restaurado para consultas a UNITEC
+	conn           net.Conn
+	mu             sync.Mutex
+	isRunning      bool
 	ctx            context.Context
 	cancel         context.CancelFunc
-	dbManager      *db.PostgresManager
-	EventChan      chan models.LecturaEvent    // Canal para lecturas QR/SKU (flujo original)
-	DataMatrixChan chan models.DataMatrixEvent // Canal para lecturas DataMatrix (nuevo flujo)
-	insertChan     chan insertRequest          // Canal para inserciones asíncronas
+	listener       net.Listener
+	EventChan      chan models.LecturaEvent
+	DataMatrixChan chan models.DataMatrixEvent
+	insertChan     chan insertRequest
 	dispositivo    string
+	isStopped      chan struct{}
+	reconnectChan  chan struct{}
+	messageChannel chan string
 }
 
-func NewCognexListener(id int, remoteHost string, port int, scan_method string, dbManager *db.PostgresManager) *CognexListener {
+func NewCognexListener(id int, remoteHost string, port int, scanMethod string, dbManager *db.PostgresManager, ssmsManager *db.Manager) *CognexListener {
+	log.Printf("[Cognex-%d] NewCognexListener creado con método: %s", id, scanMethod)
 	ctx, cancel := context.WithCancel(context.Background())
 	dispositivo := fmt.Sprintf("Cognex-%d:%d", id, port)
 	cl := &CognexListener{
-		id:             id,
-		remoteHost:     remoteHost,
-		port:           port,
+		ID:             id,
+		Name:           fmt.Sprintf("Cognex-%d", id),
+		RemoteHost:     remoteHost,
+		Port:           port,
 		ctx:            ctx,
-		scan_method:    scan_method,
+		ScanMethod:     scanMethod,
 		cancel:         cancel,
 		dbManager:      dbManager,
-		EventChan:      make(chan models.LecturaEvent, 100),    // buffer para 100 eventos QR/SKU
-		DataMatrixChan: make(chan models.DataMatrixEvent, 100), // buffer para 100 eventos DataMatrix
-		insertChan:     make(chan insertRequest, 200),          // buffer para 200 inserciones pendientes
+		ssmsManager:    ssmsManager, // Asignar el gestor de SQL Server
+		EventChan:      make(chan models.LecturaEvent, 100),
+		DataMatrixChan: make(chan models.DataMatrixEvent, 100),
+		insertChan:     make(chan insertRequest, 200),
 		dispositivo:    dispositivo,
+		isStopped:      make(chan struct{}),
+		reconnectChan:  make(chan struct{}, 1),
+		messageChannel: make(chan string, 100),
 	}
 
 	// Iniciar worker para inserciones asíncronas
@@ -73,14 +89,50 @@ func NewCognexListener(id int, remoteHost string, port int, scan_method string, 
 	return cl
 }
 
+// fetchSKUFromUnitec consulta la base de datos de UNITEC para obtener los datos de un SKU.
+func (c *CognexListener) fetchSKUFromUnitec(ctx context.Context, codCaja string) (string, string, string, string, int, error) {
+	var especie, calibre, variedad, embalaje string
+	var dark int
+
+	if c.ssmsManager == nil {
+		return "", "", "", "", 0, fmt.Errorf("el gestor de SQL Server no está inicializado")
+	}
+
+	row := c.ssmsManager.QueryRow(ctx, db.SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA, codCaja)
+	err := row.Scan(&especie, &calibre, &variedad, &embalaje, &dark)
+	if err != nil {
+		return "", "", "", "", 0, fmt.Errorf("error al escanear el resultado de la consulta: %w", err)
+	}
+
+	return especie, calibre, variedad, embalaje, dark, nil
+}
+
+// fetchSKUFromUnitecQR consulta la base de datos de UNITEC para obtener los datos de un SKU a partir de un código QR.
+func (c *CognexListener) fetchSKUFromUnitecQR(ctx context.Context, qrCode string) (string, string, string, string, int, error) {
+	var especie, calibre, variedad, embalaje string
+	var dark int
+
+	if c.ssmsManager == nil {
+		return "", "", "", "", 0, fmt.Errorf("el gestor de SQL Server no está inicializado")
+	}
+
+	row := c.ssmsManager.QueryRow(ctx, db.SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA, qrCode)
+	err := row.Scan(&especie, &calibre, &variedad, &embalaje, &dark)
+	if err != nil {
+		return "", "", "", "", 0, fmt.Errorf("error al escanear el resultado de la consulta QR: %w", err)
+	}
+
+	return especie, calibre, variedad, embalaje, dark, nil
+}
+
 // String implementa la interfaz fmt.Stringer
 func (c *CognexListener) String() string {
-	return fmt.Sprintf("CognexListener{remote: %s, port: %d}", c.remoteHost, c.port)
+	return fmt.Sprintf("CognexListener{remote: %s, port: %d}", c.RemoteHost, c.Port)
 }
 
 // GetID retorna el ID del Cognex
 func (c *CognexListener) GetID() int {
-	return c.id
+	return c.ID
 }
 
 // insertWorker procesa inserciones a la base de datos de forma asíncrona
@@ -135,7 +187,7 @@ func (c *CognexListener) processInsert(req insertRequest) {
 // Start inicia el servidor TCP para escuchar mensajes de Cognex
 func (c *CognexListener) Start() error {
 	// Siempre escuchar en todas las interfaces (0.0.0.0)
-	address := fmt.Sprintf("0.0.0.0:%d", c.port)
+	address := fmt.Sprintf("0.0.0.0:%d", c.Port)
 
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -143,7 +195,7 @@ func (c *CognexListener) Start() error {
 	}
 
 	c.listener = listener
-	log.Printf("✓ CognexListener escuchando en %s (esperando conexiones desde %s)\n", address, c.remoteHost)
+	log.Printf("✓ CognexListener escuchando en %s (esperando conexiones desde %s)\n", address, c.RemoteHost)
 
 	// Aceptar conexiones en una goroutine
 	go c.acceptConnections()
@@ -225,7 +277,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 	logTs("📦 Mensaje recibido de %s: %s", conn.RemoteAddr().String(), message)
 
 	message = strings.TrimSpace(message)
-	switch c.scan_method {
+	switch c.ScanMethod {
 	case "QR":
 		message_splitted := strings.Split(message, ";")
 		if message == "" {
@@ -417,9 +469,6 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			)
 		}
 	case "ID-DB":
-		logTs("📊 ID detectado: %s", strings.TrimSpace(message))
-		message = strings.TrimSpace(message)
-
 		if message == "" {
 			log.Printf("❌ Mensaje vacío recibido")
 			response := "NACK\r\n"
@@ -430,121 +479,63 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			return
 		}
 
-		if strings.TrimSpace(message) == models.NO_READ_CODE {
-			log.Printf("❌ Código NO_READ recibido")
+		// El mensaje es un ID de caja, lo usamos para consultar la DB
+		especie, calibre, variedad, embalaje, dark, err := c.fetchSKUFromUnitec(context.Background(), message)
+		if err != nil {
+			log.Printf("❌ Error al obtener SKU de UNITEC desde ID: %v", err)
 			response := "NACK\r\n"
-			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("NO_READ"), message, c.dispositivo)
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("error en UNITEC ID: %w", err), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
 		}
 
-		// Extraer componentes (formato: Especie;Calibre;Dark;Embalaje;Variedad)
-		especie := strings.TrimSpace(message_splitted[0])
-		calibre := strings.TrimSpace(message_splitted[1])
-		darkStr := strings.TrimSpace(message_splitted[2])
-		embalaje := strings.TrimSpace(message_splitted[3])
-		// message_splitted[4] es etiqueta/marca (no se usa)
-		variedad := strings.TrimSpace(message_splitted[4])
-
-		// Validar que los componentes no estén vacíos
-		if especie == "" || calibre == "" || embalaje == "" || variedad == "" {
-			log.Printf("❌ Componentes vacíos en mensaje: %s", message)
-			response := "NACK\r\n"
-			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("componentes vacíos"), message, c.dispositivo)
-			conn.Write([]byte(response))
-			return
-		}
-
-		// Parsear el valor de dark (esperamos "0" o "1")
-		var dark int
-		if darkStr == "0" || darkStr == "" {
-			dark = 0
-		} else if darkStr == "1" {
-			dark = 1
-		} else {
-			log.Printf("⚠️  Valor dark inválido '%s', usando 0 por defecto", darkStr)
-			dark = 0
-		}
-
-		// Generar SKU para validación
+		// A partir de aquí, el flujo es idéntico al de los otros métodos
 		sku, err := models.RequestSKU(variedad, calibre, embalaje, dark)
 		if err != nil {
-			log.Printf("❌ SKU inválido generado desde mensaje: %s | Error: %v", message, err)
+			log.Printf("❌ SKU inválido generado desde datos de UNITEC ID: %s | Error: %v", message, err)
 			response := "NACK\r\n"
-			c.EventChan <- models.NewLecturaFallidaConDatos(
-				err,
-				especie,
-				calibre,
-				variedad,
-				embalaje,
-				message,
-				c.dispositivo,
-			)
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("SKU inválido de UNITEC ID"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
 		}
 
-		// Inserción asíncrona en DB para máxima velocidad
 		resultCh := make(chan insertResult, 1)
 		insertReq := insertRequest{
 			especie:  especie,
 			variedad: variedad,
 			calibre:  calibre,
 			embalaje: embalaje,
-			dark:     dark, // Usar el dark extraído del QR
+			dark:     dark,
 			sku:      sku.SKU,
 			message:  message,
 			resultCh: resultCh,
 		}
 
-		// Enviar al worker (no bloqueante si hay buffer disponible)
 		select {
 		case c.insertChan <- insertReq:
-			// Enviado al worker, responder inmediatamente ACK
 			response := "ACK\r\n"
 			conn.Write([]byte(response))
-			logTs("✅ ACK enviado (async insert en cola)")
+			logTs("✅ ACK enviado (async insert en cola para ID-DB)")
 
-			// Procesar resultado en goroutine para no bloquear
 			go func() {
 				result := <-resultCh
 				if result.err != nil {
-					log.Printf("❌ Error al insertar caja en DB desde mensaje: %s | Error: %v", message, result.err)
+					log.Printf("❌ Error al insertar caja en DB desde ID-DB: %s | Error: %v", message, result.err)
 					c.EventChan <- models.NewLecturaFallidaConDatos(
 						fmt.Errorf("error al insertar: %w", result.err),
-						especie,
-						calibre,
-						variedad,
-						embalaje,
-						message,
-						c.dispositivo,
+						especie, calibre, variedad, embalaje, message, c.dispositivo,
 					)
 				} else {
-					// Reconstruir SKU con nombre de variedad en vez de código
-					skuFinal := fmt.Sprintf("%s-%s-%s-%d",
-						calibre,
-						strings.ToUpper(result.nombreVariedad),
-						embalaje,
-						dark)
-
+					skuFinal := fmt.Sprintf("%s-%s-%s-%d", calibre, strings.ToUpper(result.nombreVariedad), embalaje, dark)
 					log.Printf("📦 Correlativo de caja insertado: %s", result.correlativo)
 					log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", result.correlativo, skuFinal, especie)
 					c.EventChan <- models.NewLecturaExitosa(
-						skuFinal,
-						especie,
-						calibre,
-						variedad,
-						embalaje,
-						result.correlativo,
-						message,
-						c.dispositivo,
+						skuFinal, especie, calibre, variedad, embalaje, result.correlativo, message, c.dispositivo,
 					)
 				}
 			}()
-
 		default:
-			// Buffer lleno, responder NACK y procesar síncrono
-			log.Printf("⚠️  Buffer de inserciones lleno, procesando síncronamente")
+			log.Printf("⚠️  Buffer de inserciones lleno, procesando síncronamente (ID-DB)")
 			ctx := context.Background()
 			correlativo, err := c.dbManager.InsertNewBox(
 				ctx,
@@ -552,7 +543,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 				variedad,
 				calibre,
 				embalaje,
-				dark, // Usar el dark extraído del QR
+				dark, // Usar el dark extraído del ID
 			)
 
 			if err != nil {
@@ -615,8 +606,8 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 
 		// Crear y enviar evento DataMatrix al nuevo canal dedicado
 		// Este flujo es SEPARADO del flujo QR/SKU original
-		dmEvent := models.NewDataMatrixEvent(message, c.dispositivo, c.id, message)
-		log.Printf("✅ [Cognex#%d] DataMatrix → Canal dedicado | Código: %s", c.id, message)
+		dmEvent := models.NewDataMatrixEvent(message, c.dispositivo, c.ID, message)
+		log.Printf("✅ [Cognex#%d] DataMatrix → Canal dedicado | Código: %s", c.ID, message)
 
 		select {
 		case c.DataMatrixChan <- dmEvent:
@@ -633,7 +624,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		return
 
 	default:
-		log.Printf("❌ Método de escaneo desconocido: %s", c.scan_method)
+		log.Printf("❌ Método de escaneo desconocido: %s", c.ScanMethod)
 		response := "NACK\r\n"
 		conn.Write([]byte(response))
 		return
@@ -648,15 +639,14 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 }
 
 // Stop detiene el listener
-func (c *CognexListener) Stop() error {
-	log.Println("Deteniendo CognexListener...")
+func (c *CognexListener) Stop() {
+	log.Printf("Deteniendo CognexListener %d...", c.ID)
 	c.cancel()
 
 	if c.listener != nil {
-		return c.listener.Close()
+		c.listener.Close()
 	}
-
-	close(c.EventChan)
-
-	return nil
+	// No cerramos los canales aquí para evitar panics si todavía hay goroutines escribiendo.
+	// El contexto cancelado debería ser suficiente para detener todo.
+	log.Printf("CognexListener %d detenido.", c.ID)
 }
