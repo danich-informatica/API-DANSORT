@@ -437,7 +437,8 @@ func main() {
 		log.Println("")
 
 		if skuManager != nil && sqlServerMgr != nil {
-			startSKUSyncWorker(context.Background(), cfg, dbManager, skuManager, sorters, sqlServerMgr)
+			wsHub := httpService.GetWebSocketHub()
+			startSKUSyncWorker(context.Background(), cfg, dbManager, skuManager, sorters, sqlServerMgr, wsHub)
 		}
 
 		for _, s := range sorters {
@@ -500,7 +501,7 @@ func main() {
 	}
 }
 
-func startSKUSyncWorker(ctx context.Context, cfg *config.Config, dbManager *db.PostgresManager, skuManager *flow.SKUManager, sorters []*sorter.Sorter, sqlServerMgr *db.Manager) {
+func startSKUSyncWorker(ctx context.Context, cfg *config.Config, dbManager *db.PostgresManager, skuManager *flow.SKUManager, sorters []*sorter.Sorter, sqlServerMgr *db.Manager, wsHub *listeners.WebSocketHub) {
 	log.Println("🔄 Iniciando SKU Sync Worker...")
 	log.Printf("   📍 Vista UNITEC: VW_INT_DANICH_ENVIVO")
 
@@ -523,6 +524,7 @@ func startSKUSyncWorker(ctx context.Context, cfg *config.Config, dbManager *db.P
 		skuManager,
 		sorterInterfaces,
 		syncInterval,
+		wsHub,
 	)
 	go syncWorker.Start()
 	log.Printf("   ✅ Sync Worker iniciado (intervalo: %v)", syncInterval)

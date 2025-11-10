@@ -21,7 +21,7 @@ type SKUSyncWorker struct {
 	skuManager   *SKUManager
 	sorters      []shared.SorterInterface // Lista de sorters a notificar
 	interval     time.Duration
-	wsHub        interface{}
+	wsHub        *listeners.WebSocketHub
 }
 
 // NewSKUSyncWorker crea una nueva instancia del worker de sincronización
@@ -35,6 +35,12 @@ func NewSKUSyncWorker(
 	wsHub interface{},
 ) *SKUSyncWorker {
 	workerCtx, cancel := context.WithCancel(ctx)
+
+	var hub *listeners.WebSocketHub
+	if h, ok := wsHub.(*listeners.WebSocketHub); ok {
+		hub = h
+	}
+
 	return &SKUSyncWorker{
 		ctx:          workerCtx,
 		cancel:       cancel,
@@ -43,7 +49,7 @@ func NewSKUSyncWorker(
 		skuManager:   skuManager,
 		sorters:      sorters,
 		interval:     interval,
-		wsHub:        wsHub,
+		wsHub:        hub,
 	}
 }
 
@@ -141,12 +147,11 @@ func (w *SKUSyncWorker) syncSKUs() {
 	for _, sorter := range w.sorters {
 		sorter.UpdateSKUs(assignableSKUs)
 	}
-	log.Printf("📤 Sync SKU: Propagando %d SKUs (REJECT + %d activos) a sorters...", len(assignableSKUs), len(activeSKUs))
 
 	// Forzar notificación al WebSocket
-	for _, sorter := range w.sorters {
-		if hub, ok := w.wsHub.(*listeners.WebSocketHub); ok {
-			hub.NotifySKUAssigned(sorter)
+	if w.wsHub != nil {
+		for _, sorter := range w.sorters {
+			w.wsHub.NotifySKUAssigned(sorter)
 		}
 	}
 
