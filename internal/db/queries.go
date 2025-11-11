@@ -9,8 +9,8 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 		0 as dark,
 		dc.VariedadTimbrada AS nombre_variedad,
 		1 AS linea
-	FROM DatosCajas dc
-	WHERE dc.proceso = (SELECT MAX(proceso) FROM DatosCajas);
+	FROM INT_DANICH_DatosCajas dc
+	WHERE dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas);
 `
 
 const SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA = `
@@ -20,7 +20,7 @@ const SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA = `
 		dc.codVariedadTimbrada as variedad, 
 		dc.codConfeccion as embalaje,
 		0 as dark
-	FROM DatosCajas dc
+	FROM INT_DANICH_DatosCajas dc
 	WHERE dc.codCaja = @p1;
 `
 
@@ -32,9 +32,10 @@ const SELECT_TOP_N_BOXES_FROM_CURRENT_PROCESO = `
 		dc.codVariedadTimbrada AS variedad,
 		dc.codConfeccion AS embalaje,
 		0 AS dark,
+		dc.variedadTimbrada AS nombre_variedad,
 		dc.codCaja
-	FROM DatosCajas dc
-	WHERE dc.proceso = (SELECT MAX(proceso) FROM DatosCajas)
+	FROM INT_DANICH_DatosCajas dc
+	WHERE dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas)
 	ORDER BY dc.codCaja DESC;
 `
 
@@ -47,13 +48,13 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
 		0 as dark,
 		dc.VariedadTimbrada AS nombre_variedad,
 		1 AS linea
-	FROM DatosCajas dc
-	WHERE dc.proceso = (SELECT MAX(proceso) FROM DatosCajas);
+	FROM INT_DANICH_DatosCajas dc
+	WHERE dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas);
 `
 
 const SELECT_BOX_DATA_FROM_UNITEC_DB = `
 	SELECT dc.CalibreTimbrado as calibre, dc.VariedadTimbrada as variedad, dc.codConfeccion as embalaje
-	FROM DatosCajas dc
+	FROM INT_DANICH_DatosCajas dc
 	WHERE dc.codCaja = @p1;
 `
 

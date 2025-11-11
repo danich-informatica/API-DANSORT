@@ -148,11 +148,16 @@ func main() {
 	log.Println("")
 	log.Printf("📷 Configurando %d dispositivo(s) Cognex...", len(cfg.CognexDevices))
 	var cognexListeners []*listeners.CognexListener
-	ssmsManager, _ := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
+	ssmsManager, err := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
+	if err != nil {
+		log.Printf("⚠️  Error al conectar con SQL Server UNITEC: %v", err)
+		log.Println("⚠️  Continuando sin conexión a UNITEC (BoxCache y queries ID-DB deshabilitados)")
+		ssmsManager = nil
+	}
 
 	// Inicializar BoxCacheManager para optimizar lecturas ID-DB
 	var boxCacheManager *flow.BoxCacheManager
-	if cfg.BoxCache.Enabled {
+	if cfg.BoxCache.Enabled && ssmsManager != nil {
 		log.Println("")
 		log.Println("📦 Inicializando BoxCacheManager (optimización ID-DB)...")
 		cacheSize := cfg.BoxCache.Size
@@ -165,6 +170,11 @@ func main() {
 		boxCacheManager.Start()
 		defer boxCacheManager.Stop()
 		log.Println("✅ BoxCacheManager iniciado correctamente")
+		log.Println("")
+	} else if cfg.BoxCache.Enabled && ssmsManager == nil {
+		log.Println("")
+		log.Println("⚠️  BoxCache DESHABILITADO: SQL Server UNITEC no disponible")
+		log.Println("⚠️  Lecturas ID-DB fallarán hasta que se restablezca la conexión")
 		log.Println("")
 	} else {
 		log.Println("⚠️  BoxCache desactivado en configuración (se usarán queries directas)")
@@ -246,7 +256,7 @@ func main() {
 
 			// Crear mapa de cámaras DataMatrix para este sorter (basado en cognex_id en salidas)
 			cognexDevices := make(map[int]*listeners.CognexListener)
-			ssms_manager, _ := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
+			// Reutilizar ssmsManager ya validado (puede ser nil si SQL Server no está disponible)
 			for _, salidaCfg := range sorterCfg.Salidas {
 				if salidaCfg.CognexID > 0 {
 					// Esta salida tiene una cámara DataMatrix asignada
@@ -261,8 +271,8 @@ func main() {
 									cognexCfg.Port,
 									cognexCfg.ScanMethod,
 									dbManager,
-									ssms_manager,
-									nil, // DataMatrix no usa boxCache (solo para ID-DB)
+									ssmsManager, // Usar ssmsManager validado (puede ser nil)
+									nil,         // DataMatrix no usa boxCache (solo para ID-DB)
 								)
 								cognexDevices[cognexCfg.ID] = dmListener
 								log.Printf("     📷 Cámara DataMatrix Cognex #%d → Salida #%d (%s:%d)",
