@@ -40,7 +40,7 @@ const SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA = `
 // ÍNDICE RECOMENDADO: CREATE INDEX idx_proceso_fecha ON INT_DANICH_DatosCajas(proceso, FechaCreacion DESC)
 const SELECT_TOP_N_BOXES_FROM_CURRENT_PROCESO = `
 	SELECT TOP (@p1)
-		dc.codEspecie AS especie,
+		dc.codEspecie AS Especie,
 		dc.codVariedadTimbrada AS variedad,
 		dc.CalibreTimbrado AS calibre,
 		dc.codConfeccion AS embalaje,

@@ -13,12 +13,13 @@ import (
 
 // BoxData representa los datos de una caja cacheados en memoria
 type BoxData struct {
-	CodCaja  string
-	Especie  string
-	Calibre  string
-	Variedad string
-	Embalaje string
-	Dark     int
+	CodCaja        string
+	Especie        string
+	Calibre        string
+	Variedad       string // Corresponde a codVariedadTimbrada
+	NombreVariedad string // Corresponde a variedadTimbrada
+	Embalaje       string
+	Dark           int
 }
 
 // BoxCacheManager gestiona un caché en memoria de las últimas N cajas
@@ -152,8 +153,7 @@ func (m *BoxCacheManager) refresh() error {
 	rowCount := 0
 	for rows.Next() {
 		var box BoxData
-		var nombreVariedad string // No se usa en BoxData, pero viene en la query
-		if err := rows.Scan(&box.Especie, &box.Variedad, &box.Calibre, &box.Embalaje, &box.Dark, &nombreVariedad, &box.CodCaja); err != nil {
+		if err := rows.Scan(&box.Especie, &box.Variedad, &box.Calibre, &box.Embalaje, &box.Dark, &box.NombreVariedad, &box.CodCaja); err != nil {
 			log.Printf("⚠️  [BoxCache] Error al escanear fila: %v", err)
 			continue
 		}
