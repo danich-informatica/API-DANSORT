@@ -102,9 +102,9 @@ func (c *CognexListener) fetchSKUFromUnitec(ctx context.Context, codCaja string)
 	}
 
 	row := c.ssmsManager.QueryRow(ctx, db.SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA, codCaja)
-	err := row.Scan(&especie, &calibre, &variedad, &embalaje, &dark)
+	err := row.Scan(&especie, &variedad, &calibre, &embalaje, &dark)
 	if err != nil {
-		return "", "", "", "", 0, fmt.Errorf("error al escanear el resultado de la consulta: %w", err)
+		return "", "", "", "", 1, fmt.Errorf("error al escanear el resultado de la consulta: %w", err)
 	}
 
 	return especie, calibre, variedad, embalaje, dark, nil
@@ -161,7 +161,7 @@ func (c *CognexListener) fetchSKUFromUnitecQR(ctx context.Context, qrCode string
 	}
 
 	row := c.ssmsManager.QueryRow(ctx, db.SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA, qrCode)
-	err := row.Scan(&especie, &calibre, &variedad, &embalaje, &dark)
+	err := row.Scan(&especie, &variedad, &calibre, &embalaje, &dark)
 	if err != nil {
 		return "", "", "", "", 0, fmt.Errorf("error al escanear el resultado de la consulta QR: %w", err)
 	}
@@ -542,7 +542,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		startFetch := time.Now()
 		especie, calibre, variedad, embalaje, dark, err := c.fetchSKUFromCache(context.Background(), message)
 		fetchDuration := time.Since(startFetch)
-
+		log.Printf("🔧 [Cognex-%d] Fetch de datos desde UNITEC completado SKU: %s-%s-%s-%d en %.3fms", c.ID, calibre, variedad, embalaje, dark, fetchDuration.Seconds()*1000)
 		if err != nil {
 			log.Printf("❌ Error al obtener SKU de UNITEC desde ID: %v", err)
 			response := "NACK\r\n"
@@ -555,7 +555,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		startSKU := time.Now()
 		sku, err := models.RequestSKU(variedad, calibre, embalaje, dark)
 		skuDuration := time.Since(startSKU)
-
+		log.Printf("🔧 [Cognex-%d] Generación de SKU: %s (Variedad=%s, Calibre=%s, Embalaje=%s, Dark=%d)", c.ID, sku.SKU, sku.Variedad, sku.Calibre, sku.Embalaje, sku.Dark)
 		if err != nil {
 			log.Printf("❌ SKU inválido generado desde datos de UNITEC ID: %s | Error: %v", message, err)
 			response := "NACK\r\n"

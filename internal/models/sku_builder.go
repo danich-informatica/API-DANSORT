@@ -25,3 +25,9 @@ func RequestSKU(variedad, calibre, embalaje string, dark int) (SKU, error) {
 	}
 	return skuObj, nil
 }
+
+// modificamos el to string para hacerle print
+func (s *SKU) String() string {
+	return fmt.Sprintf("SKU{Variedad: %s, Calibre: %s, Embalaje: %s, Dark: %d, Linea: %s, SKU: %s, Estado: %t, NombreVariedad: %s}",
+		s.Variedad, s.Calibre, s.Embalaje, s.Dark, s.Linea, s.SKU, s.Estado, s.NombreVariedad)
+}

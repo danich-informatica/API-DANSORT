@@ -3,10 +3,22 @@ package db
 // Query CON VIE_Dark y VIE_Descrizione (intentar primero)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 	SELECT DISTINCT
-		dc.CalibreTimbrado as calibre,
 		dc.codVariedadTimbrada as variedad,
+	    dc.CalibreTimbrado as calibre,
 		dc.codConfeccion as embalaje,
-		0 as dark,
+		1 as dark,
+		dc.VariedadTimbrada AS nombre_variedad,
+		1 AS linea
+	FROM INT_DANICH_DatosCajas dc
+	WHERE dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas);
+`
+
+const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
+	SELECT DISTINCT
+		dc.codVariedadTimbrada as variedad,
+		dc.CalibreTimbrado as calibre,
+		dc.codConfeccion as embalaje,
+		1 as dark,
 		dc.VariedadTimbrada AS nombre_variedad,
 		1 AS linea
 	FROM INT_DANICH_DatosCajas dc
@@ -15,42 +27,39 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
 
 const SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA = `
 	SELECT 
-	    dc.codEspecie as especie,
-		dc.CalibreTimbrado as calibre, 
-		dc.codVariedadTimbrada as variedad, 
+	    100 as especie,
+		dc.codVariedadTimbrada as variedad,
+		dc.CalibreTimbrado as calibre,
 		dc.codConfeccion as embalaje,
-		0 as dark
+		1 as dark
 	FROM INT_DANICH_DatosCajas dc
 	WHERE dc.codCaja = @p1;
 `
 
 // Query optimizada para caché: últimas N cajas del proceso actual ordenadas DESC
+// ÍNDICE RECOMENDADO: CREATE INDEX idx_proceso_fecha ON INT_DANICH_DatosCajas(proceso, FechaCreacion DESC)
 const SELECT_TOP_N_BOXES_FROM_CURRENT_PROCESO = `
 	SELECT TOP (@p1)
 		dc.codEspecie AS especie,
-		dc.CalibreTimbrado AS calibre,
 		dc.codVariedadTimbrada AS variedad,
+		dc.CalibreTimbrado AS calibre,
 		dc.codConfeccion AS embalaje,
-		0 AS dark,
+		1 AS dark,
 		dc.variedadTimbrada AS nombre_variedad,
 		dc.codCaja
 	FROM INT_DANICH_DatosCajas dc
-	WHERE dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas)
-	ORDER BY dc.codCaja DESC;
+	WHERE 
+	    dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas)
+		AND dc.codEpecie IS NOT NULL 
+		AND dc.codVariedadTimbrada IS NOT NULL
+		AND dc.CalibreTimbrado IS NOT NULL
+		AND dc.codConfeccion IS NOT NULL
+		AND dc.variedadTimbrada IS NOT NULL
+		AND dc.codCaja IS NOT NULL
+	ORDER BY dc.FechaCreacion DESC;
 `
 
 // Query SIN VIE_Dark (fallback si la columna no existe)
-const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
-	SELECT DISTINCT
-		dc.CalibreTimbrado as calibre,
-		dc.codVariedadTimbrada as variedad,
-		dc.codConfeccion as embalaje,
-		0 as dark,
-		dc.VariedadTimbrada AS nombre_variedad,
-		1 AS linea
-	FROM INT_DANICH_DatosCajas dc
-	WHERE dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas);
-`
 
 const SELECT_BOX_DATA_FROM_UNITEC_DB = `
 	SELECT dc.CalibreTimbrado as calibre, dc.VariedadTimbrada as variedad, dc.codConfeccion as embalaje
@@ -118,7 +127,7 @@ const INSERT_SKU_IF_NOT_EXISTS_INTERNAL_DB = `
 
 const SELECT_ALL_SKUS_INTERNAL_DB = `
 	SELECT s.calibre, s.variedad, s.embalaje, s.dark, s.linea,
-		CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
+		CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku,
 	       s.estado,
 	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
 	FROM SKU s
@@ -126,7 +135,7 @@ const SELECT_ALL_SKUS_INTERNAL_DB = `
 	ORDER BY s.variedad, s.calibre, s.embalaje, s.dark
 `
 const SELECT_IF_EXISTS_SKU_INTERNAL_DB = `
-	SELECT EXISTS(SELECT 1 FROM sku WHERE calibre = $1 AND variedad = $2 AND embalaje = $3)
+	SELECT EXISTS(SELECT 1 FROM sku WHERE calibre = $1 AND variedad = $2 AND embalaje = $3 AND dark = $4)
 `
 
 const UPDATE_SKU_STATE_INTERNAL_DB = `
@@ -206,7 +215,7 @@ const COUNT_BOXES_INTERNAL_DB = `
 
 const SELECT_ACTIVE_SKUS_INTERNAL_DB = `
 	SELECT s.calibre, s.variedad, s.embalaje, s.dark, s.linea,
-	       CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku, 
+	       CONCAT(s.calibre, '-', UPPER(COALESCE(v.nombre_variedad, s.variedad)), '-', s.embalaje, '-', s.dark) as sku,
 	       s.estado,
 	       COALESCE(v.nombre_variedad, s.variedad) as nombre_variedad
 	FROM sku s
@@ -317,8 +326,8 @@ const SELECT_HISTORIAL_DESVIOS_INTERNAL_DB = `
 const INSERT_VARIEDAD_INTERNAL_DB = `
 	INSERT INTO variedad (codigo_variedad, nombre_variedad)
 	VALUES ($1, $2)
-	ON CONFLICT (codigo_variedad) 
-	DO UPDATE SET nombre_variedad = EXCLUDED.nombre_variedad
+	ON CONFLICT (nombre_variedad) 
+	DO NOTHING
 `
 
 const SELECT_NOMBRE_VARIEDAD_BY_CODIGO = `

@@ -41,7 +41,7 @@ func main() {
 	log.Println("Iniciando API-Greenex...")
 	log.Println("")
 
-	// Ahora activar fecha/hora para los logs normales
+	// Activar fecha/hora para los logs normales
 	log.SetFlags(log.Ldate | log.Ltime)
 
 	// Inicializar gestor de canales compartidos (Singleton)
@@ -82,6 +82,7 @@ func main() {
 		connectTimeout,
 		healthCheckInterval,
 	)
+
 	if err != nil {
 		log.Fatalf("❌ Error al inicializar PostgreSQL: %v", err)
 	}
@@ -580,7 +581,7 @@ func main() {
 	// Iniciar SKU Sync Worker si está disponible
 	if skuManager != nil && len(sorters) > 0 {
 		log.Println("🔄 Inicializando SKU Sync Worker...")
-		log.Printf("   📍 Vista UNITEC: VW_INT_DANICH_ENVIVO")
+		log.Printf("   📍 Vista UNITEC_DB : %s", cfg.Database.SQLServer.Host)
 
 		// Pasar directamente la configuración del YAML
 		sqlServerMgr, err := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)

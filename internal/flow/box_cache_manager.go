@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,19 +22,21 @@ type BoxData struct {
 }
 
 // BoxCacheManager gestiona un caché en memoria de las últimas N cajas
-// del proceso actual, con búsqueda binaria O(log n) para máxima velocidad
+// del proceso actual, con acceso directo O(1) por código de caja
 type BoxCacheManager struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	ssmsManager *db.Manager
 
-	// Caché ordenado por codCaja DESC para búsqueda binaria
-	boxes []BoxData
+	// Caché indexado por codCaja para acceso O(1) directo
+	boxes map[string]BoxData
 	mu    sync.RWMutex
 
 	// Configuración
-	cacheSize int           // Número de cajas a cachear (ej: 500)
-	interval  time.Duration // Intervalo de polling (ej: 5s)
+	cacheSize  int           // Número de cajas a cachear (ej: 1000)
+	interval   time.Duration // Intervalo de polling (ej: 2s)
+	started    atomic.Bool   // Flag para evitar múltiples Start()
+	refreshing atomic.Bool   // Flag para evitar refreshes simultáneos
 
 	// Métricas
 	hits   atomic.Int64 // Búsquedas exitosas en caché
@@ -65,7 +66,7 @@ func NewBoxCacheManager(ctx context.Context, ssmsManager *db.Manager, cacheSize 
 		ctx:         workerCtx,
 		cancel:      cancel,
 		ssmsManager: ssmsManager,
-		boxes:       make([]BoxData, 0, cacheSize),
+		boxes:       make(map[string]BoxData, cacheSize),
 		cacheSize:   cacheSize,
 		interval:    interval,
 	}
@@ -73,8 +74,14 @@ func NewBoxCacheManager(ctx context.Context, ssmsManager *db.Manager, cacheSize 
 
 // Start inicia el worker de sincronización periódica
 func (m *BoxCacheManager) Start() {
+	// Protección contra múltiples Start()
+	if !m.started.CompareAndSwap(false, true) {
+		log.Printf("⚠️  [BoxCache] Start() ya fue llamado, ignorando llamada duplicada")
+		return
+	}
+
 	log.Printf("🚀 [BoxCache] Iniciando con configuración:")
-	log.Printf("   📦 Tamaño de caché: %d cajas", m.cacheSize)
+	log.Printf("   📦 Tamaño de caché: %d cajas (acceso O(1) directo por ID)", m.cacheSize)
 	log.Printf("   ⏱️  Intervalo de polling: %v", m.interval)
 	log.Printf("   🔄 Primera carga inmediata...")
 
@@ -115,139 +122,89 @@ func (m *BoxCacheManager) run() {
 
 // refresh ejecuta la query y actualiza el caché atómicamente
 func (m *BoxCacheManager) refresh() error {
+	// Protección contra refreshes simultáneos
+	if !m.refreshing.CompareAndSwap(false, true) {
+		return nil // Ya hay un refresh en curso, skip
+	}
+	defer m.refreshing.Store(false)
+
 	startTotal := time.Now()
-	log.Printf("🔄 [BoxCache] Iniciando refresh del caché...")
-	log.Printf("   📊 Tamaño configurado: %d cajas", m.cacheSize)
+
+	// VERIFICACIÓN: Asegurarse de que el manager de SSMS no sea nil
+	if m.ssmsManager == nil {
+		log.Printf("❌ [BoxCache] Error: ssmsManager es nil. El refresh no puede continuar.")
+		return fmt.Errorf("ssmsManager no está inicializado")
+	}
 
 	// 1. Query a SQL Server
-	log.Printf("   ⏱️  Query SQL Server iniciada...")
-	startQuery := time.Now()
-
-	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
 	defer cancel()
 
 	rows, err := m.ssmsManager.Query(ctx, db.SELECT_TOP_N_BOXES_FROM_CURRENT_PROCESO, m.cacheSize)
 	if err != nil {
+		log.Printf("❌ [BoxCache] Error en query: %v", err)
 		return fmt.Errorf("error en query: %w", err)
 	}
 	defer rows.Close()
 
-	// 2. Leer resultados
-	var newBoxes []BoxData
+	// 2. Leer resultados y construir map indexado por codCaja
+	newBoxes := make(map[string]BoxData, m.cacheSize)
+	rowCount := 0
 	for rows.Next() {
 		var box BoxData
-		if err := rows.Scan(&box.Especie, &box.Calibre, &box.Variedad, &box.Embalaje, &box.Dark, &box.CodCaja); err != nil {
+		var nombreVariedad string // No se usa en BoxData, pero viene en la query
+		if err := rows.Scan(&box.Especie, &box.Variedad, &box.Calibre, &box.Embalaje, &box.Dark, &nombreVariedad, &box.CodCaja); err != nil {
 			log.Printf("⚠️  [BoxCache] Error al escanear fila: %v", err)
 			continue
 		}
-		newBoxes = append(newBoxes, box)
+		newBoxes[box.CodCaja] = box
+		rowCount++
 	}
 
-	queryDuration := time.Since(startQuery)
-	log.Printf("   ✅ Query completada en %.2fms (%d filas)", queryDuration.Seconds()*1000, len(newBoxes))
-
 	if len(newBoxes) == 0 {
-		log.Printf("   ⚠️  Query retornó 0 filas (proceso actual vacío?)")
+		log.Printf("⚠️  [BoxCache] Query retornó 0 filas")
 		return nil
 	}
 
-	// 3. Ordenar por codCaja DESC (para búsqueda binaria)
-	log.Printf("   🔧 Ordenando por codCaja DESC...")
-	startSort := time.Now()
-	sort.Slice(newBoxes, func(i, j int) bool {
-		return newBoxes[i].CodCaja > newBoxes[j].CodCaja
-	})
-	sortDuration := time.Since(startSort)
-	log.Printf("   ✅ Ordenamiento completado en %.3fms", sortDuration.Seconds()*1000)
-
-	// 4. Swap atómico del caché
-	log.Printf("   🔄 Actualizando caché atómicamente...")
-	startSwap := time.Now()
+	// 3. Swap atómico del caché
 	m.mu.Lock()
 	m.boxes = newBoxes
 	m.mu.Unlock()
-	swapDuration := time.Since(startSwap)
-	log.Printf("   ✅ Caché actualizado en %.3fms", swapDuration.Seconds()*1000)
 
-	// 5. Registrar métricas de tiempo
+	// 4. Registrar métricas de tiempo
 	totalDuration := time.Since(startTotal)
 	m.mu2.Lock()
 	m.lastRefreshDuration = totalDuration
 	m.lastRefreshTime = time.Now()
 	m.mu2.Unlock()
 
-	log.Printf("✅ [BoxCache] Refresh completado en %.2fms total", totalDuration.Seconds()*1000)
-	log.Printf("   📊 Caché actualizado con %d cajas", len(newBoxes))
-
-	// Mostrar estadísticas actuales
-	hits := m.hits.Load()
-	misses := m.misses.Load()
-	total := hits + misses
-	if total > 0 {
-		ratio := float64(hits) / float64(total) * 100
-		log.Printf("   📈 Stats acumuladas: Hits=%d, Misses=%d, Ratio=%.1f%%", hits, misses, ratio)
-	}
+	log.Printf("✅ [BoxCache] Refresh OK: %d cajas en %.1fms", rowCount, totalDuration.Seconds()*1000)
 
 	return nil
 }
 
-// GetBoxData busca una caja en el caché usando búsqueda binaria
+// GetBoxData busca una caja en el caché usando acceso directo O(1) al map
 // Retorna los datos y un bool indicando si se encontró
 func (m *BoxCacheManager) GetBoxData(codCaja string) (BoxData, bool) {
-	startSearch := time.Now()
-
-	log.Printf("🔍 [BoxCache] Búsqueda de caja: %s", codCaja)
-	log.Printf("   ⚡ Búsqueda binaria iniciada...")
-
 	m.mu.RLock()
 	boxes := m.boxes
 	m.mu.RUnlock()
 
 	if len(boxes) == 0 {
-		log.Printf("   ⚠️  Caché vacío, retornando MISS")
 		m.misses.Add(1)
 		return BoxData{}, false
 	}
 
-	// Búsqueda binaria (boxes está ordenado DESC)
-	comparisons := 0
-	left, right := 0, len(boxes)-1
+	// Acceso directo O(1) al map por código de caja
+	box, found := boxes[codCaja]
 
-	for left <= right {
-		comparisons++
-		mid := (left + right) / 2
-
-		if boxes[mid].CodCaja == codCaja {
-			searchDuration := time.Since(startSearch)
-			m.hits.Add(1)
-
-			hits := m.hits.Load()
-			misses := m.misses.Load()
-			total := hits + misses
-			ratio := float64(hits) / float64(total) * 100
-
-			log.Printf("   ✅ CACHE HIT en %.3fms (%d comparaciones)", searchDuration.Seconds()*1000, comparisons)
-			log.Printf("   📊 Stats: Hits=%d, Misses=%d, Ratio=%.1f%%", hits, misses, ratio)
-
-			return boxes[mid], true
-		} else if boxes[mid].CodCaja > codCaja {
-			left = mid + 1
-		} else {
-			right = mid - 1
-		}
+	if found {
+		m.hits.Add(1)
+		return box, true
 	}
 
 	// No encontrado
-	searchDuration := time.Since(startSearch)
 	m.misses.Add(1)
-
-	hits := m.hits.Load()
-	misses := m.misses.Load()
-	total := hits + misses
-	ratio := float64(hits) / float64(total) * 100
-
-	log.Printf("   ⚠️  CACHE MISS en %.3fms (%d comparaciones)", searchDuration.Seconds()*1000, comparisons)
-	log.Printf("   📊 Stats: Hits=%d, Misses=%d, Ratio=%.1f%%", hits, misses, ratio)
 
 	return BoxData{}, false
 }

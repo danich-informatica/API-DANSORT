@@ -8,10 +8,10 @@ database:
     healthcheck_interval: "30s"
 
   sqlserver:
-    host: "190.110.163.22" # Producción: 192.168.0.9 -- Desarrollo: 190.110.163.22
+    host: "192.168.2.10" # Producción: 192.168.0.9 -- Desarrollo: 190.110.163.22
     port: 1433
-    user: "Danich"
-    password: "yb*;NC&5r9U2"
+    user: "danich"
+    password: "danich"
     database: "UNITEC_DB"
     encrypt: "disable"
     trust_cert: true
@@ -33,11 +33,14 @@ statistics:
   flow_calculation_interval: 1s # Cada cuántos segundos se calcula y publica el %
   flow_window_duration: 20s # Ventana de tiempo para el cálculo (últimos X segundos)
 
-# Caché de cajas para optimización ID-DB (búsqueda binaria en memoria)
+# Caché de cajas para optimización ID-DB (búsqueda O(1) en memoria)
+# IMPORTANTE: Configuración calibrada para ventana de tránsito de 30 segundos
 box_cache:
-  enabled: true           # Activar/desactivar caché (true = ultra rápido, false = query directa)
-  size: 500               # Número de cajas a cachear (ajustar según necesidad)
-  refresh_interval: "5s"  # Polling cada 5 segundos (ajustar: "3s", "10s", etc.)
+  enabled: true           # Activar/desactivar caché (true = búsqueda O(1) instantánea)
+  size: 3000              # 3000 cajas para cubrir ventana de tránsito de 30 segundos
+                          # Cálculo: 80 cajas/seg × 30 seg = 2400 + 20% buffer = 3000
+                          # Ordenado por FechaCreacion DESC para capturar cajas "en tránsito"
+  refresh_interval: "2s"  # Polling cada 2 segundos (120 refreshes en ventana de 30 seg)
 
 # Dispositivos Cognex (múltiples)
 # IMPORTANTE:

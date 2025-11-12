@@ -161,7 +161,7 @@ func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]models.SKU, error) 
 }
 
 // CheckSKUExists verifica si una SKU existe en la base de datos
-func (m *PostgresManager) CheckSKUExists(ctx context.Context, calibre, variedad, embalaje string) (bool, error) {
+func (m *PostgresManager) CheckSKUExists(ctx context.Context, calibre, variedad, embalaje string, dark int) (bool, error) {
 	if m == nil || m.pool == nil {
 		return false, fmt.Errorf("manager no inicializado")
 	}
@@ -170,7 +170,9 @@ func (m *PostgresManager) CheckSKUExists(ctx context.Context, calibre, variedad,
 	err := m.pool.QueryRow(ctx, SELECT_IF_EXISTS_SKU_INTERNAL_DB,
 		strings.TrimSpace(calibre),
 		strings.TrimSpace(variedad),
-		strings.TrimSpace(embalaje)).Scan(&exists)
+		strings.TrimSpace(embalaje),
+		dark,
+	).Scan(&exists)
 
 	if err != nil && err != pgx.ErrNoRows {
 		return false, fmt.Errorf("error al verificar existencia de SKU: %w", err)
@@ -207,7 +209,7 @@ func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, c
 	}
 
 	// Paso 1: Verificar si la SKU existe, si no existe, crearla
-	exists, err := m.CheckSKUExists(ctx, calibre, variedad, embalaje)
+	exists, err := m.CheckSKUExists(ctx, calibre, variedad, embalaje, dark)
 	if err != nil {
 		return "", fmt.Errorf("error al verificar SKU: %w", err)
 	}
