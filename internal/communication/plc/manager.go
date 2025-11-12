@@ -376,23 +376,14 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 	// Intentar llamar al método con el NÚMERO de salida como int16
 	if sorterConfig.PLC.ObjectID != "" && sorterConfig.PLC.MethodID != "" {
-		logTs("🔄 [Sorter %d] Intentando método PLC con número de salida %d...", sorterID, laneNumber)
+		logTs("🔄 [Sorter %d] Intentando método PLC con número de salida %d... (ObjectID=%s, MethodID=%s)",
+			sorterID, laneNumber, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID)
 
 		// ESPERA INTELIGENTE: Verificar trigger antes de llamar al método
 		if sorterConfig.PLC.TriggerNodeID != "" {
-			logTs("⏳ [Sorter %d] Esperando trigger disponible...", sorterID)
-			// warm up al método llamando con un 0 antes de la llamada real
-
-			warmUpVariant := ua.MustVariant(int16(0))
-			warmUpInputArgs := []*ua.Variant{warmUpVariant}
-			_, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, warmUpInputArgs)
-			if err != nil {
-				logTs("⚠️  [Sorter %d] Error en warm up del método PLC: %v", sorterID, err)
-			} else {
-				logTs("✅ [Sorter %d] Warm up del método PLC exitoso", sorterID)
-			}
-
+			logTs("⏳ [Sorter %d] Esperando trigger disponible... (TriggerNode=%s, MaxWait=2s)", sorterID, sorterConfig.PLC.TriggerNodeID)
 			maxWaitTime := 2 * time.Second
+			logTs("🕐 [Sorter %d] Creando contexto con timeout de %v", sorterID, maxWaitTime)
 			ctxWithTimeout, cancel := context.WithTimeout(ctx, maxWaitTime)
 			defer cancel()
 
@@ -401,12 +392,13 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 			startTime := time.Now()
 			triggerReady := false
+			logTs("🔍 [Sorter %d] Iniciando polling del trigger cada 20ms...", sorterID)
 
 			for !triggerReady {
 				select {
 				case <-ctxWithTimeout.Done():
 					elapsed := time.Since(startTime)
-					log.Printf("⚠️  [Sorter %d] Timeout esperando trigger después de %v, continuando de todas formas...", sorterID, elapsed)
+					logTs("⚠️  [Sorter %d] Timeout esperando trigger después de %v, continuando de todas formas...", sorterID, elapsed)
 					triggerReady = true
 
 				case <-ticker.C:
@@ -431,12 +423,12 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 				}
 			}
 		} else {
-			// Fallback: Si no hay trigger configurado, usar sleep fijo
-			log.Printf("⚠️  [Sorter %d] No hay trigger_node_id, usando sleep fijo de 0ms", sorterID)
-			//time.Sleep(100 * time.Millisecond)
+			// Fallback: Si no hay trigger configurado, sin espera
+			logTs("⚠️  [Sorter %d] No hay trigger_node_id configurado, sin espera", sorterID)
 		}
 
 		// CRÍTICO: El método espera int16 con el número de salida, NO un NodeID
+		logTs("🎯 [Sorter %d] Preparando argumentos: laneNumber=%d (tipo=int16)", sorterID, laneNumber)
 		variant := ua.MustVariant(laneNumber) // laneNumber ya es int16
 		inputArgs := []*ua.Variant{variant}
 
@@ -445,13 +437,16 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		var outputValues []interface{}
 		var lastErr error
 
+		logTs("🔁 [Sorter %d] Iniciando ciclo de reintentos (máx: %d)", sorterID, maxRetries)
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			if attempt > 1 {
 				logTs("🔄 [Sorter %d] Reintento %d/%d para Lane %d...", sorterID, attempt, maxRetries, laneNumber)
 				time.Sleep(25 * time.Millisecond) // Política del PLC: 25ms entre reintentos
 			}
 
+			logTs("📞 [Sorter %d] Llamando CallMethod (intento %d/%d) con Lane=%d...", sorterID, attempt, maxRetries, laneNumber)
 			outputValues, lastErr = m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
+			logTs("📥 [Sorter %d] CallMethod retornó (intento %d/%d): err=%v, outputs=%v", sorterID, attempt, maxRetries, lastErr, outputValues)
 
 			// ✅ ÉXITO: Sin error
 			if lastErr == nil {

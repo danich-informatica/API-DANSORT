@@ -164,9 +164,28 @@ func (s *Sorter) getSalidaForFallo(tipoLectura models.TipoLectura) (salida *shar
 	case models.LecturaNoRead:
 		salidaPtr = s.GetDiscardSalida()
 		razon = "sort por descarte (NO_READ)"
+
+		// 🚨 CRÍTICO: Si no hay salida REJECT, usar la ÚLTIMA salida disponible
+		// Esto asegura que SIEMPRE se llame al PLC para NO_READ
+		if salidaPtr == nil && len(s.Salidas) > 0 {
+			salidaPtr = &s.Salidas[len(s.Salidas)-1]
+			razon = "sort por descarte forzado (NO_READ sin REJECT configurado)"
+			log.Printf("⚠️  Sorter #%d: NO_READ sin REJECT, usando última salida %s (ID=%d) por defecto",
+				s.ID, salidaPtr.Salida_Sorter, salidaPtr.ID)
+		}
+
 	case models.LecturaFormato, models.LecturaSKU:
 		salidaPtr = s.GetDiscardSalida()
 		razon = "sort por descarte (formato/SKU inválido)"
+
+		// Para errores de formato/SKU también forzar la última salida si no hay REJECT
+		if salidaPtr == nil && len(s.Salidas) > 0 {
+			salidaPtr = &s.Salidas[len(s.Salidas)-1]
+			razon = "sort por descarte forzado (error sin REJECT configurado)"
+			log.Printf("⚠️  Sorter #%d: Error formato/SKU sin REJECT, usando última salida %s (ID=%d) por defecto",
+				s.ID, salidaPtr.Salida_Sorter, salidaPtr.ID)
+		}
+
 	case models.LecturaDB:
 		razon = "error de base de datos"
 	}

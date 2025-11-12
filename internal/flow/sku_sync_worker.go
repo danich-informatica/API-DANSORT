@@ -164,13 +164,12 @@ func (w *SKUSyncWorker) syncSKUs() {
 	defer tx.Rollback(ctx) // Rollback automático si no se hace commit
 	log.Println("✅ [Sync] Transacción iniciada correctamente")
 
-	log.Println("🔄 [Sync] Marcando todas las SKUs como false...")
+	log.Println("🔄 [Sync] Marcando todas las SKUs como false (excepto REJECT)...")
 	// 3. PASO CRÍTICO: Marcar todas las SKUs como false
 	if _, err := tx.Exec(ctx, db.UPDATE_TO_FALSE_SKU_STATE_INTERNAL_DB); err != nil {
 		log.Printf("❌ Sync SKU: error marcando SKUs como false: %v", err)
 		return
 	}
-	log.Println("✅ [Sync] Todas las SKUs marcadas como false")
 
 	// 4. Insertar/actualizar desde vista con estado = true
 	syncedCount := 0

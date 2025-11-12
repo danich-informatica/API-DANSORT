@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -538,11 +539,30 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			return
 		}
 
+		if message == models.NO_READ_CODE {
+			log.Printf("❌ Código NO_READ recibido")
+			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("NO_READ"), message, c.dispositivo)
+			conn.Write([]byte(response))
+			return
+		}
+
+		_, err := strconv.Atoi(message)
+
+		// El "truco" de Go es verificar si el error es 'nil' (nulo/vacío)
+		if err != nil {
+			fmt.Printf("ALERTA con '%s': solo se aceptan numeros enteros.\n", message)
+			response := "NACK\r\n"
+			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("formato inválido, no es un número entero"), message, c.dispositivo)
+			conn.Write([]byte(response))
+			return
+		}
 		// El mensaje es un ID de caja, lo usamos para consultar la DB
 		startFetch := time.Now()
 		especie, calibre, variedad, embalaje, dark, err := c.fetchSKUFromCache(context.Background(), message)
 		fetchDuration := time.Since(startFetch)
 		log.Printf("🔧 [Cognex-%d] Fetch de datos desde UNITEC completado SKU: %s-%s-%s-%d en %.3fms", c.ID, calibre, variedad, embalaje, dark, fetchDuration.Seconds()*1000)
+
 		if err != nil {
 			log.Printf("❌ Error al obtener SKU de UNITEC desde ID: %v", err)
 			response := "NACK\r\n"
@@ -551,7 +571,6 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			return
 		}
 
-		// A partir de aquí, el flujo es idéntico al de los otros métodos
 		startSKU := time.Now()
 		sku, err := models.RequestSKU(variedad, calibre, embalaje, dark)
 		skuDuration := time.Since(startSKU)

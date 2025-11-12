@@ -267,7 +267,7 @@ const SELECT_ASSIGNED_SKUS_FOR_SORTER_INTERNAL_DB = `
 	JOIN salida_sku ss ON sal.id = ss.salida_id
 	JOIN sku s2 ON ss.calibre = s2.calibre AND ss.variedad = s2.variedad AND ss.embalaje = s2.embalaje AND ss.dark = s2.dark
 	LEFT JOIN variedad v ON ss.variedad = v.codigo_variedad
-	WHERE s.id = $1 AND s2.estado = true
+	WHERE s.id = $1 AND (s2.estado = true OR ss.calibre = 'REJECT')
 	ORDER BY sal.id
 `
 const INSERT_SALIDA_SKU_INTERNAL_DB = `
