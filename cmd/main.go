@@ -248,6 +248,8 @@ func main() {
 				log.Printf("     ✅ %d cámara(s) DataMatrix configurada(s) para Sorter #%d", len(cognexDevices), sorterCfg.ID)
 			}
 
+			// Crear instancia de manager de base de datos para cada salida
+			ssmsManager, _ := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
 			// Crear salidas desde config YAML e insertarlas en la base de datos
 			var salidas []shared.Salida
 			for _, salidaCfg := range sorterCfg.Salidas {
@@ -270,10 +272,10 @@ func main() {
 				var salida shared.Salida
 				if salidaCfg.CognexID > 0 {
 					// Usar el CognexID especificado en el config
-					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, salidaCfg.CognexID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize)
+					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, salidaCfg.CognexID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize, ssmsManager)
 					log.Printf("           📷 CognexID=%d asignado a salida", salidaCfg.CognexID)
 				} else {
-					salida = shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize)
+					salida = shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize, ssmsManager)
 				}
 
 				salida.EstadoNode = salidaCfg.PLC.EstadoNodeID

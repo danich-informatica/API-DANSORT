@@ -31,7 +31,7 @@ const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
 `
 
 const SELECT_BOX_DATA_FROM_UNITEC_DB = `
-	SELECT dc.CalibreTimbrado as calibre, dc.VariedadTimbrada as variedad, dc.codConfeccion as embalaje
+	SELECT dc.CalibreTimbrado as calibre, dc.codVariedadTimbrada as variedad, dc.codConfeccion as embalaje
 	FROM DatosCajas dc
 	WHERE dc.codCaja = @p1;
 `

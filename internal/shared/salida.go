@@ -46,7 +46,7 @@ type Salida struct {
 	boxIndexMu       sync.Mutex  // Mutex para el índice
 
 	// Manager de SSMS (SQL Server) - agregado para permitir inyección
-	SSMSManager interface{} // Manager de SSMS para operaciones con la base de datos
+	SSMSManager *db.Manager // Manager de SSMS para operaciones con la base de datos
 }
 
 // Start inicia la gorutina para escuchar eventos de la salida
@@ -97,7 +97,7 @@ func (s *Salida) IsAvailable() bool {
 	return estado != 2 && !bloqueo
 }
 
-func GetNewSalida(ID int, salida_sorter string, tipo string, mesaID int, batchSize int) Salida {
+func GetNewSalida(ID int, salida_sorter string, tipo string, mesaID int, batchSize int, SSMSmanager *db.Manager) Salida {
 	// Si no se especifica batch_size, usar 1 por defecto
 	if batchSize <= 0 {
 		batchSize = 1
@@ -113,6 +113,7 @@ func GetNewSalida(ID int, salida_sorter string, tipo string, mesaID int, batchSi
 		BatchSize:        batchSize,
 		SKUs_Actuales:    []models.SKU{},
 		Estado:           0,
+		SSMSManager:      SSMSmanager,
 		Ingreso:          false,
 		IsEnabled:        true,
 		EventChannel:     make(chan interface{}, 100),
@@ -120,15 +121,15 @@ func GetNewSalida(ID int, salida_sorter string, tipo string, mesaID int, batchSi
 }
 
 // GetNewSalidaWithPhysicalID crea una nueva salida con ID físico específico
-func GetNewSalidaWithPhysicalID(ID int, physicalID int, salida_sorter string, tipo string, mesaID int, batchSize int) Salida {
-	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize)
+func GetNewSalidaWithPhysicalID(ID int, physicalID int, salida_sorter string, tipo string, mesaID int, batchSize int, SSMSmanager *db.Manager) Salida {
+	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize, SSMSmanager)
 	salida.SealerPhysicalID = physicalID
 	return salida
 }
 
 // GetNewSalidaComplete crea una nueva salida con todos los parámetros
-func GetNewSalidaComplete(ID int, physicalID int, cognexID int, salida_sorter string, tipo string, mesaID int, batchSize int) Salida {
-	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize)
+func GetNewSalidaComplete(ID int, physicalID int, cognexID int, salida_sorter string, tipo string, mesaID int, batchSize int, SSMSmanager *db.Manager) Salida {
+	salida := GetNewSalida(ID, salida_sorter, tipo, mesaID, batchSize, SSMSmanager)
 	salida.SealerPhysicalID = physicalID
 	salida.CognexID = cognexID
 	return salida
@@ -147,7 +148,7 @@ func (s *Salida) SetPalletClient(palletClient interface{}) {
 // SetSSMSManager permite inyectar un manager de SSMS (SQL Server) ya configurado.
 // Esto evita que `ProcessDataMatrix` intente crear/usar el singleton con valores
 // por defecto (que pueden apuntar a localhost).
-func (s *Salida) SetSSMSManager(mgr interface{}) {
+func (s *Salida) SetSSMSManager(mgr *db.Manager) {
 	s.SSMSManager = mgr
 }
 
@@ -212,32 +213,11 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 	}
 	*/
 
-	// Usar el manager inyectado (s.SSMSManager) que se configuró en main.go
-	cajaCorrecta := true // Asumir que la caja es correcta si no se puede validar
-	var ssmsManager db.QueryExecutor
+	cajaCorrecta := false // Asumir que la caja no es correcta hasta verificar
 
 	if s.SSMSManager != nil {
-		var ok bool
-		ssmsManager, ok = s.SSMSManager.(db.QueryExecutor)
-		if !ok {
-			log.Printf("⚠️  [Salida %d] El SSMSManager inyectado no es un db.QueryExecutor válido.", s.SealerPhysicalID)
-			ssmsManager, err = db.GetManager(ctx)
-			if err != nil {
-				log.Printf("❌ [Salida %d] Error obteniendo SSMS manager por defecto: %v", s.SealerPhysicalID, err)
-				ssmsManager = nil
-			} else {
-				log.Printf("✅ [Salida %d] Usando SSMSManager por defecto para validar caja %s", s.SealerPhysicalID, correlativoStr)
-			}
-		} else {
-			log.Printf("✅ [Salida %d] Usando SSMSManager inyectado para validar caja %s", s.SealerPhysicalID, correlativoStr)
-		}
-	}
-
-	if ssmsManager == nil {
-		log.Printf("❌ [Salida %d] No hay un SSMS manager disponible para consultar la caja %s. No se puede validar.", s.SealerPhysicalID, correlativoStr)
-	} else {
 		// Ejecutar la consulta en la DB de Unitec
-		rows, err := ssmsManager.Query(ctx, db.SELECT_BOX_DATA_FROM_UNITEC_DB, sql.Named("p1", correlativoStr))
+		rows, err := s.SSMSManager.Query(ctx, db.SELECT_BOX_DATA_FROM_UNITEC_DB, sql.Named("p1", correlativoStr))
 		if err != nil {
 			log.Printf("❌ [Salida %d] Error ejecutando consulta SELECT_BOX_DATA_FROM_UNITEC_DB: %v", s.SealerPhysicalID, err)
 		} else {
@@ -258,6 +238,9 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 							cajaCorrecta = true
 							break // Si encuentras una coincidencia, puedes salir del bucle
 						}
+					}
+					if !cajaCorrecta {
+						log.Printf("❌ [Salida %d] La caja con codCaja=%s NO corresponde a ninguna SKU válida para esta salida", s.SealerPhysicalID, correlativoStr)
 					}
 				}
 			} else {

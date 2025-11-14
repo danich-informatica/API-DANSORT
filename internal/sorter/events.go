@@ -195,7 +195,13 @@ func (s *Sorter) sendPLCSignal(salida *shared.Salida) {
 	defer cancel()
 
 	startTime := time.Now()
-	err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(salida.SealerPhysicalID))
+	destino := salida.SealerPhysicalID
+	if salida.Tipo == "descarte" {
+		log.Printf("⚠️  [Sorter #%d] Enviando señal PLC de DESCARTE → Salida %d (PhysicalID=%d)",
+			s.ID, salida.ID, 0)
+		destino = 0
+	}
+	err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(destino))
 	elapsed := time.Since(startTime)
 
 	if err != nil {
