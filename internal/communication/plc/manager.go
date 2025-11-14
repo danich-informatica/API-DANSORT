@@ -18,11 +18,23 @@ func logTs(format string, args ...interface{}) {
 	log.Printf("[%s] "+format, append([]interface{}{ts}, args...)...)
 }
 
+// PLCMetrics contiene contadores de llamadas PLC para diagnóstico
+type PLCMetrics struct {
+	mu                 sync.RWMutex
+	MethodCallAttempts int64 // Intentos totales de llamada a método (incluye reintentos)
+	MethodCallSuccess  int64 // Llamadas exitosas
+	MethodCallFailed   int64 // Llamadas fallidas (después de todos los reintentos)
+	LastCallTime       time.Time
+	LastSorterID       int
+	LastLaneNumber     int16
+}
+
 // Manager gestiona múltiples clientes OPC UA para diferentes sorters
 type Manager struct {
 	config       *config.Config
 	clients      map[string]*Client
 	clientsMutex sync.RWMutex
+	metrics      PLCMetrics // NUEVO: Métricas de diagnóstico
 }
 
 // NewManager crea un nuevo gestor de clientes OPC UA
@@ -360,6 +372,9 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 	if sorterConfig == nil {
 		return fmt.Errorf("sorter ID %d no encontrado", sorterID)
 	}
+	variant := ua.MustVariant(laneNumber) // laneNumber ya es int16
+	inputArgs := []*ua.Variant{variant}
+	m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
 
 	// Buscar el NodeID del ESTADO de la salida (el método espera un NodeID, NO un número)
 	var estadoNodeID string
@@ -376,9 +391,17 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 	// Intentar llamar al método con el NÚMERO de salida como int16
 	if sorterConfig.PLC.ObjectID != "" && sorterConfig.PLC.MethodID != "" {
-		logTs("🔄 [Sorter %d] Intentando método PLC con número de salida %d... (ObjectID=%s, MethodID=%s)",
-			sorterID, laneNumber, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID)
+		// 📊 Incrementar contador de intentos y registrar última llamada
+		m.metrics.mu.Lock()
+		m.metrics.MethodCallAttempts++
+		m.metrics.LastCallTime = time.Now()
+		m.metrics.LastSorterID = sorterID
+		m.metrics.LastLaneNumber = laneNumber
+		currentAttempts := m.metrics.MethodCallAttempts // Variable temporal para el log
+		m.metrics.mu.Unlock()
 
+		logTs("🔄 [Sorter %d] Intentando método PLC con número de salida %d... (ObjectID=%s, MethodID=%s) [Total intentos: %d]",
+			sorterID, laneNumber, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, currentAttempts)
 		// ESPERA INTELIGENTE: Verificar trigger antes de llamar al método
 		if sorterConfig.PLC.TriggerNodeID != "" {
 			logTs("⏳ [Sorter %d] Esperando trigger disponible... (TriggerNode=%s, MaxWait=2s)", sorterID, sorterConfig.PLC.TriggerNodeID)
@@ -433,9 +456,10 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		inputArgs := []*ua.Variant{variant}
 
 		// 🔁 REINTENTOS: Hasta 3 intentos con política del PLC (25ms entre intentos)
-		maxRetries := 3
+		maxRetries := 2
 		var outputValues []interface{}
 		var lastErr error
+		var successCount, failCount, totalAttempts int64 // 📊 Variables para métricas
 
 		logTs("🔁 [Sorter %d] Iniciando ciclo de reintentos (máx: %d)", sorterID, maxRetries)
 		for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -450,12 +474,24 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 			// ✅ ÉXITO: Sin error
 			if lastErr == nil {
+				// 📊 Incrementar contador de éxitos
+				m.metrics.mu.Lock()
+				m.metrics.MethodCallSuccess++
+				successCount = m.metrics.MethodCallSuccess
+				failCount = m.metrics.MethodCallFailed
+				totalAttempts = m.metrics.MethodCallAttempts
+				m.metrics.mu.Unlock()
+
 				// Validar que hay output (algunos PLCs retornan valores de confirmación)
 				if len(outputValues) > 0 {
 					logTs("✅ [Sorter %d] Método ejecutado - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
 				} else {
 					logTs("✅ [Sorter %d] Método ejecutado - Lane %d asignado (sin output)", sorterID, laneNumber)
 				}
+
+				log.Printf("📊 [PLC] Stats: Intentos=%d | Éxitos=%d | Fallos=%d | Tasa=%.1f%%",
+					totalAttempts, successCount, failCount, float64(successCount)/float64(totalAttempts)*100)
+
 				return nil
 			}
 
@@ -471,6 +507,17 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		}
 
 		// Si llegamos aquí, todos los intentos fallaron - ignorar envío según política del PLC
+		// 📊 Incrementar contador de fallos
+		m.metrics.mu.Lock()
+		m.metrics.MethodCallFailed++
+		failCount = m.metrics.MethodCallFailed
+		successCount = m.metrics.MethodCallSuccess
+		totalAttempts = m.metrics.MethodCallAttempts
+		m.metrics.mu.Unlock()
+
+		log.Printf("📊 [PLC] Stats: Intentos=%d | Éxitos=%d | Fallos=%d | Tasa=%.1f%%",
+			totalAttempts, successCount, failCount, float64(successCount)/float64(totalAttempts)*100)
+
 		logTs("❌ [Sorter %d] Lane %d NO asignado después de %d intentos - IGNORADO", sorterID, laneNumber, maxRetries)
 		return fmt.Errorf("error llamando método PLC para lane %d en sorter %d (intentos: %d): %w", laneNumber, sorterID, maxRetries, lastErr)
 	}
@@ -559,4 +606,38 @@ func (m *Manager) UnlockSalida(sorterID int, bloqueoNode string) error {
 
 	ctx := context.Background()
 	return m.WriteNode(ctx, sorterID, bloqueoNode, false)
+}
+
+// GetMetrics retorna las métricas actuales del PLC Manager
+func (m *Manager) GetMetrics() PLCMetrics {
+	m.metrics.mu.RLock()
+	defer m.metrics.mu.RUnlock()
+
+	return PLCMetrics{
+		MethodCallAttempts: m.metrics.MethodCallAttempts,
+		MethodCallSuccess:  m.metrics.MethodCallSuccess,
+		MethodCallFailed:   m.metrics.MethodCallFailed,
+		LastCallTime:       m.metrics.LastCallTime,
+		LastSorterID:       m.metrics.LastSorterID,
+		LastLaneNumber:     m.metrics.LastLaneNumber,
+	}
+}
+
+// LogMetrics imprime las métricas actuales en el log
+func (m *Manager) LogMetrics() {
+	metrics := m.GetMetrics()
+
+	var tasaExito float64
+	if metrics.MethodCallAttempts > 0 {
+		tasaExito = float64(metrics.MethodCallSuccess) / float64(metrics.MethodCallAttempts) * 100
+	}
+
+	log.Printf("📊 [PLC Metrics] Intentos: %d | Éxitos: %d | Fallos: %d | Tasa éxito: %.1f%% | Última llamada: Sorter=%d Lane=%d",
+		metrics.MethodCallAttempts,
+		metrics.MethodCallSuccess,
+		metrics.MethodCallFailed,
+		tasaExito,
+		metrics.LastSorterID,
+		metrics.LastLaneNumber,
+	)
 }

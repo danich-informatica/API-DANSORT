@@ -38,6 +38,21 @@ type insertResult struct {
 	err            error
 }
 
+// CognexMetrics contiene contadores de eventos para diagnóstico
+type CognexMetrics struct {
+	mu                  sync.RWMutex
+	MessagesReceived    int64 // Total de mensajes recibidos (incluye NO_READ, QR, ID-DB)
+	MessagesNoRead      int64 // Mensajes NO_READ
+	MessagesQR          int64 // Mensajes con formato QR
+	MessagesIDDB        int64 // Mensajes ID-DB (numéricos)
+	MessagesInvalid     int64 // Mensajes con formato inválido
+	EventsGenerated     int64 // Eventos generados (exitosos + fallidos)
+	EventsSuccess       int64 // Eventos de lectura exitosa
+	EventsFailed        int64 // Eventos de lectura fallida
+	LastMessageTime     time.Time
+	LastMessageReceived string
+}
+
 // CognexListener maneja la conexión y el procesamiento de datos para un dispositivo Cognex.
 type CognexListener struct {
 	ID             int
@@ -61,6 +76,7 @@ type CognexListener struct {
 	isStopped      chan struct{}
 	reconnectChan  chan struct{}
 	messageChannel chan string
+	metrics        CognexMetrics // NUEVO: Métricas de diagnóstico
 }
 
 func NewCognexListener(id int, remoteHost string, port int, scanMethod string, dbManager *db.PostgresManager, ssmsManager *db.Manager, boxCache *flow.BoxCacheManager) *CognexListener {
@@ -90,7 +106,48 @@ func NewCognexListener(id int, remoteHost string, port int, scanMethod string, d
 	// Iniciar worker para inserciones asíncronas
 	go cl.insertWorker()
 
+	// Iniciar logger de métricas periódico (cada 30 segundos)
+	go cl.metricsLogger()
+
 	return cl
+}
+
+// GetMetrics devuelve una copia de las métricas actuales
+func (c *CognexListener) GetMetrics() CognexMetrics {
+	c.metrics.mu.RLock()
+	defer c.metrics.mu.RUnlock()
+	return c.metrics
+}
+
+// metricsLogger imprime métricas periódicamente para monitoreo
+func (c *CognexListener) metricsLogger() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			c.metrics.mu.RLock()
+			m := c.metrics
+			c.metrics.mu.RUnlock()
+
+			if m.MessagesReceived > 0 {
+				log.Printf("📊 [Cognex-%d] Métricas:")
+				log.Printf("   📦 Mensajes recibidos: %d (NO_READ: %d, QR: %d, ID-DB: %d, Inválidos: %d)",
+					m.MessagesReceived, m.MessagesNoRead, m.MessagesQR, m.MessagesIDDB, m.MessagesInvalid)
+				log.Printf("   ✅ Eventos: Total=%d | Exitosos=%d | Fallidos=%d | Tasa=%.1f%%",
+					m.EventsGenerated, m.EventsSuccess, m.EventsFailed,
+					float64(m.EventsSuccess)/float64(m.EventsGenerated)*100)
+				if !m.LastMessageTime.IsZero() {
+					log.Printf("   🕒 Último mensaje: %s (hace %s)",
+						m.LastMessageTime.Format("15:04:05"),
+						time.Since(m.LastMessageTime).Round(time.Second))
+				}
+			}
+		}
+	}
 }
 
 // fetchSKUFromUnitec consulta la base de datos de UNITEC para obtener los datos de un SKU.
@@ -332,7 +389,15 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 
 // processMessage procesa los mensajes recibidos de Cognex
 func (c *CognexListener) processMessage(message string, conn net.Conn) {
-	logTs("📦 Mensaje recibido de %s: %s", conn.RemoteAddr().String(), message)
+	// 📊 Incrementar contador de mensajes recibidos
+	c.metrics.mu.Lock()
+	c.metrics.MessagesReceived++
+	c.metrics.LastMessageTime = time.Now()
+	c.metrics.LastMessageReceived = message
+	totalReceived := c.metrics.MessagesReceived
+	c.metrics.mu.Unlock()
+
+	logTs("📦 Mensaje recibido de %s: %s [Total: %d]", conn.RemoteAddr().String(), message, totalReceived)
 
 	message = strings.TrimSpace(message)
 	switch c.ScanMethod {
@@ -341,6 +406,12 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if message == "" {
 			log.Printf("❌ Mensaje vacío recibido")
 			response := "NACK\r\n"
+
+			c.metrics.mu.Lock()
+			c.metrics.MessagesInvalid++
+			c.metrics.EventsFailed++
+			c.metrics.EventsGenerated++
+			c.metrics.mu.Unlock()
 
 			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("mensaje vacío"), message, c.dispositivo)
 
@@ -351,6 +422,13 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if strings.TrimSpace(message) == models.NO_READ_CODE {
 			log.Printf("❌ Código NO_READ recibido")
 			response := "NACK\r\n"
+
+			c.metrics.mu.Lock()
+			c.metrics.MessagesNoRead++
+			c.metrics.EventsFailed++
+			c.metrics.EventsGenerated++
+			c.metrics.mu.Unlock()
+
 			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("NO_READ"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
@@ -359,6 +437,13 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if len(message_splitted) < 5 {
 			log.Printf("❌ Mensaje inválido (partes insuficientes): %s (tiene %d partes, necesita 5)", message, len(message_splitted))
 			response := "NACK\r\n"
+
+			c.metrics.mu.Lock()
+			c.metrics.MessagesInvalid++
+			c.metrics.EventsFailed++
+			c.metrics.EventsGenerated++
+			c.metrics.mu.Unlock()
+
 			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("formato inválido"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
@@ -422,6 +507,11 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			message:  message,
 			resultCh: resultCh,
 		}
+
+		// Incrementar contador de mensajes QR
+		c.metrics.mu.Lock()
+		c.metrics.MessagesQR++
+		c.metrics.mu.Unlock()
 
 		// Enviar al worker (no bloqueante si hay buffer disponible)
 		select {
@@ -533,6 +623,12 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			log.Printf("❌ Mensaje vacío recibido")
 			response := "NACK\r\n"
 
+			c.metrics.mu.Lock()
+			c.metrics.MessagesInvalid++
+			c.metrics.EventsFailed++
+			c.metrics.EventsGenerated++
+			c.metrics.mu.Unlock()
+
 			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("mensaje vacío"), message, c.dispositivo)
 
 			conn.Write([]byte(response))
@@ -542,6 +638,13 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if message == models.NO_READ_CODE {
 			log.Printf("❌ Código NO_READ recibido")
 			response := "NACK\r\n"
+
+			c.metrics.mu.Lock()
+			c.metrics.MessagesNoRead++
+			c.metrics.EventsFailed++
+			c.metrics.EventsGenerated++
+			c.metrics.mu.Unlock()
+
 			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("NO_READ"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
@@ -553,15 +656,35 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if err != nil {
 			fmt.Printf("ALERTA con '%s': solo se aceptan numeros enteros.\n", message)
 			response := "NACK\r\n"
+
+			c.metrics.mu.Lock()
+			c.metrics.MessagesInvalid++
+			c.metrics.EventsFailed++
+			c.metrics.EventsGenerated++
+			c.metrics.mu.Unlock()
+
 			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("formato inválido, no es un número entero"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
 		}
+
+		// Incrementar contador de mensajes ID-DB válidos
+		c.metrics.mu.Lock()
+		c.metrics.MessagesIDDB++
+		c.metrics.mu.Unlock()
+
 		// El mensaje es un ID de caja, lo usamos para consultar la DB
 		startFetch := time.Now()
 		especie, calibre, variedad, embalaje, dark, err := c.fetchSKUFromCache(context.Background(), message)
+
+		// limpiamos los datos recibidos
+		especie = strings.TrimSpace(especie)
+		calibre = strings.TrimSpace(calibre)
+		variedad = strings.TrimSpace(variedad)
+		embalaje = strings.TrimSpace(embalaje)
+
 		fetchDuration := time.Since(startFetch)
-		log.Printf("🔧 [Cognex-%d] Fetch de datos desde UNITEC completado SKU: %s-%s-%s-%d en %.3fms", c.ID, calibre, variedad, embalaje, dark, fetchDuration.Seconds()*1000)
+		log.Printf("🔧 [Cognex-%d] Fetch de datos desde UNITEC completado SKU: %q-%q-%q-%q en %.3fms", c.ID, calibre, variedad, embalaje, dark, fetchDuration.Seconds()*1000)
 
 		if err != nil {
 			log.Printf("❌ Error al obtener SKU de UNITEC desde ID: %v", err)
@@ -572,9 +695,9 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		}
 
 		startSKU := time.Now()
-		sku, err := models.RequestSKU(variedad, calibre, embalaje, dark)
+		sku, err := models.RequestSKU(strings.TrimSpace(variedad), strings.TrimSpace(calibre), strings.TrimSpace(embalaje), dark)
 		skuDuration := time.Since(startSKU)
-		log.Printf("🔧 [Cognex-%d] Generación de SKU: %s (Variedad=%s, Calibre=%s, Embalaje=%s, Dark=%d)", c.ID, sku.SKU, sku.Variedad, sku.Calibre, sku.Embalaje, sku.Dark)
+		log.Printf("🔧 [Cognex-%d] Generación de SKU: %s (Variedad=%q, Calibre=%q, Embalaje=%q, Dark=%q)", c.ID, sku.SKU, sku.Variedad, sku.Calibre, sku.Embalaje, sku.Dark)
 		if err != nil {
 			log.Printf("❌ SKU inválido generado desde datos de UNITEC ID: %s | Error: %v", message, err)
 			response := "NACK\r\n"
@@ -587,13 +710,13 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 
 		resultCh := make(chan insertResult, 1)
 		insertReq := insertRequest{
-			especie:  especie,
-			variedad: variedad,
-			calibre:  calibre,
-			embalaje: embalaje,
+			especie:  strings.TrimSpace(especie),
+			variedad: strings.TrimSpace(variedad),
+			calibre:  strings.TrimSpace(calibre),
+			embalaje: strings.TrimSpace(embalaje),
 			dark:     dark,
-			sku:      sku.SKU,
-			message:  message,
+			sku:      strings.TrimSpace(sku.SKU),
+			message:  strings.TrimSpace(message),
 			resultCh: resultCh,
 		}
 
@@ -616,6 +739,12 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 
 				if result.err != nil {
 					log.Printf("❌ Error al insertar caja en DB desde ID-DB: %s | Error: %v (tardó %.2fms)", message, result.err, insertDuration.Seconds()*1000)
+
+					c.metrics.mu.Lock()
+					c.metrics.EventsFailed++
+					c.metrics.EventsGenerated++
+					c.metrics.mu.Unlock()
+
 					c.EventChan <- models.NewLecturaFallidaConDatos(
 						fmt.Errorf("error al insertar: %w", result.err),
 						especie, calibre, variedad, embalaje, message, c.dispositivo,
@@ -624,6 +753,12 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 					skuFinal := fmt.Sprintf("%s-%s-%s-%d", calibre, strings.ToUpper(result.nombreVariedad), embalaje, dark)
 					log.Printf("📦 Correlativo de caja insertado: %s (inserción DB: %.2fms)", result.correlativo, insertDuration.Seconds()*1000)
 					log.Printf("✅ Caja insertada | Correlativo: %s | SKU: %s | Especie: %s", result.correlativo, skuFinal, especie)
+
+					c.metrics.mu.Lock()
+					c.metrics.EventsSuccess++
+					c.metrics.EventsGenerated++
+					c.metrics.mu.Unlock()
+
 					c.EventChan <- models.NewLecturaExitosa(
 						skuFinal, especie, calibre, variedad, embalaje, result.correlativo, message, c.dispositivo,
 					)
