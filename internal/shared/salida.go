@@ -233,7 +233,7 @@ func (s *Salida) ProcessDataMatrix(ctx context.Context, correlativoStr string) (
 				} else {
 					log.Printf("✅ [Salida %d] Datos caja desde Unitec -> calibre=%s variedad=%s embalaje=%s", s.SealerPhysicalID, calibre.String, variedad.String, embalaje.String)
 					for _, sku := range s.SKUs_Actuales {
-						if sku.Calibre == calibre.String && sku.Variedad == variedad.String {
+						if sku.Calibre == calibre.String && sku.Variedad == variedad.String && sku.Embalaje == embalaje.String {
 							log.Printf("📦 [Salida %d] La caja con codCaja=%s corresponde a la SKU %s", s.SealerPhysicalID, correlativoStr, sku.SKU)
 							cajaCorrecta = true
 							break // Si encuentras una coincidencia, puedes salir del bucle

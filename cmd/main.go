@@ -477,7 +477,7 @@ func main() {
 			// Buscar salidas manuales
 			var manualSalidas []shared.Salida
 			for _, salida := range salidas {
-				if salida.Tipo == "manual" {
+				if salida.Tipo == "manual" || salida.Tipo == "descarte" {
 					manualSalidas = append(manualSalidas, salida)
 				}
 			}
