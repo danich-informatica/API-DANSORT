@@ -363,6 +363,22 @@ func main() {
 			}
 
 			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Name, sorterCfg.PLC.InputNodeID, sorterCfg.PLC.OutputNodeID, sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port, salidas, cognexListener, cognexDevices, httpService.GetWebSocketHub(), dbManager, plcManager, fxSyncManager)
+
+			// Configurar WebSocketHub para todas las salidas (necesario para el channel)
+			log.Printf("     🔧 Configurando WebSocket Hub para salidas...")
+			wsHub := httpService.GetWebSocketHub()
+			for i := range s.Salidas {
+				if s.Salidas[i].Tipo == "automatico" {
+					s.Salidas[i].SetWebSocketHub(wsHub, sorterCfg.ID)
+					log.Printf("        ✅ WebSocket Hub configurado para Salida %d (physical_id=%d)",
+						s.Salidas[i].ID, s.Salidas[i].SealerPhysicalID)
+				}
+			}
+
+			// Iniciar agregador centralizado de box status (se inicia después del sorter)
+			// El agregador recopila estadísticas de todas las salidas automáticas
+			// y las publica como un único evento cada 2 segundos
+
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)
@@ -523,6 +539,17 @@ func main() {
 		for _, s := range sorters {
 			go s.StartFlowStatistics(calculationInterval, windowDuration)
 			log.Printf("   ✅ Sorter #%d: Sistema de flow stats iniciado", s.ID)
+		}
+		log.Println("")
+
+		// Iniciar sistema de agregación de estados de cajas
+		log.Println("📦 Iniciando agregador de estados de cajas...")
+		boxStatusInterval := 2 * time.Second // Publicar cada 2 segundos
+		log.Printf("   ⏱️  Intervalo de publicación: %v", boxStatusInterval)
+
+		for _, s := range sorters {
+			go s.StartBoxStatusAggregator(boxStatusInterval)
+			log.Printf("   ✅ Sorter #%d: Agregador de box status iniciado", s.ID)
 		}
 		log.Println("")
 

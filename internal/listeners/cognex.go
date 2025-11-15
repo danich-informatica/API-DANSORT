@@ -420,17 +420,11 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		logTs("📊 DataMatrix detectado: %s", strings.TrimSpace(message))
 		message = strings.TrimSpace(message)
 
-		if message == "" {
-			log.Printf("❌ Mensaje DataMatrix vacío recibido")
-			response := "NACK\r\n"
-			if _, err := conn.Write([]byte(response)); err != nil {
-				log.Printf("Error al enviar respuesta NACK: %v\n", err)
-			}
-			return
-		}
-
-		// Crear y enviar evento DataMatrix al nuevo canal dedicado
+		// Crear y enviar evento DataMatrix a un canal dedicado
 		// Este flujo es SEPARADO del flujo QR/SKU original
+		if message == models.NO_READ_CODE {
+			message = ""
+		}
 		dmEvent := models.NewDataMatrixEvent(message, c.dispositivo, c.id, message)
 		log.Printf("✅ [Cognex#%d] DataMatrix → Canal dedicado | Código: %s", c.id, message)
 
