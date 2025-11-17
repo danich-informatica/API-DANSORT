@@ -213,12 +213,12 @@ func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, c
 	}
 
 	if !exists {
-		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente con dark=%d y estado=false...", calibre, variedad, embalaje, dark)
+		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente con dark=%d y estado=true...", calibre, variedad, embalaje, dark)
 
 		// Insertar la SKU con estado false (desactivada hasta que sea activada manualmente)
 		_, err = m.pool.Exec(ctx, `
-			INSERT INTO sku (calibre, variedad, embalaje, dark, estado) 
-			VALUES ($1, $2, $3, $4, false)
+			INSERT INTO sku (calibre, variedad, embalaje, dark, estado)
+			VALUES ($1, $2, $3, $4, true)
 			ON CONFLICT (calibre, variedad, embalaje, dark) DO NOTHING
 		`, calibre, variedad, embalaje, dark)
 
