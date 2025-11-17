@@ -174,3 +174,42 @@ func (s *Sorter) FindSalidaForSKU(skuText string) int {
 	}
 	return -1
 }
+
+// getAlternativeSalida busca una salida alternativa para un SKU, excluyendo salidas problemáticas
+func (s *Sorter) getAlternativeSalida(sku string, excludeSalidaIDs []int) *shared.Salida {
+	// Buscar TODAS las salidas que tienen este SKU, excluyendo las problemáticas
+	var salidasDisponibles []*shared.Salida
+
+	for i := range s.Salidas {
+		// Verificar si esta salida está en la lista de exclusión
+		excluded := false
+		for _, excludeID := range excludeSalidaIDs {
+			if s.Salidas[i].ID == excludeID {
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
+
+		// Verificar si tiene el SKU y está disponible
+		for _, skuConfig := range s.Salidas[i].SKUs_Actuales {
+			if skuConfig.SKU == sku && s.Salidas[i].IsAvailable() {
+				salidasDisponibles = append(salidasDisponibles, &s.Salidas[i])
+				break
+			}
+		}
+	}
+
+	if len(salidasDisponibles) == 0 {
+		log.Printf("[Sorter %d] ⚠️ No hay salidas alternativas disponibles para SKU '%s' (excluidas: %v)",
+			s.ID, sku, excludeSalidaIDs)
+		return nil
+	}
+
+	// Retornar la primera salida disponible
+	log.Printf("[Sorter %d] ✅ Salida alternativa encontrada para SKU '%s': Salida ID=%d (excluidas: %v)",
+		s.ID, sku, salidasDisponibles[0].ID, excludeSalidaIDs)
+	return salidasDisponibles[0]
+}
