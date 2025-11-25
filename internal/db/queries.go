@@ -2,27 +2,37 @@ package db
 
 // Query CON VIE_Dark y VIE_Descrizione (intentar primero)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
-	SELECT DISTINCT
-		dc.codVariedadTimbrada as variedad,
-	    dc.CalibreTimbrado as calibre,
+	SELECT TOP 18
+		dc.codVariedadTimbrada as variedad, 
+		dc.CalibreTimbrado as calibre, 
 		dc.codConfeccion as embalaje,
-		1 as dark,
-		dc.VariedadTimbrada AS nombre_variedad,
+		1 as dark, 
+		dc.VariedadTimbrada AS nombre_variedad, 
 		1 AS linea
-	FROM INT_DANICH_DatosCajas dc
-	WHERE dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas);
+	FROM INT_DANICH_DatosCajas dc 
+	GROUP BY 
+		dc.codVariedadTimbrada, 
+		dc.CalibreTimbrado, 
+		dc.codConfeccion, 
+		dc.VariedadTimbrada
+	ORDER BY MAX(dc.FechaCreacion) DESC;
 `
 
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA_FALLBACK = `
-	SELECT DISTINCT
-		dc.codVariedadTimbrada as variedad,
-		dc.CalibreTimbrado as calibre,
+	SELECT TOP 18
+		dc.codVariedadTimbrada as variedad, 
+		dc.CalibreTimbrado as calibre, 
 		dc.codConfeccion as embalaje,
-		1 as dark,
-		dc.VariedadTimbrada AS nombre_variedad,
+		1 as dark, 
+		dc.VariedadTimbrada AS nombre_variedad, 
 		1 AS linea
-	FROM INT_DANICH_DatosCajas dc
-	WHERE dc.proceso = (SELECT MAX(proceso) FROM INT_DANICH_DatosCajas);
+	FROM INT_DANICH_DatosCajas dc 
+	GROUP BY 
+		dc.codVariedadTimbrada, 
+		dc.CalibreTimbrado, 
+		dc.codConfeccion, 
+		dc.VariedadTimbrada
+	ORDER BY MAX(dc.FechaCreacion) DESC;
 `
 
 const SELECT_UNITEC_DB_DBO_SKU_FROM_CODIGO_CAJA = `
