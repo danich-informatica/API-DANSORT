@@ -193,8 +193,10 @@ func (s *Salida) SetWebSocketHub(hub interface{}, sorterID int) {
 	s.SorterID = sorterID
 }
 
-// StartBoxStatusWorker inicia un worker que escucha el channel de estados de cajas
-// y publica las estadísticas al WebSocket Hub
+// StartBoxStatusWorker - DEPRECATED: Ahora se usa el agregador centralizado en el Sorter
+// Este método fue reemplazado por Sorter.StartBoxStatusAggregator() que recopila
+// estadísticas de todas las salidas automáticas y las publica como un solo evento
+/*
 func (s *Salida) StartBoxStatusWorker() {
 	go func() {
 		log.Printf("📊 [Salida %d] Worker de estados de cajas iniciado", s.SealerPhysicalID)
@@ -215,7 +217,7 @@ func (s *Salida) StartBoxStatusWorker() {
 				for k, v := range contadores {
 					contadoresJSON[string(k)] = v
 				}
-				
+
 				porcentajesJSON := make(map[string]float64)
 				for k, v := range porcentajes {
 					porcentajesJSON[string(k)] = v
@@ -242,6 +244,7 @@ func (s *Salida) StartBoxStatusWorker() {
 		log.Printf("⚠️  [Salida %d] Channel de estados cerrado, worker terminado", s.SealerPhysicalID)
 	}()
 }
+*/
 
 // InitializeBoxNumbers inicializa la lista de números de caja disponibles
 func (s *Salida) InitializeBoxNumbers(boxNumbers []int) {

@@ -122,7 +122,7 @@ func InternalServerError(c *gin.Context, message string, details interface{}) {
 // SorterNotFound - Error de negocio: Sorter no encontrado
 func SorterNotFound(c *gin.Context, sorterID string) {
 	RespondWithError(c, http.StatusNotFound, ErrCodeSorterNotFound,
-		"Sorter no encontrado",
+		"🔍 Sorter no encontrado",
 		gin.H{
 			"sorter_id": sorterID,
 			"reason":    "El sorter especificado no está registrado en el sistema",
@@ -133,7 +133,7 @@ func SorterNotFound(c *gin.Context, sorterID string) {
 // SealerNotFound - Error de negocio: Salida no encontrada
 func SealerNotFound(c *gin.Context, sealerID int) {
 	RespondWithError(c, http.StatusNotFound, ErrCodeSealerNotFound,
-		"Salida (sealer) no encontrada",
+		"🔍 Salida (sealer) no encontrada",
 		gin.H{
 			"sealer_id": sealerID,
 			"reason":    "La salida especificada no existe en ningún sorter",
@@ -144,7 +144,7 @@ func SealerNotFound(c *gin.Context, sealerID int) {
 // SKUNotFound - Error de negocio: SKU no encontrada
 func SKUNotFound(c *gin.Context, skuID interface{}, sorterID string) {
 	RespondWithError(c, http.StatusNotFound, ErrCodeSKUNotFound,
-		"SKU no encontrada",
+		"🔍 SKU no encontrada",
 		gin.H{
 			"sku_id":    skuID,
 			"sorter_id": sorterID,
@@ -156,7 +156,7 @@ func SKUNotFound(c *gin.Context, skuID interface{}, sorterID string) {
 // RejectSKUNotAllowed - Error de negocio: No se puede asignar REJECT a salida automática
 func RejectSKUNotAllowed(c *gin.Context, sealerID int, sealerName string) {
 	RespondWithError(c, http.StatusUnprocessableEntity, ErrCodeRejectNotAllowed,
-		"No se puede asignar SKU REJECT a salida automática",
+		"⛔ No se puede asignar SKU REJECT a salida automática",
 		gin.H{
 			"sku_id":      0,
 			"sku_name":    "REJECT",
@@ -171,7 +171,7 @@ func RejectSKUNotAllowed(c *gin.Context, sealerID int, sealerName string) {
 // ValidationError - Error de validación genérico
 func ValidationError(c *gin.Context, field string, message string) {
 	RespondWithError(c, http.StatusBadRequest, ErrCodeValidationError,
-		"Error de validación",
+		"❌ Error de validación",
 		gin.H{
 			"field":  field,
 			"reason": message,
@@ -182,7 +182,7 @@ func ValidationError(c *gin.Context, field string, message string) {
 // DatabaseError - Error de base de datos
 func DatabaseError(c *gin.Context, operation string, err error) {
 	RespondWithError(c, http.StatusInternalServerError, ErrCodeDatabaseError,
-		"Error de base de datos",
+		"💾 Error de base de datos",
 		gin.H{
 			"operation": operation,
 			"error":     err.Error(),

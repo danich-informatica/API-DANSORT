@@ -1,7 +1,7 @@
 package db
 
 import (
-	"API-DANSORT/internal/models"
+	"API-GREENEX/internal/models"
 	"context"
 	"fmt"
 	"log"
@@ -161,7 +161,7 @@ func (m *PostgresManager) GetAllSKUs(ctx context.Context) ([]models.SKU, error) 
 }
 
 // CheckSKUExists verifica si una SKU existe en la base de datos
-func (m *PostgresManager) CheckSKUExists(ctx context.Context, calibre, variedad, embalaje string, dark int) (bool, error) {
+func (m *PostgresManager) CheckSKUExists(ctx context.Context, calibre, variedad, embalaje string) (bool, error) {
 	if m == nil || m.pool == nil {
 		return false, fmt.Errorf("manager no inicializado")
 	}
@@ -170,9 +170,7 @@ func (m *PostgresManager) CheckSKUExists(ctx context.Context, calibre, variedad,
 	err := m.pool.QueryRow(ctx, SELECT_IF_EXISTS_SKU_INTERNAL_DB,
 		strings.TrimSpace(calibre),
 		strings.TrimSpace(variedad),
-		strings.TrimSpace(embalaje),
-		dark,
-	).Scan(&exists)
+		strings.TrimSpace(embalaje)).Scan(&exists)
 
 	if err != nil && err != pgx.ErrNoRows {
 		return false, fmt.Errorf("error al verificar existencia de SKU: %w", err)
@@ -209,18 +207,18 @@ func (m *PostgresManager) InsertNewBox(ctx context.Context, especie, variedad, c
 	}
 
 	// Paso 1: Verificar si la SKU existe, si no existe, crearla
-	exists, err := m.CheckSKUExists(ctx, calibre, variedad, embalaje, dark)
+	exists, err := m.CheckSKUExists(ctx, calibre, variedad, embalaje)
 	if err != nil {
 		return "", fmt.Errorf("error al verificar SKU: %w", err)
 	}
 
 	if !exists {
-		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente con dark=%d y estado=false...", calibre, variedad, embalaje, dark)
+		log.Printf("⚠️  SKU no existe (%s-%s-%s), creándola automáticamente con dark=%d y estado=true...", calibre, variedad, embalaje, dark)
 
 		// Insertar la SKU con estado false (desactivada hasta que sea activada manualmente)
 		_, err = m.pool.Exec(ctx, `
-			INSERT INTO sku (calibre, variedad, embalaje, dark, estado) 
-			VALUES ($1, $2, $3, $4, false)
+			INSERT INTO sku (calibre, variedad, embalaje, dark, estado)
+			VALUES ($1, $2, $3, $4, true)
 			ON CONFLICT (calibre, variedad, embalaje, dark) DO NOTHING
 		`, calibre, variedad, embalaje, dark)
 

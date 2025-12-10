@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"API-DANSORT/internal/config"
+	"API-GREENEX/internal/config"
 
 	"github.com/gopcua/opcua/ua"
 )
@@ -18,23 +18,11 @@ func logTs(format string, args ...interface{}) {
 	log.Printf("[%s] "+format, append([]interface{}{ts}, args...)...)
 }
 
-// PLCMetrics contiene contadores de llamadas PLC para diagnóstico
-type PLCMetrics struct {
-	mu                 sync.RWMutex
-	MethodCallAttempts int64 // Intentos totales de llamada a método (incluye reintentos)
-	MethodCallSuccess  int64 // Llamadas exitosas
-	MethodCallFailed   int64 // Llamadas fallidas (después de todos los reintentos)
-	LastCallTime       time.Time
-	LastSorterID       int
-	LastLaneNumber     int16
-}
-
 // Manager gestiona múltiples clientes OPC UA para diferentes sorters
 type Manager struct {
 	config       *config.Config
 	clients      map[string]*Client
 	clientsMutex sync.RWMutex
-	metrics      PLCMetrics // NUEVO: Métricas de diagnóstico
 }
 
 // NewManager crea un nuevo gestor de clientes OPC UA
@@ -388,23 +376,23 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 	// Intentar llamar al método con el NÚMERO de salida como int16
 	if sorterConfig.PLC.ObjectID != "" && sorterConfig.PLC.MethodID != "" {
-		// 📊 Incrementar contador de intentos
-		m.metrics.mu.Lock()
-		m.metrics.MethodCallAttempts++
-		m.metrics.LastCallTime = time.Now()
-		m.metrics.LastSorterID = sorterID
-		m.metrics.LastLaneNumber = laneNumber
-		totalAttempts := m.metrics.MethodCallAttempts
-		m.metrics.mu.Unlock()
-
-		logTs("🔄 [Sorter %d] Intentando método PLC con número de salida %d... (ObjectID=%s, MethodID=%s) [Total intentos: %d]",
-			sorterID, laneNumber, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, totalAttempts)
+		logTs("🔄 [Sorter %d] Intentando método PLC con número de salida %d...", sorterID, laneNumber)
 
 		// ESPERA INTELIGENTE: Verificar trigger antes de llamar al método
 		if sorterConfig.PLC.TriggerNodeID != "" {
-			logTs("⏳ [Sorter %d] Esperando trigger disponible... (TriggerNode=%s, MaxWait=2s)", sorterID, sorterConfig.PLC.TriggerNodeID)
+			logTs("⏳ [Sorter %d] Esperando trigger disponible...", sorterID)
+			// warm up al método llamando con un 0 antes de la llamada real
+
+			warmUpVariant := ua.MustVariant(int16(0))
+			warmUpInputArgs := []*ua.Variant{warmUpVariant}
+			_, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, warmUpInputArgs)
+			if err != nil {
+				logTs("⚠️  [Sorter %d] Error en warm up del método PLC: %v", sorterID, err)
+			} else {
+				logTs("✅ [Sorter %d] Warm up del método PLC exitoso", sorterID)
+			}
+
 			maxWaitTime := 2 * time.Second
-			logTs("🕐 [Sorter %d] Creando contexto con timeout de %v", sorterID, maxWaitTime)
 			ctxWithTimeout, cancel := context.WithTimeout(ctx, maxWaitTime)
 			defer cancel()
 
@@ -413,13 +401,12 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 
 			startTime := time.Now()
 			triggerReady := false
-			logTs("🔍 [Sorter %d] Iniciando polling del trigger cada 20ms...", sorterID)
 
 			for !triggerReady {
 				select {
 				case <-ctxWithTimeout.Done():
 					elapsed := time.Since(startTime)
-					logTs("⚠️  [Sorter %d] Timeout esperando trigger después de %v, continuando de todas formas...", sorterID, elapsed)
+					log.Printf("⚠️  [Sorter %d] Timeout esperando trigger después de %v, continuando de todas formas...", sorterID, elapsed)
 					triggerReady = true
 
 				case <-ticker.C:
@@ -444,12 +431,12 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 				}
 			}
 		} else {
-			// Fallback: Si no hay trigger configurado, sin espera
-			logTs("⚠️  [Sorter %d] No hay trigger_node_id configurado, sin espera", sorterID)
+			// Fallback: Si no hay trigger configurado, usar sleep fijo
+			log.Printf("⚠️  [Sorter %d] No hay trigger_node_id, usando sleep fijo de 0ms", sorterID)
+			//time.Sleep(100 * time.Millisecond)
 		}
 
 		// CRÍTICO: El método espera int16 con el número de salida, NO un NodeID
-		logTs("🎯 [Sorter %d] Preparando argumentos: laneNumber=%d (tipo=int16)", sorterID, laneNumber)
 		variant := ua.MustVariant(laneNumber) // laneNumber ya es int16
 		inputArgs := []*ua.Variant{variant}
 
@@ -457,39 +444,23 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		maxRetries := 3
 		var outputValues []interface{}
 		var lastErr error
-		var successCount, failCount, totalAttempts int64 // 📊 Variables para métricas
 
-		logTs("🔁 [Sorter %d] Iniciando ciclo de reintentos (máx: %d)", sorterID, maxRetries)
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			if attempt > 1 {
 				logTs("🔄 [Sorter %d] Reintento %d/%d para Lane %d...", sorterID, attempt, maxRetries, laneNumber)
 				time.Sleep(25 * time.Millisecond) // Política del PLC: 25ms entre reintentos
 			}
 
-			logTs("📞 [Sorter %d] Llamando CallMethod (intento %d/%d) con Lane=%d...", sorterID, attempt, maxRetries, laneNumber)
 			outputValues, lastErr = m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
-			logTs("📥 [Sorter %d] CallMethod retornó (intento %d/%d): err=%v, outputs=%v", sorterID, attempt, maxRetries, lastErr, outputValues)
 
 			// ✅ ÉXITO: Sin error
 			if lastErr == nil {
-				// 📊 Incrementar contador de éxitos
-				m.metrics.mu.Lock()
-				m.metrics.MethodCallSuccess++
-				successCount = m.metrics.MethodCallSuccess
-				failCount = m.metrics.MethodCallFailed
-				totalAttempts = m.metrics.MethodCallAttempts
-				m.metrics.mu.Unlock()
-
 				// Validar que hay output (algunos PLCs retornan valores de confirmación)
 				if len(outputValues) > 0 {
 					logTs("✅ [Sorter %d] Método ejecutado - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
 				} else {
 					logTs("✅ [Sorter %d] Método ejecutado - Lane %d asignado (sin output)", sorterID, laneNumber)
 				}
-
-				log.Printf("📊 [PLC] Stats: Intentos=%d | Éxitos=%d | Fallos=%d | Tasa=%.1f%%",
-					totalAttempts, successCount, failCount, float64(successCount)/float64(totalAttempts)*100)
-
 				return nil
 			}
 
@@ -505,17 +476,6 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		}
 
 		// Si llegamos aquí, todos los intentos fallaron - ignorar envío según política del PLC
-		// 📊 Incrementar contador de fallos
-		m.metrics.mu.Lock()
-		m.metrics.MethodCallFailed++
-		failCount = m.metrics.MethodCallFailed
-		successCount = m.metrics.MethodCallSuccess
-		totalAttempts = m.metrics.MethodCallAttempts
-		m.metrics.mu.Unlock()
-
-		log.Printf("📊 [PLC] Stats: Intentos=%d | Éxitos=%d | Fallos=%d | Tasa=%.1f%%",
-			totalAttempts, successCount, failCount, float64(successCount)/float64(totalAttempts)*100)
-
 		logTs("❌ [Sorter %d] Lane %d NO asignado después de %d intentos - IGNORADO", sorterID, laneNumber, maxRetries)
 		return fmt.Errorf("error llamando método PLC para lane %d en sorter %d (intentos: %d): %w", laneNumber, sorterID, maxRetries, lastErr)
 	}
@@ -604,38 +564,4 @@ func (m *Manager) UnlockSalida(sorterID int, bloqueoNode string) error {
 
 	ctx := context.Background()
 	return m.WriteNode(ctx, sorterID, bloqueoNode, false)
-}
-
-// GetMetrics retorna las métricas actuales del PLC Manager
-func (m *Manager) GetMetrics() PLCMetrics {
-	m.metrics.mu.RLock()
-	defer m.metrics.mu.RUnlock()
-
-	return PLCMetrics{
-		MethodCallAttempts: m.metrics.MethodCallAttempts,
-		MethodCallSuccess:  m.metrics.MethodCallSuccess,
-		MethodCallFailed:   m.metrics.MethodCallFailed,
-		LastCallTime:       m.metrics.LastCallTime,
-		LastSorterID:       m.metrics.LastSorterID,
-		LastLaneNumber:     m.metrics.LastLaneNumber,
-	}
-}
-
-// LogMetrics imprime las métricas actuales en el log
-func (m *Manager) LogMetrics() {
-	metrics := m.GetMetrics()
-
-	var tasaExito float64
-	if metrics.MethodCallAttempts > 0 {
-		tasaExito = float64(metrics.MethodCallSuccess) / float64(metrics.MethodCallAttempts) * 100
-	}
-
-	log.Printf("📊 [PLC Metrics] Intentos: %d | Éxitos: %d | Fallos: %d | Tasa éxito: %.1f%% | Última llamada: Sorter=%d Lane=%d",
-		metrics.MethodCallAttempts,
-		metrics.MethodCallSuccess,
-		metrics.MethodCallFailed,
-		tasaExito,
-		metrics.LastSorterID,
-		metrics.LastLaneNumber,
-	)
 }

@@ -776,7 +776,6 @@ func translateAssignmentError(errMsg string, skuID uint32, salidaID int) string 
 	if strings.Contains(errLower, "sku con id") && strings.Contains(errLower, "no encontrada") {
 		return fmt.Sprintf("SKU no disponible (ID: %d)", skuID)
 	}
-
 	if strings.Contains(errLower, "no encontrada en las skus disponibles") {
 		return "SKU no existe en el sistema o no está activa"
 	}
