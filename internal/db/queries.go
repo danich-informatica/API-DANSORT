@@ -2,7 +2,7 @@ package db
 
 // Query CON VIE_Dark y VIE_Descrizione (intentar primero)
 const SELECT_UNITEC_DB_DBO_SEGREGAZIONE_PROGRAMMA = `
-	SELECT TOP 18
+	SELECT TOP 15
 		dc.codVariedadTimbrada as variedad, 
 		dc.CalibreTimbrado as calibre, 
 		dc.codConfeccion as embalaje,

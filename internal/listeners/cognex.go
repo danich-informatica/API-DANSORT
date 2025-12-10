@@ -830,8 +830,8 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 		if message == models.NO_READ_CODE {
 			message = ""
 		}
-		dmEvent := models.NewDataMatrixEvent(message, c.dispositivo, c.id, message)
-		log.Printf("✅ [Cognex#%d] DataMatrix → Canal dedicado | Código: %s", c.id, message)
+		dmEvent := models.NewDataMatrixEvent(message, c.dispositivo, c.ID, message)
+		log.Printf("✅ [Cognex#%d] DataMatrix → Canal dedicado | Código: %s", c.ID, message)
 
 		select {
 		case c.DataMatrixChan <- dmEvent:
