@@ -18,13 +18,13 @@ type SKU struct {
 	NombreVariedad string // Nombre de variedad (ej: "LAPINS") - para frontend
 }
 
-// BuildSKU construye el string SKU en formato: calibre-NOMBRE_VARIEDAD-embalaje-dark
+// BuildDisplay construye el string SKU en formato: calibre-variedad-embalaje-dark
 // Usa NombreVariedad si existe, sino usa Variedad (código)
 // Siempre en MAYÚSCULAS
-func (s *SKU) BuildSKU() string {
+func (s *SKU) BuildDisplay() string {
 	variedad := s.NombreVariedad
-	if variedad == "" {
-		variedad = s.Variedad // Fallback al código si no hay nombre
+	if strings.TrimSpace(variedad) == "" {
+		variedad = s.Variedad
 	}
 	return fmt.Sprintf("%s-%s-%s-%d", s.Calibre, strings.ToUpper(variedad), s.Embalaje, s.Dark)
 }

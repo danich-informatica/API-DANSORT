@@ -353,22 +353,32 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 
 	s.Salidas[salidaIndex].SKUs_Actuales = newSKUs
 
-	for i := range s.assignedSKUs {
-		if uint32(s.assignedSKUs[i].ID) == skuID {
-			s.assignedSKUs[i].IsAssigned = false
-			break
+	// Determinar si es salida automática
+	tipoSalida := s.Salidas[salidaIndex].Tipo
+	esAutomatica := tipoSalida == "automatico" || tipoSalida == "automatica"
+
+	// Solo marcar como no asignada si NO es salida automática
+	if !esAutomatica {
+		// Salida manual: liberar SKU completamente
+		for i := range s.assignedSKUs {
+			if uint32(s.assignedSKUs[i].ID) == skuID {
+				s.assignedSKUs[i].IsAssigned = false
+				log.Printf("🔓 Sorter #%d: SKU ID=%d liberada (salida manual)", s.ID, skuID)
+				break
+			}
 		}
+	} else {
+		// Salida automática: MANTENER IsAssigned=true para permitir reasignación temporal
+		log.Printf("🔄 Sorter #%d: SKU ID=%d mantiene estado asignado para reasignación temporal", s.ID, skuID)
 	}
 
-	log.Printf("🗑️  Sorter #%d: SKU '%s' (ID=%d) eliminada de salida '%s' (ID=%d)",
-		s.ID, removedSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID)
+	log.Printf("🗑️  Sorter #%d: SKU '%s' (ID=%d) eliminada de salida '%s' (ID=%d, tipo=%s)",
+		s.ID, removedSKU.SKU, skuID, targetSalida.Salida_Sorter, salidaID, tipoSalida)
 
 	s.UpdateSKUs(s.assignedSKUs)
 
 	// Si es salida automática, ejecutar secuencia de vaciado
-	// Normalizar: tanto "automatico" como "automatica" son válidos
-	tipoSalida := s.Salidas[salidaIndex].Tipo
-	if tipoSalida == "automatico" || tipoSalida == "automatica" {
+	if esAutomatica {
 		log.Printf("🔄 Sorter #%d: Iniciando secuencia de vaciado para salida automática %d", s.ID, salidaID)
 		go s.SecuenciaVaciado(targetSalida)
 	}
@@ -391,6 +401,22 @@ func (s *Sorter) SecuenciaVaciado(salida *shared.Salida) {
 			s.ID, salida.ID)
 	}
 
+	// 🔍 PASO 0: Buscar salida manual disponible para reasignar la SKU temporalmente
+	var salidaManualDestino *shared.Salida
+	for i := range s.Salidas {
+		if (s.Salidas[i].Tipo == "manual" || s.Salidas[i].Tipo == "") &&
+			s.Salidas[i].ID != salida.ID {
+			salidaManualDestino = &s.Salidas[i]
+			log.Printf("📌 Sorter #%d: Salida manual %d ('%s') seleccionada para reasignación temporal",
+				s.ID, salidaManualDestino.ID, salidaManualDestino.Salida_Sorter)
+			break
+		}
+	}
+
+	if salidaManualDestino == nil {
+		log.Printf("⚠️  Sorter #%d: No hay salidas manuales disponibles para reasignación temporal", s.ID)
+	}
+
 	// Crear cliente de paletizado
 	client := pallet.NewClient(s.PaletHost, s.PaletPort, 10*time.Second)
 	defer client.Close()
@@ -408,11 +434,44 @@ func (s *Sorter) SecuenciaVaciado(salida *shared.Salida) {
 		}
 	}
 
-	// PASO 2: Esperar 2 segundos para que entren las últimas cajas
-	log.Printf("⏳ Sorter #%d: Esperando 2 segundos para que entren últimas cajas...", s.ID)
-	time.Sleep(2 * time.Second)
+	// PASO 2: Reasignar SKU temporalmente a salida manual (si hay disponible)
+	if salidaManualDestino != nil {
+		// Buscar la SKU que estaba asignada a la salida automática
+		for i := range s.assignedSKUs {
+			if s.assignedSKUs[i].IsAssigned {
+				// Verificar si esta SKU debería ir a esta salida automática
+				skuID := uint32(s.assignedSKUs[i].ID)
 
-	// PASO 3: Vaciar mesa en servidor de paletizado (modo 2 = finalizar orden)
+				// Construir SKU temporal
+				skuTemp := models.SKU{
+					SKU:      s.assignedSKUs[i].SKU,
+					Variedad: s.assignedSKUs[i].Variedad,
+					Calibre:  s.assignedSKUs[i].Calibre,
+					Embalaje: s.assignedSKUs[i].Embalaje,
+					Dark:     s.assignedSKUs[i].Dark,
+					Estado:   true,
+				}
+
+				// Agregar a salida manual temporal
+				salidaManualDestino.SKUs_Actuales = append(salidaManualDestino.SKUs_Actuales, skuTemp)
+
+				log.Printf("✅ Sorter #%d: SKU ID=%d ('%s') reasignada temporalmente a salida manual %d durante vaciado",
+					s.ID, skuID, s.assignedSKUs[i].SKU, salidaManualDestino.ID)
+
+				// Solo reasignar la primera SKU encontrada
+				break
+			}
+		}
+
+		// Publicar actualización al frontend
+		s.UpdateSKUs(s.assignedSKUs)
+	}
+
+	// PASO 3: Esperar 5 segundos para que entren las últimas cajas
+	log.Printf("⏳ Sorter #%d: Esperando 5 segundos para que entren últimas cajas...", s.ID)
+	time.Sleep(5 * time.Second)
+
+	// PASO 4: Vaciar mesa en servidor de paletizado (modo 2 = finalizar orden)
 	log.Printf("🧹 Sorter #%d: Enviando orden de vaciado a mesa %d (modo 2: finalizar orden)",
 		s.ID, salida.MesaID)
 
@@ -426,10 +485,6 @@ func (s *Sorter) SecuenciaVaciado(salida *shared.Salida) {
 	} else {
 		log.Printf("✅ Sorter #%d: Mesa %d vaciada exitosamente (orden finalizada)", s.ID, salida.MesaID)
 	}
-
-	// PASO 4: Esperar 3 segundos para que el paletizador procese
-	log.Printf("⏳ Sorter #%d: Esperando 3 segundos para que paletizador procese...", s.ID)
-	time.Sleep(3 * time.Second)
 
 	// PASO 5: Desbloquear salida en PLC
 	if salida.BloqueoNode != "" {
@@ -445,8 +500,53 @@ func (s *Sorter) SecuenciaVaciado(salida *shared.Salida) {
 		}
 	}
 
-	log.Printf("✅ Sorter #%d: Secuencia de vaciado completada para salida %d (total: 5 segundos)",
-		s.ID, salida.ID)
+	// PASO 6: Eliminar SKU temporal de la salida manual
+	if salidaManualDestino != nil {
+		// Buscar y eliminar la SKU que agregamos temporalmente
+		var skusLimpias []models.SKU
+		skuEliminada := false
+
+		for _, sku := range salidaManualDestino.SKUs_Actuales {
+			// Buscar si esta SKU corresponde a la que asignamos temporalmente
+			skuID := uint32(sku.GetNumericID())
+
+			// Verificar si esta SKU debería volver a la salida automática
+			esTemporalDeAutomatica := false
+			for i := range s.assignedSKUs {
+				if uint32(s.assignedSKUs[i].ID) == skuID && s.assignedSKUs[i].IsAssigned {
+					esTemporalDeAutomatica = true
+					break
+				}
+			}
+
+			// Si es la primera SKU temporal encontrada, eliminarla
+			if !skuEliminada && esTemporalDeAutomatica {
+				log.Printf("🗑️  Sorter #%d: Eliminando SKU temporal ID=%d ('%s') de salida manual %d",
+					s.ID, skuID, sku.SKU, salidaManualDestino.ID)
+				skuEliminada = true
+				continue // No agregar a skusLimpias
+			}
+
+			// Mantener el resto de SKUs
+			skusLimpias = append(skusLimpias, sku)
+		}
+
+		// Actualizar SKUs de la salida manual
+		salidaManualDestino.SKUs_Actuales = skusLimpias
+
+		if skuEliminada {
+			log.Printf("✅ Sorter #%d: SKU temporal eliminada de salida manual %d",
+				s.ID, salidaManualDestino.ID)
+
+			// Publicar actualización al frontend
+			s.UpdateSKUs(s.assignedSKUs)
+		} else {
+			log.Printf("⚠️  Sorter #%d: No se encontró SKU temporal para eliminar en salida manual %d",
+				s.ID, salidaManualDestino.ID)
+		}
+	}
+
+	log.Printf("✅ Sorter #%d: Secuencia de vaciado completada para salida %d", s.ID, salida.ID)
 }
 
 // RemoveAllSKUsFromSalida elimina TODAS las SKUs de una salida específica

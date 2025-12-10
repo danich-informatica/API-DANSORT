@@ -2,6 +2,7 @@ package sorter
 
 import (
 	"API-GREENEX/internal/models"
+	"hash/fnv"
 	"log"
 	"time"
 )
@@ -63,6 +64,14 @@ func (s *Sorter) limpiarVentana(windowDuration time.Duration) {
 	}
 }
 
+// generateSKUID genera un ID numérico determinístico para un SKU
+// usando el mismo algoritmo que models.SKU.GetNumericID()
+func generateSKUID(sku string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(sku))
+	return int(h.Sum32() & 0x7FFFFFFF) // Máscara para asegurar valor positivo
+}
+
 // calcularFlowStatistics calcula las estadísticas de flujo para la ventana actual
 func (s *Sorter) calcularFlowStatistics(windowDuration time.Duration) models.FlowStatistics {
 	s.flowMutex.RLock()
@@ -108,8 +117,15 @@ func (s *Sorter) calcularFlowStatistics(windowDuration time.Duration) models.Flo
 			porcentaje = float64(int(porcentajeRaw + 0.5))
 		}
 
+		// Obtener ID del mapa, si no existe generar uno determinístico
+		skuID := skuIDMap[sku]
+		if skuID == 0 && sku != "REJECT" {
+			skuID = generateSKUID(sku)
+			log.Printf("⚠️  Sorter #%d: SKU '%s' no tiene ID asignado, generando ID determinístico: %d", s.ID, sku, skuID)
+		}
+
 		stats = append(stats, models.SKUFlowStat{
-			ID:         skuIDMap[sku],
+			ID:         skuID,
 			SKU:        sku,
 			Linea:      skuLineaMap[sku],
 			Lecturas:   count,

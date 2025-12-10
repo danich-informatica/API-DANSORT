@@ -251,10 +251,12 @@ func (h *WebSocketHub) NotifyFlowStatistics(stats models.FlowStatistics) {
 }
 
 // NotifyBoxStatus notifica las estadísticas de estados de cajas a los clientes
-// Ahora espera un array de salidas en lugar de una sola salida
+// Se publica en DOS rooms:
+//  1. assignment_{sorterID} - para compatibilidad con el dashboard general
+//  2. box_status_{sorterID}  - room dedicada para seguimiento de estados de cajas
+//
+// El frontend debe conectarse a: ws://host/ws/box_status_1 para recibir SOLO estos eventos
 func (h *WebSocketHub) NotifyBoxStatus(sorterID int, salidas []map[string]interface{}) {
-	roomName := fmt.Sprintf("assignment_%d", sorterID)
-
 	message := WebSocketMessage{
 		Type:      "box_status",
 		Timestamp: time.Now().Format(time.RFC3339),
@@ -262,11 +264,17 @@ func (h *WebSocketHub) NotifyBoxStatus(sorterID int, salidas []map[string]interf
 		Data:      salidas, // Array de salidas con sus estadísticas
 	}
 
-	h.sendMessageToRoom(roomName, message)
+	// Publicar en la room assignment (para compatibilidad con dashboard general)
+	assignmentRoom := fmt.Sprintf("assignment_%d", sorterID)
+	h.sendMessageToRoom(assignmentRoom, message)
+
+	// Publicar en la room dedicada box_status
+	boxStatusRoom := fmt.Sprintf("box_status_%d", sorterID)
+	h.sendMessageToRoom(boxStatusRoom, message)
 
 	// Log con información consolidada
-	log.Printf("📤 [WS] box_status → room %s (%d salidas automáticas)",
-		roomName, len(salidas))
+	log.Printf("📤 [WS] box_status → rooms [%s, %s] (%d salidas automáticas)",
+		assignmentRoom, boxStatusRoom, len(salidas))
 }
 
 // sendMessageToRoom envía un mensaje a todos los clientes de una room
@@ -387,17 +395,21 @@ func HandleWebSocketConnection(hub *WebSocketHub) gin.HandlerFunc {
 			return
 		}
 
-		// Validar formato de room. Aceptamos dos formatos:
+		// Validar formato de room. Aceptamos tres formatos:
 		//  - assignment_{id}
 		//  - history_sorter_{id}
+		//  - box_status_{id}
 		var sorterID int
 		if _, err := fmt.Sscanf(roomName, "assignment_%d", &sorterID); err != nil {
 			// intentar historial
 			if _, err2 := fmt.Sscanf(roomName, "history_sorter_%d", &sorterID); err2 != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": "invalid room format, expected: assignment_N or history_sorter_N",
-				})
-				return
+				// intentar box_status
+				if _, err3 := fmt.Sscanf(roomName, "box_status_%d", &sorterID); err3 != nil {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"error": "invalid room format, expected: assignment_N, history_sorter_N, or box_status_N",
+					})
+					return
+				}
 			}
 		}
 
@@ -431,7 +443,10 @@ func HandleWebSocketConnection(hub *WebSocketHub) gin.HandlerFunc {
 
 // SetupWebSocketRoutes configura las rutas de WebSocket en el router
 func SetupWebSocketRoutes(router *gin.Engine, hub *WebSocketHub) {
-	// WebSocket endpoint: ws://host/ws/assignment_1
+	// WebSocket endpoint genérico:
+	//   ws://host/ws/assignment_1      - Todos los eventos del sorter (assignments, flow stats, box status)
+	//   ws://host/ws/history_sorter_1  - Historial de asignaciones
+	//   ws://host/ws/box_status_1      - Solo eventos de seguimiento de estados de cajas
 	router.GET("/ws/:room", HandleWebSocketConnection(hub))
 
 	// Endpoint REST para estadísticas de WebSocket

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -383,12 +384,14 @@ func (h *HTTPFrontend) setupRoutes() {
 		}
 
 		if targetSorter == nil {
-			// Si hubo error específico (ej: REJECT en automática), mostrarlo
+			// Si hubo error específico, traducirlo a mensaje amigable para el frontend
 			if assignError != nil {
-				UnprocessableEntity(c, assignError.Error(),
+				userMessage := translateAssignmentError(assignError.Error(), skuID, request.SealerID)
+				UnprocessableEntity(c, userMessage,
 					gin.H{
-						"sku_id":    skuID,
-						"sealer_id": request.SealerID,
+						"sku_id":       skuID,
+						"sealer_id":    request.SealerID,
+						"error_detail": assignError.Error(),
 					})
 				return
 			}
@@ -423,7 +426,7 @@ func (h *HTTPFrontend) setupRoutes() {
 				"variedad": variedad,
 				"embalaje": embalaje,
 			},
-		}, fmt.Sprintf("✅ SKU asignada exitosamente a salida #%d", request.SealerID))
+		}, fmt.Sprintf("SKU asignada exitosamente a salida #%d", request.SealerID))
 	})
 
 	// Endpoint DELETE /assignment/:sealer_id/:sku_id
@@ -745,4 +748,60 @@ func (h *HTTPFrontend) Start() error {
 
 func (h *HTTPFrontend) GetRouter() *gin.Engine {
 	return h.router
+}
+
+// translateAssignmentError traduce errores técnicos de asignación a mensajes amigables para el frontend
+func translateAssignmentError(errMsg string, skuID uint32, salidaID int) string {
+	errLower := strings.ToLower(errMsg)
+
+	// Errores de SKU REJECT
+	if strings.Contains(errLower, "reject") && strings.Contains(errLower, "automática") {
+		return "No se puede asignar REJECT a una salida automática"
+	}
+
+	// Errores de mesa ocupada/no disponible
+	if strings.Contains(errLower, "mesa") && strings.Contains(errLower, "no está disponible") {
+		return "Mesa ocupada, espere a que termine la orden actual"
+	}
+	if strings.Contains(errLower, "mesa") && strings.Contains(errLower, "bloqueada") {
+		return "Mesa bloqueada por otra orden en proceso"
+	}
+
+	// Errores de validación de mesa
+	if strings.Contains(errLower, "error al validar disponibilidad de mesa") {
+		return "Error de conexión con el servidor de paletizado"
+	}
+
+	// Errores de SKU no encontrada
+	if strings.Contains(errLower, "sku con id") && strings.Contains(errLower, "no encontrada") {
+		return fmt.Sprintf("SKU no disponible (ID: %d)", skuID)
+	}
+
+	if strings.Contains(errLower, "no encontrada en las skus disponibles") {
+		return "SKU no existe en el sistema o no está activa"
+	}
+
+	// Errores de salida no encontrada
+	if strings.Contains(errLower, "salida con id") && strings.Contains(errLower, "no encontrada") {
+		return fmt.Sprintf("Salida no encontrada (ID: %d)", salidaID)
+	}
+
+	// Errores de conexión/comunicación
+	if strings.Contains(errLower, "timeout") || strings.Contains(errLower, "connection refused") {
+		return "Error de comunicación con el servidor de paletizado"
+	}
+	if strings.Contains(errLower, "dial") || strings.Contains(errLower, "connect") {
+		return "No se puede conectar al servidor de paletizado"
+	}
+
+	// Errores de estado de mesa
+	if strings.Contains(errLower, "no se recibió información de la mesa") {
+		return "No se pudo obtener el estado de la mesa"
+	}
+
+	// Error genérico - retornar el mensaje original pero acortado
+	if len(errMsg) > 80 {
+		return errMsg[:77] + "..."
+	}
+	return errMsg
 }

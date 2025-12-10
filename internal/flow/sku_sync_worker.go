@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"API-DANSORT/internal/shared"
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/models"
-	"API-GREENEX/internal/shared"
 )
 
 // SKUSyncWorker sincroniza periódicamente SKUs desde SQL Server a PostgreSQL
@@ -101,7 +101,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 
 	log.Println("🔄 Iniciando sincronización de SKUs desde UNITEC...")
 
-	// 1. Consultar SQL Server (vista VW_INT_DANICH_ENVIVO)
+	// 1. Consultar SQL Server
 	rows, err := db.FetchSegregazioneProgramma(ctx, w.sqlServerMgr)
 	if err != nil {
 		log.Printf("❌ Sync SKU: ERROR consultando SQL Server UNITEC: %v", err)
@@ -110,7 +110,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 	}
 
 	if len(rows) == 0 {
-		log.Println("⚠️  Sync SKU: vista VW_INT_DANICH_ENVIVO retornó 0 filas")
+		log.Println("⚠️  Sync SKU: vista retornó 0 filas")
 		log.Println("   → La vista está vacía o no tiene datos que cumplan WHERE (NOT NULL)")
 		log.Println("   → No se modificará la tabla sku (se mantiene estado actual)")
 		return
@@ -130,6 +130,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 			}
 		}
 	}
+	log.Printf("🔄 Extrayendo %d variedades únicas de %d filas...", len(variedadesMap), len(rows))
 
 	// Insertar/actualizar variedades en PostgreSQL ANTES de tocar SKUs
 	variedadCount := 0
@@ -175,7 +176,13 @@ func (w *SKUSyncWorker) syncSKUs() {
 	// Mapa para agrupar por tipo de SKU
 	skuStats := make(map[string]int)
 
-	for _, row := range rows {
+	log.Printf("🔄 [Sync] Procesando %d SKUs para upsert...", len(rows))
+	for idx, row := range rows {
+		// Progreso cada 100 SKUs
+		if idx > 0 && idx%100 == 0 {
+			log.Printf("   📊 Progreso: %d/%d SKUs procesadas...", idx, len(rows))
+		}
+
 		if !row.Variedad.Valid || !row.Calibre.Valid || !row.Embalaje.Valid {
 			skippedCount++
 			continue
@@ -204,9 +211,6 @@ func (w *SKUSyncWorker) syncSKUs() {
 		if result.RowsAffected() > 0 {
 			// Agrupar stats por variedad
 			skuStats[variedad]++
-
-			// Podemos inferir si fue insert o update comparando con antes,
-			// pero para simplificar contamos todo como "sincronizado"
 			syncedCount++
 		}
 	}
@@ -218,28 +222,28 @@ func (w *SKUSyncWorker) syncSKUs() {
 		return
 	}
 	log.Println("✅ [Sync] Commit exitoso")
-
-	// 5.5. LIMPIEZA: Eliminar asignaciones de SKUs inactivas en salida_sku
-	// IMPORTANTE: NO eliminar REJECT (calibre='REJECT') porque es una SKU especial permanente
-	cleanupQuery := `
-		DELETE FROM salida_sku ss
-		WHERE ss.calibre != 'REJECT'
-		  AND NOT EXISTS (
-			SELECT 1 FROM sku s 
-			WHERE s.calibre = ss.calibre 
-			  AND s.variedad = ss.variedad 
-			  AND s.embalaje = ss.embalaje 
-			  AND s.dark = ss.dark 
-			  AND s.estado = true
-		)
-	`
-	result, err := w.postgresMgr.Pool().Exec(ctx, cleanupQuery)
-	if err != nil {
-		log.Printf("⚠️  Sync SKU: error limpiando asignaciones inactivas: %v", err)
-	} else if result.RowsAffected() > 0 {
-		log.Printf("🧹 Sync SKU: %d asignaciones de SKUs inactivas eliminadas", result.RowsAffected())
-	}
-
+	/*
+		// 5.5. LIMPIEZA: Eliminar asignaciones de SKUs inactivas en salida_sku
+		// IMPORTANTE: NO eliminar REJECT (calibre='REJECT') porque es una SKU especial permanente
+		cleanupQuery := `
+			DELETE FROM salida_sku ss
+			WHERE ss.calibre != 'REJECT'
+			  AND NOT EXISTS (
+				SELECT 1 FROM sku s
+				WHERE s.calibre = ss.calibre
+				  AND s.variedad = ss.variedad
+				  AND s.embalaje = ss.embalaje
+				  AND s.dark = ss.dark
+				  AND s.estado = true
+			)
+		`
+		result, err := w.postgresMgr.Pool().Exec(ctx, cleanupQuery)
+		if err != nil {
+			log.Printf("⚠️  Sync SKU: error limpiando asignaciones inactivas: %v", err)
+		} else if result.RowsAffected() > 0 {
+			log.Printf("🧹 Sync SKU: %d asignaciones de SKUs inactivas eliminadas", result.RowsAffected())
+		}
+	*/
 	log.Println("🔄 [Sync] Recargando SKUManager desde PostgreSQL...")
 	// 6. Recargar SKUManager desde PostgreSQL (solo SKUs con estado = true)
 	if err := w.skuManager.ReloadFromDB(ctx); err != nil {
