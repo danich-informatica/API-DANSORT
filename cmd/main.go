@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"API-GREENEX/internal/communication/pallet"
 	"API-GREENEX/internal/communication/plc"
 	"API-GREENEX/internal/config"
 	"API-GREENEX/internal/db"
@@ -41,18 +42,18 @@ func main() {
 	// Ahora activar fecha/hora para los logs normales
 	log.SetFlags(log.Ldate | log.Ltime)
 
-	// 0. Inicializar gestor de canales compartidos (Singleton)
+	// Inicializar gestor de canales compartidos (Singleton)
 	channelMgr := shared.GetChannelManager()
 	defer channelMgr.CloseAll()
 	log.Println("✅ Gestor de canales inicializado")
 	log.Println("")
 
-	// 1. Cargar archivo .env para obtener ruta del config
+	// Cargar archivo .env para obtener ruta del config
 	if err := godotenv.Load(); err != nil {
 		log.Println("⚠️  Archivo .env no encontrado, usando valores por defecto")
 	}
 
-	// 2. Cargar configuración desde YAML
+	// Cargar configuración desde YAML
 	configPath := os.Getenv("CONFIG_FILE")
 	if configPath == "" {
 		configPath = "config/config.yaml"
@@ -64,7 +65,7 @@ func main() {
 	}
 	log.Printf("✅ Configuración cargada desde: %s", configPath)
 
-	// 3. Inicializar la conexión a PostgreSQL usando config YAML
+	// Inicializar la conexión a PostgreSQL usando config YAML
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -85,7 +86,7 @@ func main() {
 	defer dbManager.Close()
 	log.Println("✅ Base de datos PostgreSQL inicializada correctamente")
 
-	// 3.4. Inicializar FX6Manager para lecturas DataMatrix
+	// Inicializar FX6Manager para lecturas DataMatrix
 	log.Println("")
 	log.Println("📊 Inicializando conexión a SQL Server FX6...")
 	fx6Manager, err := db.GetFX6Manager(ctx, cfg)
@@ -98,14 +99,25 @@ func main() {
 	}
 	log.Println("")
 
-	// 3.5. Inicializar SKUManager para gestión eficiente con streaming
+	log.Println("📊 Inicializando conexión a SQL Server FX_Sync...")
+	fxSyncManager, err := db.GetFXSyncManager(ctx, cfg)
+	if err != nil {
+		log.Printf("⚠️  Error al inicializar FXSyncManager: %v (continuando sin soporte orden de fabricación)", err)
+		fxSyncManager = nil
+	} else {
+		defer fxSyncManager.Close()
+		log.Println("✅ FXSyncManager inicializado correctamente (vista V_Danish)")
+	}
+	log.Println("")
+
+	// Inicializar SKUManager para gestión eficiente con streaming
 	skuManager, err := flow.NewSKUManager(ctx, dbManager)
 	if err != nil {
 		log.Printf("⚠️  Error al inicializar SKUManager: %v (continuando sin caché de SKUs)", err)
 		skuManager = nil
 	}
 
-	// 3.6. Crear el servidor HTTP con endpoints (antes de crear sorters)
+	// Crear el servidor HTTP con endpoints (antes de crear sorters)
 	httpHost := cfg.HTTP.Host
 	if httpHost == "" {
 		httpHost = "0.0.0.0" // Default si no está configurado
@@ -124,13 +136,13 @@ func main() {
 	log.Printf("✅ Servidor HTTP creado en %s", httpAddr)
 	log.Println("")
 
-	// 3.7. Crear Device Monitor para monitoreo de dispositivos con heartbeat
+	// Crear Device Monitor para monitoreo de dispositivos con heartbeat
 	deviceMonitor := monitoring.NewDeviceMonitor(5*time.Second, 3*time.Second)
 	httpService.SetDeviceMonitor(deviceMonitor)
 	log.Println("📡 Device Monitor creado (heartbeat: 5s, timeout: 3s)")
 	log.Println("")
 
-	// 4. Crear listeners de Cognex (NO iniciarlos aún, los sorters lo harán)
+	// Crear listeners de Cognex (NO iniciarlos aún, los sorters lo harán)
 	log.Println("")
 	log.Printf("📷 Configurando %d dispositivo(s) Cognex...", len(cfg.CognexDevices))
 	var cognexListeners []*listeners.CognexListener
@@ -151,29 +163,33 @@ func main() {
 		)
 
 		cognexListeners = append(cognexListeners, cognexListener)
-		log.Printf("     ✅ CognexListener creado (será iniciado por el sorter)")
+		log.Printf("     [OK] CognexListener created (will be started by sorter)")
 	}
 	log.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Println("")
 
-	// 5. Crear y conectar PLC Manager
-	log.Println("🔌 Inicializando PLC Manager...")
+	// Crear y conectar PLC Manager
+	log.Println("[Init] Initializing PLC Manager...")
 	plcManager := plc.NewManager(cfg)
 
 	plcCtx, plcCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer plcCancel()
 
 	if err := plcManager.ConnectAll(plcCtx); err != nil {
-		log.Printf("❌ Error conectando a PLCs: %v", err)
-		log.Println("⚠️  Continuando sin conexión PLC (funcionalidad limitada)")
-		plcManager = nil
+		log.Printf("[Init] Initial PLC connection error: %v", err)
+		log.Println("[Init] PLC Manager will continue attempting automatic reconnection")
+		// NO ponemos plcManager = nil, dejamos que intente reconectar
 	} else {
-		log.Println("✅ PLC Manager conectado exitosamente")
+		log.Println("[Init] PLC Manager connected successfully")
+	}
+
+	// Siempre registrar defer para cerrar conexiones al salir
+	if plcManager != nil {
 		defer plcManager.CloseAll(context.Background())
 	}
 	log.Println("")
 
-	// 6. Inicializar Sorters (si hay configurados)
+	// Inicializar Sorters (si hay configurados)
 	var sorters []*sorter.Sorter
 	if len(cfg.Sorters) > 0 {
 		log.Printf("🔀 Inicializando %d Sorter(s)...", len(cfg.Sorters))
@@ -191,7 +207,7 @@ func main() {
 				log.Printf("     ✅ Sorter #%d insertado en DB (o ya existía)", sorterCfg.ID)
 			}
 
-			// Buscar el CognexListener correspondiente (asumiendo 1 Cognex por sorter)
+			// Buscar el CognexListener correspondiente para QR/SKU (asumiendo 1 Cognex principal por sorter)
 			var cognexListener *listeners.CognexListener
 			if sorterCfg.ID > 0 && sorterCfg.ID <= len(cognexListeners) {
 				cognexListener = cognexListeners[sorterCfg.ID-1]
@@ -202,6 +218,38 @@ func main() {
 				cognexListener = cognexListeners[0]
 			}
 
+			// Crear mapa de cámaras DataMatrix para este sorter (basado en cognex_id en salidas)
+			cognexDevices := make(map[int]*listeners.CognexListener)
+			for _, salidaCfg := range sorterCfg.Salidas {
+				if salidaCfg.CognexID > 0 {
+					// Esta salida tiene una cámara DataMatrix asignada
+					// Buscar la configuración del Cognex correspondiente
+					for _, cognexCfg := range cfg.CognexDevices {
+						if cognexCfg.ID == salidaCfg.CognexID && cognexCfg.ScanMethod == "DATAMATRIX" {
+							// Crear listener solo si no existe ya en el mapa
+							if _, exists := cognexDevices[cognexCfg.ID]; !exists {
+								dmListener := listeners.NewCognexListener(
+									cognexCfg.ID,
+									cognexCfg.Host,
+									cognexCfg.Port,
+									cognexCfg.ScanMethod,
+									dbManager,
+								)
+								cognexDevices[cognexCfg.ID] = dmListener
+								log.Printf("     📷 Cámara DataMatrix Cognex #%d → Salida #%d (%s:%d)",
+									cognexCfg.ID, salidaCfg.ID, cognexCfg.Host, cognexCfg.Port)
+							}
+							break
+						}
+					}
+				}
+			}
+			if len(cognexDevices) > 0 {
+				log.Printf("     ✅ %d cámara(s) DataMatrix configurada(s) para Sorter #%d", len(cognexDevices), sorterCfg.ID)
+			}
+
+			// Crear instancia de manager de base de datos para cada salida
+			ssmsManager, _ := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
 			// Crear salidas desde config YAML e insertarlas en la base de datos
 			var salidas []shared.Salida
 			for _, salidaCfg := range sorterCfg.Salidas {
@@ -220,14 +268,14 @@ func main() {
 					tipo = "automatico"
 				}
 
-				// Crear salida con todos los parámetros incluyendo CognexID si está disponible
+				// Crear salida con todos los parámetros incluyendo CognexID desde config
 				var salida shared.Salida
-				if cognexListener != nil {
-					// Obtener el ID del Cognex del listener
-					cognexID := sorterCfg.ID // Asumimos que el CognexID coincide con el SorterID
-					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, cognexID, salidaCfg.Nombre, tipo, 1)
+				if salidaCfg.CognexID > 0 {
+					// Usar el CognexID especificado en el config
+					salida = shared.GetNewSalidaComplete(salidaCfg.ID, physicalID, salidaCfg.CognexID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize, ssmsManager)
+					log.Printf("           📷 CognexID=%d asignado a salida", salidaCfg.CognexID)
 				} else {
-					salida = shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, 1)
+					salida = shared.GetNewSalidaWithPhysicalID(salidaCfg.ID, physicalID, salidaCfg.Nombre, tipo, salidaCfg.MesaID, salidaCfg.BatchSize, ssmsManager)
 				}
 
 				salida.EstadoNode = salidaCfg.PLC.EstadoNodeID
@@ -251,6 +299,14 @@ func main() {
 					log.Printf("           📦 %d números de caja configurados", len(boxNumbers))
 				}
 
+				// Vincular cliente de pallet para salidas automáticas
+				if tipo == "automatico" && sorterCfg.PaletAutomatico.Host != "" && sorterCfg.PaletAutomatico.Port > 0 {
+					palletClient := pallet.NewClient(sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port, 10*time.Second)
+					salida.SetPalletClient(palletClient)
+					log.Printf("           ✅ Cliente Serfruit vinculado (Host: %s:%d)",
+						sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port)
+				}
+
 				// Importante: añadir la salida después de configurarla completamente
 				salidas = append(salidas, salida)
 
@@ -268,6 +324,14 @@ func main() {
 				} else {
 					log.Printf("         ✅ Salida %d sincronizada en DB (physical_id=%d)", salidaCfg.ID, physicalID)
 				}
+			}
+
+			// CRÍTICO: Asegurar que SKU REJECT existe en la tabla sku para que JOIN funcione
+			rejectSQL := `INSERT INTO sku (calibre, variedad, embalaje, dark, estado) 
+			              VALUES ('REJECT', 'REJECT', 'REJECT', 0, true) 
+			              ON CONFLICT (calibre, variedad, embalaje, dark) DO NOTHING`
+			if _, err := dbManager.Pool().Exec(ctx, rejectSQL); err != nil {
+				log.Printf("     ⚠️  Error al insertar REJECT en tabla sku: %v", err)
 			}
 
 			// Cargar SKUs asignadas desde la base de datos
@@ -298,13 +362,47 @@ func main() {
 				log.Printf("        ↳ Output Node: %s", sorterCfg.PLC.OutputNodeID)
 			}
 
-			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Name, sorterCfg.PLC.InputNodeID, sorterCfg.PLC.OutputNodeID, salidas, cognexListener, httpService.GetWebSocketHub(), dbManager, plcManager)
+			s := sorter.GetNewSorter(sorterCfg.ID, sorterCfg.Name, sorterCfg.PLC.InputNodeID, sorterCfg.PLC.OutputNodeID, sorterCfg.PaletAutomatico.Host, sorterCfg.PaletAutomatico.Port, salidas, cognexListener, cognexDevices, httpService.GetWebSocketHub(), dbManager, plcManager, fxSyncManager)
+
+			// Configurar WebSocketHub para todas las salidas (necesario para el channel)
+			log.Printf("     🔧 Configurando WebSocket Hub para salidas...")
+			wsHub := httpService.GetWebSocketHub()
+			for i := range s.Salidas {
+				if s.Salidas[i].Tipo == "automatico" {
+					s.Salidas[i].SetWebSocketHub(wsHub, sorterCfg.ID)
+					log.Printf("        ✅ WebSocket Hub configurado para Salida %d (physical_id=%d)",
+						s.Salidas[i].ID, s.Salidas[i].SealerPhysicalID)
+				}
+			}
+
+			// Iniciar agregador centralizado de box status (se inicia después del sorter)
+			// El agregador recopila estadísticas de todas las salidas automáticas
+			// y las publica como un único evento cada 2 segundos
+
 			sorters = append(sorters, s)
 
 			log.Printf("     ✅ Sorter #%d creado y registrado", sorterCfg.ID)
 
+			// Sincronizar mesas de paletizado automático en PostgreSQL
+			log.Printf("     🔄 Sincronizando mesas en PostgreSQL...")
+			mesasSincronizadas := 0
+			for _, salida := range salidas {
+				if salida.Tipo == "automatico" || salida.Tipo == "automatica" {
+					err := dbManager.InsertMesa(ctx, salida.MesaID, salida.ID)
+					if err != nil {
+						log.Printf("        ❌ Error sincronizando mesa %d (salida %d): %v", salida.MesaID, salida.ID, err)
+					} else {
+						log.Printf("        ✅ Mesa %d sincronizada (salida %d)", salida.MesaID, salida.ID)
+						mesasSincronizadas++
+					}
+				}
+			}
+			if mesasSincronizadas > 0 {
+				log.Printf("     ✅ %d mesa(s) sincronizada(s) en PostgreSQL", mesasSincronizadas)
+			}
+
 			// Registrar dispositivos del sorter en el monitor
-			// 1. Registrar PLC
+			// Registrar PLC
 			if sorterCfg.PLCEndpoint != "" {
 				// Extraer host y puerto del endpoint OPC UA
 				// Formato: opc.tcp://host:port
@@ -341,7 +439,7 @@ func main() {
 				}
 			}
 
-			// 2. Registrar Cognex del sorter
+			// Registrar Cognex del sorter
 			if cognexListener != nil {
 				cognexCfg := cfg.CognexDevices[sorterCfg.ID-1] // Asumiendo relación 1:1
 				cognexDevice := &models.DeviceStatus{
@@ -387,7 +485,7 @@ func main() {
 			log.Println("")
 		}
 
-		// 🎲 Asignar REJECT a salidas manuales aleatorias (solo en memoria)
+		// Asignar REJECT a salidas manuales aleatorias (solo en memoria)
 		log.Println("🎲 Asignando SKU REJECT a salidas de descarte...")
 		for _, s := range sorters {
 			salidas := s.GetSalidas()
@@ -395,7 +493,7 @@ func main() {
 			// Buscar salidas manuales
 			var manualSalidas []shared.Salida
 			for _, salida := range salidas {
-				if salida.Tipo == "manual" {
+				if salida.Tipo == "manual" || salida.Tipo == "descarte" {
 					manualSalidas = append(manualSalidas, salida)
 				}
 			}
@@ -406,7 +504,7 @@ func main() {
 				targetSalida := manualSalidas[randomIndex]
 
 				// Asignar REJECT (ID=0) a esta salida
-				_, _, _, _, err := s.AssignSKUToSalida(0, targetSalida.ID)
+				_, _, _, _, _, err := s.AssignSKUToSalida(0, targetSalida.ID)
 				if err != nil {
 					log.Printf("   ⚠️  Error al asignar REJECT en Sorter #%d: %v", s.ID, err)
 				} else {
@@ -430,7 +528,7 @@ func main() {
 		}
 		log.Println("")
 
-		// 🆕 Iniciar sistema de estadísticas de flujo para cada sorter
+		// Iniciar sistema de estadísticas de flujo para cada sorter
 		log.Println("📊 Iniciando sistema de estadísticas de flujo...")
 		calculationInterval := cfg.Statistics.GetFlowCalculationInterval()
 		windowDuration := cfg.Statistics.GetFlowWindowDuration()
@@ -444,7 +542,18 @@ func main() {
 		}
 		log.Println("")
 
-		// 🆕 Iniciar monitor de dispositivos
+		// Iniciar sistema de agregación de estados de cajas
+		log.Println("📦 Iniciando agregador de estados de cajas...")
+		boxStatusInterval := 2 * time.Second // Publicar cada 2 segundos
+		log.Printf("   ⏱️  Intervalo de publicación: %v", boxStatusInterval)
+
+		for _, s := range sorters {
+			go s.StartBoxStatusAggregator(boxStatusInterval)
+			log.Printf("   ✅ Sorter #%d: Agregador de box status iniciado", s.ID)
+		}
+		log.Println("")
+
+		// Iniciar monitor de dispositivos
 		log.Println("📡 Iniciando monitoreo de dispositivos...")
 		go deviceMonitor.Start()
 		log.Println("   ✅ Device Monitor iniciado (heartbeat continuo)")
@@ -461,16 +570,20 @@ func main() {
 		}
 	}()
 
-	// 🔄 Iniciar SKU Sync Worker si está disponible
+	// Iniciar SKU Sync Worker si está disponible
 	if skuManager != nil && len(sorters) > 0 {
 		log.Println("🔄 Inicializando SKU Sync Worker...")
+		log.Printf("   📍 Vista UNITEC: VW_INT_DANICH_ENVIVO")
 
 		// Pasar directamente la configuración del YAML
 		sqlServerMgr, err := db.GetManagerWithConfig(ctx, cfg.Database.SQLServer)
 		if err != nil {
-			log.Printf("   ⚠️  No se pudo conectar a SQL Server: %v", err)
-			log.Println("   ⚠️  Sync Worker deshabilitado")
+			log.Printf("   ❌ ERROR: No se pudo conectar a SQL Server UNITEC: %v", err)
+			log.Println("   ⚠️  Sync Worker DESHABILITADO - SKUs NO se sincronizarán desde UNITEC")
+			log.Println("   ⚠️  Solo se usarán SKUs ya persistidas en PostgreSQL")
 		} else {
+			log.Println("   ✅ Conexión a SQL Server UNITEC exitosa")
+
 			syncInterval := cfg.Database.SQLServer.GetSKUSyncInterval()
 
 			// Convertir []*sorter.Sorter a []shared.SorterInterface
@@ -492,17 +605,16 @@ func main() {
 			defer syncWorker.Stop()
 
 			log.Printf("   ✅ Sync Worker iniciado (intervalo: %v)", syncInterval)
-			log.Println("   📋 Sincronizará SKUs desde vista VW_INT_DANICH_ENVIVO")
 		}
 		log.Println("")
 	}
 
-	// 5. Registrar todos los sorters para acceso directo desde HTTP
+	// Registrar todos los sorters para acceso directo desde HTTP
 	for _, s := range sorters {
 		httpService.RegisterSorter(s)
 	}
 
-	// 🔌 Configurar WebSocket para cada sorter
+	// Configurar WebSocket para cada sorter
 	if len(sorters) > 0 {
 		wsHub := httpService.GetWebSocketHub()
 
@@ -513,7 +625,7 @@ func main() {
 		}
 		wsHub.CreateRoomsForSorters(sorterIDs)
 
-		// 🔔 Suscribir WebSocket Hub a los canales de cada sorter
+		// Suscribir WebSocket Hub a los canales de cada sorter
 		for _, s := range sorters {
 			wsHub.SubscribeToSorter(s)
 		}
@@ -548,7 +660,7 @@ func main() {
 	log.Println("   GET  /ws/stats (estadísticas de conexiones)")
 	log.Println("")
 
-	// 🌐 Iniciar servidor estático para frontend (dist/) en puerto 3001
+	// Iniciar servidor estático para frontend (dist/) en puerto 3001
 	staticPort := 3001
 	staticAddr := fmt.Sprintf("%s:%d", httpHost, staticPort)
 

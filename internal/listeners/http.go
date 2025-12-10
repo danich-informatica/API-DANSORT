@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -364,16 +365,17 @@ func (h *HTTPFrontend) setupRoutes() {
 		// Buscar en qué sorter está la salida (sealer_id es único globalmente)
 		var targetSorter shared.SorterInterface
 		var assignError error
-		var calibre, variedad, embalaje string
+		var calibre, variedad, embalaje, linea string
 		var dark int
 		for _, sorter := range h.sorters {
-			cal, var_, emb, drk, err := sorter.AssignSKUToSalida(skuID, request.SealerID)
+			cal, var_, emb, drk, lin, err := sorter.AssignSKUToSalida(skuID, request.SealerID)
 			if err == nil {
 				targetSorter = sorter
 				calibre = cal
 				variedad = var_
 				embalaje = emb
 				dark = drk
+				linea = lin
 				break
 			}
 			// Guardar el error más relevante
@@ -383,12 +385,14 @@ func (h *HTTPFrontend) setupRoutes() {
 		}
 
 		if targetSorter == nil {
-			// Si hubo error específico (ej: REJECT en automática), mostrarlo
+			// Si hubo error específico, traducirlo a mensaje amigable para el frontend
 			if assignError != nil {
-				UnprocessableEntity(c, assignError.Error(),
+				userMessage := translateAssignmentError(assignError.Error(), skuID, request.SealerID)
+				UnprocessableEntity(c, userMessage,
 					gin.H{
-						"sku_id":    skuID,
-						"sealer_id": request.SealerID,
+						"sku_id":       skuID,
+						"sealer_id":    request.SealerID,
+						"error_detail": assignError.Error(),
 					})
 				return
 			}
@@ -401,10 +405,10 @@ func (h *HTTPFrontend) setupRoutes() {
 		// REJECT (ID=0) solo existe en memoria, no en BD
 		if skuID != 0 && h.postgresMgr != nil {
 			if dbMgr, ok := h.postgresMgr.(interface {
-				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int) error
+				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int, linea string) error
 			}); ok {
 				ctx := c.Request.Context()
-				if err := dbMgr.InsertSalidaSKU(ctx, request.SealerID, calibre, variedad, embalaje, dark); err != nil {
+				if err := dbMgr.InsertSalidaSKU(ctx, request.SealerID, calibre, variedad, embalaje, dark, linea); err != nil {
 					// Log el error pero no fallar el request (asignación en memoria ya está hecha)
 					fmt.Printf("⚠️  Error al insertar asignación en DB: %v\n", err)
 				}
@@ -422,8 +426,9 @@ func (h *HTTPFrontend) setupRoutes() {
 				"calibre":  calibre,
 				"variedad": variedad,
 				"embalaje": embalaje,
+				"linea":    linea,
 			},
-		}, fmt.Sprintf("✅ SKU asignada exitosamente a salida #%d", request.SealerID))
+		}, fmt.Sprintf("SKU asignada exitosamente a salida #%d", request.SealerID))
 	})
 
 	// Endpoint DELETE /assignment/:sealer_id/:sku_id
@@ -453,18 +458,19 @@ func (h *HTTPFrontend) setupRoutes() {
 
 		// Buscar en qué sorter está la salida
 		var targetSorter shared.SorterInterface
-		var calibre, variedad, embalaje string
+		var calibre, variedad, embalaje, linea string
 		var dark int
 		var removeError error
 
 		for _, sorter := range h.sorters {
-			cal, var_, emb, drk, err := sorter.RemoveSKUFromSalida(skuID, sealerID)
+			cal, var_, emb, drk, lin, err := sorter.RemoveSKUFromSalida(skuID, sealerID)
 			if err == nil {
 				targetSorter = sorter
 				calibre = cal
 				variedad = var_
 				embalaje = emb
 				dark = drk
+				linea = lin
 				break
 			}
 			// Guardar el error más relevante
@@ -494,10 +500,10 @@ func (h *HTTPFrontend) setupRoutes() {
 		// REJECT (ID=0) solo existe en memoria, no en BD
 		if skuID != 0 && h.postgresMgr != nil {
 			if dbMgr, ok := h.postgresMgr.(interface {
-				DeleteSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int) error
+				DeleteSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int, linea string) error
 			}); ok {
 				ctx := c.Request.Context()
-				if err := dbMgr.DeleteSalidaSKU(ctx, sealerID, calibre, variedad, embalaje, dark); err != nil {
+				if err := dbMgr.DeleteSalidaSKU(ctx, sealerID, calibre, variedad, embalaje, dark, linea); err != nil {
 					// Si la SKU no existe en BD, no es un error crítico
 					// (puede haber sido asignada solo en memoria)
 					fmt.Printf("⚠️  Error al eliminar asignación de DB: %v\n", err)
@@ -518,6 +524,7 @@ func (h *HTTPFrontend) setupRoutes() {
 				"calibre":  calibre,
 				"variedad": variedad,
 				"embalaje": embalaje,
+				"linea":    linea,
 			},
 		})
 	})
@@ -575,7 +582,7 @@ func (h *HTTPFrontend) setupRoutes() {
 		if h.postgresMgr != nil {
 			if dbMgr, ok := h.postgresMgr.(interface {
 				DeleteAllSalidaSKUs(ctx context.Context, salidaID int) (int64, error)
-				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error
+				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int, linea string) error
 			}); ok {
 				ctx := c.Request.Context()
 
@@ -590,8 +597,8 @@ func (h *HTTPFrontend) setupRoutes() {
 					return
 				}
 
-				// 2. ♻️ Re-insertar REJECT automáticamente
-				err = dbMgr.InsertSalidaSKU(ctx, sealerID, "REJECT", "REJECT", "REJECT")
+				// 2. ♻️ Re-insertar REJECT automáticamente (dark=0, linea="1")
+				err = dbMgr.InsertSalidaSKU(ctx, sealerID, "REJECT", "REJECT", "REJECT", 0, "1")
 				if err != nil {
 					fmt.Printf("⚠️  Error al re-insertar REJECT en DB: %v\n", err)
 				} else {
@@ -745,4 +752,59 @@ func (h *HTTPFrontend) Start() error {
 
 func (h *HTTPFrontend) GetRouter() *gin.Engine {
 	return h.router
+}
+
+// translateAssignmentError traduce errores técnicos de asignación a mensajes amigables para el frontend
+func translateAssignmentError(errMsg string, skuID uint32, salidaID int) string {
+	errLower := strings.ToLower(errMsg)
+
+	// Errores de SKU REJECT
+	if strings.Contains(errLower, "reject") && strings.Contains(errLower, "automática") {
+		return "No se puede asignar REJECT a una salida automática"
+	}
+
+	// Errores de mesa ocupada/no disponible
+	if strings.Contains(errLower, "mesa") && strings.Contains(errLower, "no está disponible") {
+		return "Mesa ocupada, espere a que termine la orden actual"
+	}
+	if strings.Contains(errLower, "mesa") && strings.Contains(errLower, "bloqueada") {
+		return "Mesa bloqueada por otra orden en proceso"
+	}
+
+	// Errores de validación de mesa
+	if strings.Contains(errLower, "error al validar disponibilidad de mesa") {
+		return "Error de conexión con el servidor de paletizado"
+	}
+
+	// Errores de SKU no encontrada
+	if strings.Contains(errLower, "sku con id") && strings.Contains(errLower, "no encontrada") {
+		return fmt.Sprintf("SKU no disponible (ID: %d)", skuID)
+	}
+	if strings.Contains(errLower, "no encontrada en las skus disponibles") {
+		return "SKU no existe en el sistema o no está activa"
+	}
+
+	// Errores de salida no encontrada
+	if strings.Contains(errLower, "salida con id") && strings.Contains(errLower, "no encontrada") {
+		return fmt.Sprintf("Salida no encontrada (ID: %d)", salidaID)
+	}
+
+	// Errores de conexión/comunicación
+	if strings.Contains(errLower, "timeout") || strings.Contains(errLower, "connection refused") {
+		return "Error de comunicación con el servidor de paletizado"
+	}
+	if strings.Contains(errLower, "dial") || strings.Contains(errLower, "connect") {
+		return "No se puede conectar al servidor de paletizado"
+	}
+
+	// Errores de estado de mesa
+	if strings.Contains(errLower, "no se recibió información de la mesa") {
+		return "No se pudo obtener el estado de la mesa"
+	}
+
+	// Error genérico - retornar el mensaje original pero acortado
+	if len(errMsg) > 80 {
+		return errMsg[:77] + "..."
+	}
+	return errMsg
 }

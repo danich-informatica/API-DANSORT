@@ -12,8 +12,8 @@ type SorterInterface interface {
 	GetSKUChannel() <-chan []models.SKUAssignable
 	GetFlowStatsChannel() <-chan models.FlowStatistics
 	GetSKUFlowPercentage(skuName string) float64
-	AssignSKUToSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, err error)
-	RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, err error)
+	AssignSKUToSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, linea string, err error)
+	RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, linea string, err error)
 	RemoveAllSKUsFromSalida(salidaID int) ([]models.SKU, error)
 	GetSalidas() []Salida
 	UpdateSKUs(skus []models.SKUAssignable)        // Para sincronización de SKUs

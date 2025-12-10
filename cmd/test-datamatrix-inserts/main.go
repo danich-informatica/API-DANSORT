@@ -14,14 +14,14 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	log.Println("🧪 Test: Inserts REALES DataMatrix en FX6")
 	log.Println("    NUEVA LÓGICA:")
-	log.Println("    • Correlativo: Número aleatorio que termina en 1")
-	log.Println("    • Número de Caja: Asignado de lista específica (20000058-20000078)")
+	log.Println("    • Correlativo: ÚNICO número que termina en 1 para todos los inserts")
+	log.Println("    • Número de Caja: 184 números diferentes (20000001-20000184)")
 	log.Println("")
 
 	ctx := context.Background()
 
 	// Cargar configuración
-	cfg, err := config.LoadConfig("/home/arbaiter/Documents/Arbeit/2025/API-Greenex/bin/config/config.yaml")
+	cfg, err := config.LoadConfig("config/config.yaml")
 	if err != nil {
 		log.Fatalf("❌ Error al cargar configuración: %v", err)
 	}
@@ -36,35 +36,27 @@ func main() {
 	log.Println("✅ FX6Manager inicializado")
 	log.Println("")
 
-	// Lista de números de caja válidos (según especificación)
-	numerosCaja := []int{
-		20000058, 20000059, 20000060, 20000061, 20000062,
-		20000063, 20000064, 20000065, 20000066, 20000067,
-		20000068, 20000069, 20000070, 20000071, 20000072,
-		20000073, 20000074, 20000075, 20000076, 20000077,
-		20000078,
+	// Generar 184 números de caja diferentes (20000001 a 20000184)
+	numerosCaja := make([]int, 184)
+	for i := 0; i < 184; i++ {
+		numerosCaja[i] = 20000001 + i
 	}
 
-	log.Printf("� Lista de números de caja: %d disponibles (%d a %d)",
+	log.Printf("📦 Lista de números de caja: %d disponibles (%d a %d)",
 		len(numerosCaja), numerosCaja[0], numerosCaja[len(numerosCaja)-1])
 	log.Println("")
 
-	// Generar correlativo aleatorio que termine en 1
-	generarCorrelativo := func() int64 {
-		// Generar número aleatorio entre 10000 y 999999
-		base := rand.Intn(990000) + 10000
-		// Asegurar que termine en 1
-		correlativo := (base / 10 * 10) + 1
-		return int64(correlativo)
-	}
+	// Generar UN ÚNICO correlativo que termine en 1
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	base := rng.Intn(990000) + 10000
+	correlativoUnico := int64((base / 10 * 10) + 1)
 
-	// Validar correlativo
-	validarCorrelativo := func(correlativo int64) bool {
-		return correlativo%10 == 1
-	}
+	log.Printf("🔢 Correlativo único para todos los inserts: %d (termina en %d)",
+		correlativoUnico, correlativoUnico%10)
+	log.Println("")
 
-	// Test: Insertar 15 lecturas de prueba
-	numInserts := 15
+	// Test: Insertar 184 lecturas de prueba
+	numInserts := 184
 	log.Printf("📝 Insertando %d lecturas REALES en SQL Server FX6", numInserts)
 	log.Println("═══════════════════════════════════════════════════════════════════════════════")
 
@@ -75,17 +67,11 @@ func main() {
 	for i := 0; i < numInserts; i++ {
 		salida := salidas[i%len(salidas)]
 
-		// Generar correlativo que termine en 1
-		correlativo := generarCorrelativo()
+		// Usar el correlativo único para todos los inserts
+		correlativo := correlativoUnico
 
-		// Validar
-		if !validarCorrelativo(correlativo) {
-			log.Printf("  ⚠️  ERROR: Correlativo %d NO termina en 1 (lógica de generación fallida)", correlativo)
-			continue
-		}
-
-		// Seleccionar número de caja de la lista (rotación circular)
-		numeroCaja := numerosCaja[i%len(numerosCaja)]
+		// Usar el número de caja correspondiente (uno diferente por cada insert)
+		numeroCaja := numerosCaja[i]
 
 		log.Printf("\n[%2d/%d] INSERT en PKG_Pallets_Externos:", i+1, numInserts)
 		log.Printf("        Salida      : %d", salida)
@@ -176,8 +162,7 @@ func main() {
 	log.Println("✅ Test de inserts REALES completado exitosamente")
 	log.Println("")
 	log.Println("💡 Lógica implementada:")
-	log.Println("   • Correlativo: Número aleatorio terminado en 1")
-	log.Println("   • Número de Caja: De la lista 20000058-20000078 (rotación circular)")
-	log.Println("   • Validación: Se verifica que correlativo termine en 1")
+	log.Printf("   • Correlativo: ÚNICO número %d (termina en 1) para todos los inserts", correlativoUnico)
+	log.Println("   • Número de Caja: 184 números diferentes (20000001 a 20000184)")
 	log.Println("   • Base de datos: PKG_Pallets_Externos en FX6_packing_Garate_Operaciones")
 }

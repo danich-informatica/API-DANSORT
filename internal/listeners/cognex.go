@@ -3,7 +3,6 @@ package listeners
 import (
 	"API-GREENEX/internal/db"
 	"API-GREENEX/internal/models"
-	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -12,6 +11,12 @@ import (
 	"time"
 )
 
+// logTs imprime log con timestamp de microsegundos para debugging preciso
+func logTs(format string, args ...interface{}) {
+	ts := time.Now().Format("2006-01-02T15:04:05.000000")
+	log.Printf("[%s] "+format, append([]interface{}{ts}, args...)...)
+}
+
 // Estructura para inserción asíncrona en DB
 type insertRequest struct {
 	especie  string
@@ -19,6 +24,7 @@ type insertRequest struct {
 	calibre  string
 	embalaje string
 	dark     int
+	linea    string
 	sku      string
 	message  string
 	resultCh chan insertResult
@@ -73,6 +79,11 @@ func (c *CognexListener) String() string {
 	return fmt.Sprintf("CognexListener{remote: %s, port: %d}", c.remoteHost, c.port)
 }
 
+// GetID retorna el ID del Cognex
+func (c *CognexListener) GetID() int {
+	return c.id
+}
+
 // insertWorker procesa inserciones a la base de datos de forma asíncrona
 func (c *CognexListener) insertWorker() {
 	for {
@@ -101,6 +112,7 @@ func (c *CognexListener) processInsert(req insertRequest) {
 		req.calibre,
 		req.embalaje,
 		req.dark,
+		req.linea,
 	)
 
 	// Obtener nombre de variedad para construir SKU correctamente
@@ -171,10 +183,20 @@ func (c *CognexListener) acceptConnections() {
 }
 
 // handleConnection maneja los mensajes de una conexión Cognex
+// handleConnection maneja los mensajes de una conexión Cognex
 func (c *CognexListener) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	reader := bufio.NewReader(conn)
+	// ⚡ OPTIMIZACIÓN: TCP Keepalive + NoDelay para latencia mínima
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+		tcpConn.SetNoDelay(true) // Deshabilitar algoritmo de Nagle
+		tcpConn.SetReadBuffer(256 * 1024)
+		tcpConn.SetWriteBuffer(256 * 1024)
+	}
+
+	buffer := make([]byte, 4096) // Buffer para lectura directa
 
 	for {
 		select {
@@ -182,28 +204,27 @@ func (c *CognexListener) handleConnection(conn net.Conn) {
 			log.Printf("Cerrando conexión con %s\n", conn.RemoteAddr().String())
 			return
 		default:
-			// Establecer timeout de lectura
-			conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-
-			// Leer mensaje (Cognex suele terminar líneas con \r\n)
-			message, err := reader.ReadString('\n')
+			// ⚡ SIN TIMEOUT - TCP Keepalive detecta conexiones muertas
+			// La goroutine NUNCA se cierra por inactividad
+			n, err := conn.Read(buffer)
 			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue
-				}
 				log.Printf("Conexión cerrada o error de lectura: %v\n", err)
 				return
 			}
 
-			// Procesar el mensaje recibido
-			c.processMessage(message, conn)
+			if n > 0 {
+				// Convertir a string y procesar
+				message := string(buffer[:n])
+				logTs("📦 Datos recibidos (%d bytes): %s", n, message)
+				c.processMessage(message, conn)
+			}
 		}
 	}
 }
 
 // processMessage procesa los mensajes recibidos de Cognex
 func (c *CognexListener) processMessage(message string, conn net.Conn) {
-	log.Printf("📦 Mensaje recibido de %s: %s", conn.RemoteAddr().String(), message)
+	logTs("📦 Mensaje recibido de %s: %s", conn.RemoteAddr().String(), message)
 
 	message = strings.TrimSpace(message)
 	switch c.scan_method {
@@ -226,22 +247,22 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			conn.Write([]byte(response))
 			return
 		}
-		// Validar que el mensaje tiene el formato correcto (6 partes)
-		if len(message_splitted) < 6 {
-			log.Printf("❌ Mensaje inválido (partes insuficientes): %s (tiene %d partes, necesita 6)", message, len(message_splitted))
+		// Validar que el mensaje tiene el formato correcto (5 partes)
+		if len(message_splitted) < 5 {
+			log.Printf("❌ Mensaje inválido (partes insuficientes): %s (tiene %d partes, necesita 5)", message, len(message_splitted))
 			response := "NACK\r\n"
 			c.EventChan <- models.NewLecturaFallida(fmt.Errorf("formato inválido"), message, c.dispositivo)
 			conn.Write([]byte(response))
 			return
 		}
 
-		// Extraer componentes (formato: Especie;Calibre;Dark;Embalaje;Etiqueta;Variedad)
+		// Extraer componentes (formato: Especie;Calibre;Dark;Embalaje;Variedad)
 		especie := strings.TrimSpace(message_splitted[0])
 		calibre := strings.TrimSpace(message_splitted[1])
 		darkStr := strings.TrimSpace(message_splitted[2])
 		embalaje := strings.TrimSpace(message_splitted[3])
 		// message_splitted[4] es etiqueta/marca (no se usa)
-		variedad := strings.TrimSpace(message_splitted[5])
+		variedad := strings.TrimSpace(message_splitted[4])
 
 		// Validar que los componentes no estén vacíos
 		if especie == "" || calibre == "" || embalaje == "" || variedad == "" {
@@ -289,6 +310,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			calibre:  calibre,
 			embalaje: embalaje,
 			dark:     dark, // Usar el dark extraído del QR
+			linea:    "",   // Valor por defecto, se convertirá en "1" en InsertNewBox
 			sku:      sku.SKU,
 			message:  message,
 			resultCh: resultCh,
@@ -300,6 +322,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			// Enviado al worker, responder inmediatamente ACK
 			response := "ACK\r\n"
 			conn.Write([]byte(response))
+			logTs("✅ ACK enviado (async insert en cola)")
 
 			// Procesar resultado en goroutine para no bloquear
 			go func() {
@@ -349,6 +372,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 				calibre,
 				embalaje,
 				dark, // Usar el dark extraído del QR
+				"",   // linea vacío, usará valor por defecto "1"
 			)
 
 			if err != nil {
@@ -397,20 +421,14 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			)
 		}
 	case "DATAMATRIX":
-		log.Printf("📊 DataMatrix detectado: %s", strings.TrimSpace(message))
+		logTs("📊 DataMatrix detectado: %s", strings.TrimSpace(message))
 		message = strings.TrimSpace(message)
 
-		if message == "" {
-			log.Printf("❌ Mensaje DataMatrix vacío recibido")
-			response := "NACK\r\n"
-			if _, err := conn.Write([]byte(response)); err != nil {
-				log.Printf("Error al enviar respuesta NACK: %v\n", err)
-			}
-			return
-		}
-
-		// Crear y enviar evento DataMatrix al nuevo canal dedicado
+		// Crear y enviar evento DataMatrix a un canal dedicado
 		// Este flujo es SEPARADO del flujo QR/SKU original
+		if message == models.NO_READ_CODE {
+			message = ""
+		}
 		dmEvent := models.NewDataMatrixEvent(message, c.dispositivo, c.id, message)
 		log.Printf("✅ [Cognex#%d] DataMatrix → Canal dedicado | Código: %s", c.id, message)
 

@@ -12,6 +12,7 @@ type SKU struct {
 	Calibre        string
 	Embalaje       string
 	Dark           int
+	Linea          string // Código de línea de producción (VIE_codLinea)
 	SKU            string
 	Estado         bool
 	NombreVariedad string // Nombre de variedad (ej: "LAPINS") - para frontend
@@ -56,6 +57,7 @@ type SKUAssignable struct {
 	NombreVariedad string  `json:"nombre_variedad,omitempty"` // Nombre de variedad (ej: "LAPINS")
 	Embalaje       string  `json:"embalaje,omitempty"`
 	Dark           int     `json:"dark"`
+	Linea          string  `json:"linea,omitempty"` // Código de línea de producción
 	Percentage     float64 `json:"percentage"`
 	IsAssigned     bool    `json:"is_assigned"`
 	IsMasterCase   bool    `json:"is_master_case"`
@@ -89,6 +91,7 @@ func (s *SKU) ToAssignable(id int) SKUAssignable {
 		NombreVariedad: s.NombreVariedad, // Nombre (ej: "LAPINS")
 		Embalaje:       s.Embalaje,
 		Dark:           s.Dark,
+		Linea:          s.Linea,
 		Percentage:     0.0,
 		IsAssigned:     false,
 		IsMasterCase:   false,
@@ -105,6 +108,7 @@ func (s *SKU) ToAssignableWithHash() SKUAssignable {
 		NombreVariedad: s.NombreVariedad, // Nombre (ej: "LAPINS")
 		Embalaje:       s.Embalaje,
 		Dark:           s.Dark,
+		Linea:          s.Linea,
 		Percentage:     0.0,
 		IsAssigned:     false,
 		IsMasterCase:   false,

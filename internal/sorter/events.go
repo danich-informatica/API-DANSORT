@@ -38,9 +38,13 @@ func (s *Sorter) procesarEventosCognex() {
 	}
 }
 
-// procesarEventosDataMatrix procesa eventos de lectura DataMatrix de Cognex (flujo separado)
+// procesarEventosDataMatrix procesa eventos de lectura DataMatrix de Cognex principal (legacy)
 func (s *Sorter) procesarEventosDataMatrix() {
-	log.Printf("📊 [Sorter #%d] Escuchando eventos DataMatrix de Cognex...", s.ID)
+	if s.Cognex == nil {
+		return
+	}
+
+	log.Printf("📊 [Sorter #%d] Escuchando eventos DataMatrix de Cognex principal...", s.ID)
 
 	for {
 		select {
@@ -55,6 +59,28 @@ func (s *Sorter) procesarEventosDataMatrix() {
 			}
 
 			log.Printf("📥 [Sorter #%d] DataMatrix recibido: %s", s.ID, dmEvent.String())
+			s.processDataMatrixEvent(dmEvent)
+		}
+	}
+}
+
+// procesarEventosDataMatrixCognex procesa eventos de una cámara DataMatrix específica
+func (s *Sorter) procesarEventosDataMatrixCognex(cognexListener *listeners.CognexListener) {
+	log.Printf("📊 [Sorter #%d] Escuchando eventos DataMatrix de Cognex #%d...", s.ID, cognexListener.GetID())
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			log.Printf("🛑 [Sorter #%d] Deteniendo procesamiento DataMatrix Cognex #%d", s.ID, cognexListener.GetID())
+			return
+
+		case dmEvent, ok := <-cognexListener.DataMatrixChan:
+			if !ok {
+				log.Printf("⚠️  [Sorter #%d] Canal DataMatrix cerrado para Cognex #%d", s.ID, cognexListener.GetID())
+				return
+			}
+
+			log.Printf("📥 [Sorter #%d] DataMatrix de Cognex #%d: %s", s.ID, cognexListener.GetID(), dmEvent.String())
 			s.processDataMatrixEvent(dmEvent)
 		}
 	}
@@ -96,7 +122,12 @@ func (s *Sorter) processLecturaExitosa(evento models.LecturaEvent) {
 	log.Printf("✅ Sorter #%d: Lectura #%d | SKU: %s | Salida: %s (ID: %d) | Razón: sort por SKU",
 		s.ID, s.LecturasExitosas, evento.SKU, salida.Salida_Sorter, salida.ID)
 
-	s.sendPLCSignal(&salida)
+	if err := s.sendPLCSignal(&salida); err != nil {
+		log.Printf("❌ [Sorter #%d] Error crítico al asignar salida para caja %s (SKU: %s): %v",
+			s.ID, evento.Correlativo, evento.SKU, err)
+		// Registrar el error pero continuar para no bloquear el flujo
+	}
+
 	s.PublishLecturaEvent(evento, &salida, true)
 
 	if err := s.RegistrarSalidaCaja(evento.Correlativo, &salida, evento.SKU, evento.Calibre); err != nil {
@@ -121,7 +152,12 @@ func (s *Sorter) processLecturaFallida(evento models.LecturaEvent) {
 	log.Printf("❌ Sorter #%d: Fallo #%d | SKU: %s | Salida: %s (ID: %d) | Razón: %s | %s",
 		s.ID, s.LecturasFallidas, evento.SKU, salida.Salida_Sorter, salida.ID, razon, evento.String())
 
-	s.sendPLCSignal(salida)
+	if err := s.sendPLCSignal(salida); err != nil {
+		log.Printf("❌ [Sorter #%d] Error crítico al asignar salida para caja fallida %s: %v",
+			s.ID, evento.Correlativo, err)
+		// Registrar el error pero continuar para no bloquear el flujo
+	}
+
 	s.PublishLecturaEvent(evento, salida, false)
 
 	if err := s.RegistrarSalidaCaja(evento.Correlativo, salida, evento.SKU, evento.Calibre); err != nil {
@@ -151,22 +187,115 @@ func (s *Sorter) getSalidaForFallo(tipoLectura models.TipoLectura) (salida *shar
 	return salida, razon
 }
 
-// sendPLCSignal envía señal al PLC para activar una salida
-func (s *Sorter) sendPLCSignal(salida *shared.Salida) {
-	if s.plcManager == nil || salida.SealerPhysicalID <= 0 {
-		return
+// sendPLCSignal envía señal al PLC para activar una salida con reintentos automáticos
+func (s *Sorter) sendPLCSignal(salida *shared.Salida) error {
+	if s.plcManager == nil {
+		log.Printf("⚠️  [Sorter #%d] sendPLCSignal: plcManager es nil, no se puede enviar señal", s.ID)
+		return fmt.Errorf("plcManager no inicializado")
+	}
+
+	if salida.SealerPhysicalID <= 0 {
+		log.Printf("⚠️  [Sorter #%d] sendPLCSignal: SealerPhysicalID inválido (%d) para salida ID=%d, no se envía señal PLC",
+			s.ID, salida.SealerPhysicalID, salida.ID)
+		return fmt.Errorf("SealerPhysicalID inválido para salida ID=%d", salida.ID)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(salida.SealerPhysicalID)); err != nil {
-		log.Printf("⚠️  [Sorter #%d] Error al enviar señal PLC para salida %d (PhysicalID=%d): %v",
-			s.ID, salida.ID, salida.SealerPhysicalID, err)
-	} else {
-		log.Printf("📤 [Sorter #%d] Señal PLC enviada → Salida %d (PhysicalID=%d)",
-			s.ID, salida.ID, salida.SealerPhysicalID)
+	startTime := time.Now()
+	destino := salida.SealerPhysicalID
+	if salida.Tipo == "descarte" {
+		log.Printf("⚠️  [Sorter #%d] Enviando señal PLC de DESCARTE → Salida %d (PhysicalID=%d)",
+			s.ID, salida.ID, 0)
+		destino = 0
 	}
+
+	// Intento inicial
+	err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(destino))
+	elapsed := time.Since(startTime)
+
+	if err == nil {
+		log.Printf("✅ [Sorter #%d] Señal PLC confirmada → Salida %d (PhysicalID=%d) en %v",
+			s.ID, salida.ID, salida.SealerPhysicalID, elapsed)
+		return nil
+	}
+
+	// ❌ Falló el primer intento
+	log.Printf("❌ [Sorter #%d] Error al enviar señal PLC para salida %d (PhysicalID=%d) después de %v: %v",
+		s.ID, salida.ID, salida.SealerPhysicalID, elapsed, err)
+
+	// 🔄 SISTEMA DE REINTENTOS CON SALIDAS ALTERNATIVAS
+	// Solo reintentar si hay múltiples salidas con el mismo SKU
+	return s.retryWithAlternativeSalida(salida, err)
+}
+
+// retryWithAlternativeSalida intenta asignar la caja a una salida alternativa
+func (s *Sorter) retryWithAlternativeSalida(salidaOriginal *shared.Salida, originalError error) error {
+	// Obtener el SKU de la salida original
+	if len(salidaOriginal.SKUs_Actuales) == 0 {
+		log.Printf("⚠️  [Sorter #%d] Salida %d no tiene SKUs asignados, no se puede buscar alternativa",
+			s.ID, salidaOriginal.ID)
+		return originalError
+	}
+
+	sku := salidaOriginal.SKUs_Actuales[0].SKU
+	maxRetries := 3
+	excludedSalidas := []int{salidaOriginal.ID}
+
+	log.Printf("🔄 [Sorter #%d] Iniciando búsqueda de salidas alternativas para SKU '%s' (intentos: %d)",
+		s.ID, sku, maxRetries)
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Buscar salida alternativa, excluyendo las que ya fallaron
+		salidaAlternativa := s.getAlternativeSalida(sku, excludedSalidas)
+
+		if salidaAlternativa == nil {
+			log.Printf("❌ [Sorter #%d] No hay más salidas alternativas disponibles para SKU '%s' (intento %d/%d)",
+				s.ID, sku, attempt, maxRetries)
+			break
+		}
+
+		log.Printf("🔄 [Sorter #%d] Intento %d/%d con salida alternativa ID=%d (PhysicalID=%d) para SKU '%s'",
+			s.ID, attempt, maxRetries, salidaAlternativa.ID, salidaAlternativa.SealerPhysicalID, sku)
+
+		// Intentar enviar señal a la salida alternativa
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		startTime := time.Now()
+
+		destino := salidaAlternativa.SealerPhysicalID
+		if salidaAlternativa.Tipo == "descarte" {
+			destino = 0
+		}
+
+		err := s.plcManager.AssignLaneToBox(ctx, s.ID, int16(destino))
+		elapsed := time.Since(startTime)
+		cancel()
+
+		if err == nil {
+			log.Printf("✅ [Sorter #%d] Señal PLC confirmada con salida alternativa %d (PhysicalID=%d) en %v (intento %d/%d)",
+				s.ID, salidaAlternativa.ID, salidaAlternativa.SealerPhysicalID, elapsed, attempt, maxRetries)
+			return nil
+		}
+
+		// Falló también con esta salida
+		log.Printf("❌ [Sorter #%d] Error con salida alternativa %d (PhysicalID=%d) después de %v: %v",
+			s.ID, salidaAlternativa.ID, salidaAlternativa.SealerPhysicalID, elapsed, err)
+
+		// Agregar a la lista de salidas excluidas
+		excludedSalidas = append(excludedSalidas, salidaAlternativa.ID)
+
+		// Pequeña pausa antes del siguiente intento
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Si llegamos aquí, todos los intentos fallaron
+	log.Printf("❌ [Sorter #%d] FALLO CRÍTICO: No se pudo asignar caja para SKU '%s' después de %d intentos (salidas fallidas: %v)",
+		s.ID, sku, maxRetries, excludedSalidas)
+
+	// Retornar el error original
+	return fmt.Errorf("fallo asignando caja para SKU '%s' después de %d intentos con salidas %v: %w",
+		sku, maxRetries, excludedSalidas, originalError)
 }
 
 // showStatsIfNeeded muestra estadísticas cada 10 lecturas

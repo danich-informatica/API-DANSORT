@@ -57,18 +57,39 @@ func (w *SKUSyncWorker) Stop() {
 }
 
 func (w *SKUSyncWorker) run() {
+	// CRÍTICO: Capturar panics para debug
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("❌ PANIC en SKU Sync Worker: %v", r)
+		}
+	}()
+
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	// Ejecutar inmediatamente al inicio
-	w.syncSKUs()
+	log.Println("🔄 [Worker] Goroutine iniciada")
 
+	// NOTA: NO recargamos desde PostgreSQL aquí porque:
+	// 1. Ya se hizo en main.go antes de crear el worker
+	// 2. El primer syncSKUs() inmediatamente recargará desde UNITEC (fuente de verdad)
+	// 3. Evitamos race condition / deadlock por doble lectura concurrente
+	log.Println("⏭️  [Worker] Omitiendo carga inicial (ya hecha en main.go)")
+
+	// Ejecutar sync desde UNITEC inmediatamente después (actualiza desde fuente de verdad)
+	log.Println("🔄 [Worker] Ejecutando primer syncSKUs()...")
+	w.syncSKUs()
+	log.Println("✅ [Worker] Primer syncSKUs() completado")
+
+	log.Println("🔄 [Worker] Entrando al loop principal...")
 	for {
 		select {
 		case <-w.ctx.Done():
+			log.Println("🛑 [Worker] Contexto cancelado, saliendo...")
 			return
 		case <-ticker.C:
+			log.Println("⏰ [Worker] Ticker disparado, ejecutando syncSKUs()...")
 			w.syncSKUs()
+			log.Println("✅ [Worker] syncSKUs() periódico completado")
 		}
 	}
 }
@@ -78,21 +99,24 @@ func (w *SKUSyncWorker) syncSKUs() {
 	ctx, cancel := context.WithTimeout(w.ctx, 30*time.Second)
 	defer cancel()
 
-	log.Println("🔄 Iniciando sincronización de SKUs...")
+	log.Println("🔄 Iniciando sincronización de SKUs desde UNITEC...")
 
 	// 1. Consultar SQL Server (vista VW_INT_DANICH_ENVIVO)
 	rows, err := db.FetchSegregazioneProgramma(ctx, w.sqlServerMgr)
 	if err != nil {
-		log.Printf("❌ Sync SKU: error consultando SQL Server: %v", err)
+		log.Printf("❌ Sync SKU: ERROR consultando SQL Server UNITEC: %v", err)
+		log.Printf("   → Verifica: conexión, vista VW_INT_DANICH_ENVIVO, permisos")
 		return
 	}
 
 	if len(rows) == 0 {
-		log.Println("⚠️  Sync SKU: vista SQL Server retornó 0 filas, no se hace cambio")
+		log.Println("⚠️  Sync SKU: vista VW_INT_DANICH_ENVIVO retornó 0 filas")
+		log.Println("   → La vista está vacía o no tiene datos que cumplan WHERE (NOT NULL)")
+		log.Println("   → No se modificará la tabla sku (se mantiene estado actual)")
 		return
 	}
 
-	log.Printf("📊 Sync SKU: %d filas obtenidas de SQL Server", len(rows))
+	log.Printf("✅ Sync SKU: %d SKUs obtenidas de UNITEC", len(rows))
 
 	// 1.5 CRÍTICO: Sincronizar variedades PRIMERO (sku.variedad es FK a variedad.codigo_variedad)
 	// Extraer variedades únicas
@@ -126,6 +150,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 		return
 	}
 
+	log.Println("🔄 [Sync] Iniciando transacción PostgreSQL...")
 	// 2. Usar transacción PostgreSQL para atomicidad
 	tx, err := w.postgresMgr.BeginTx(ctx)
 	if err != nil {
@@ -133,12 +158,15 @@ func (w *SKUSyncWorker) syncSKUs() {
 		return
 	}
 	defer tx.Rollback(ctx) // Rollback automático si no se hace commit
+	log.Println("✅ [Sync] Transacción iniciada correctamente")
 
+	log.Println("🔄 [Sync] Marcando todas las SKUs como false...")
 	// 3. PASO CRÍTICO: Marcar todas las SKUs como false
 	if _, err := tx.Exec(ctx, db.UPDATE_TO_FALSE_SKU_STATE_INTERNAL_DB); err != nil {
 		log.Printf("❌ Sync SKU: error marcando SKUs como false: %v", err)
 		return
 	}
+	log.Println("✅ [Sync] Todas las SKUs marcadas como false")
 
 	// 4. Insertar/actualizar desde vista con estado = true
 	syncedCount := 0
@@ -160,11 +188,15 @@ func (w *SKUSyncWorker) syncSKUs() {
 		if row.Dark.Valid {
 			dark = int(row.Dark.Int64)
 		}
+		linea := ""
+		if row.Linea.Valid {
+			linea = strings.TrimSpace(row.Linea.String)
+		}
 
 		// INSERT con ON CONFLICT → UPDATE estado = true
-		result, err := tx.Exec(ctx, db.INSERT_SKU_INTERNAL_DB, calibre, variedad, embalaje, dark, true)
+		result, err := tx.Exec(ctx, db.INSERT_SKU_INTERNAL_DB, calibre, variedad, embalaje, dark, linea, true)
 		if err != nil {
-			log.Printf("⚠️  Sync SKU: error upsert %s-%s-%s (dark=%d): %v", calibre, variedad, embalaje, dark, err)
+			log.Printf("⚠️  Sync SKU: error upsert %s-%s-%s (dark=%d, linea=%s): %v", calibre, variedad, embalaje, dark, linea, err)
 			continue
 		}
 
@@ -179,19 +211,46 @@ func (w *SKUSyncWorker) syncSKUs() {
 		}
 	}
 
+	log.Printf("🔄 [Sync] Haciendo commit de transacción (%d SKUs sincronizados)...", syncedCount)
 	// 5. Commit de la transacción
 	if err := tx.Commit(ctx); err != nil {
 		log.Printf("❌ Sync SKU: error haciendo commit: %v", err)
 		return
 	}
+	log.Println("✅ [Sync] Commit exitoso")
 
-	// 6. Recargar SKUManager desde PostgreSQL (solo SKUs con estado = true)
+	// 5.5. LIMPIEZA: Eliminar asignaciones de SKUs inactivas en salida_sku
+	// IMPORTANTE: NO eliminar REJECT (calibre='REJECT') porque es una SKU especial permanente
+	cleanupQuery := `
+		DELETE FROM salida_sku ss
+		WHERE ss.calibre != 'REJECT'
+		  AND NOT EXISTS (
+			SELECT 1 FROM sku s 
+			WHERE s.calibre = ss.calibre 
+			  AND s.variedad = ss.variedad 
+			  AND s.embalaje = ss.embalaje 
+			  AND s.dark = ss.dark 
+			  AND s.linea = ss.linea
+			  AND s.estado = true
+		)
+	`
+	result, err := w.postgresMgr.Pool().Exec(ctx, cleanupQuery)
+	if err != nil {
+		log.Printf("⚠️  Sync SKU: error limpiando asignaciones inactivas: %v", err)
+	} else if result.RowsAffected() > 0 {
+		log.Printf("🧹 Sync SKU: %d asignaciones de SKUs inactivas eliminadas", result.RowsAffected())
+	}
+
+	log.Println("🔄 [Sync] Recargando SKUManager desde PostgreSQL...")
+	// 6. Recargar SKUManager desde PostgreSQL (todas las SKUs, sin filtro de estado)
 	if err := w.skuManager.ReloadFromDB(ctx); err != nil {
 		log.Printf("❌ Sync SKU: error recargando SKUManager: %v", err)
 		return
 	}
+	log.Println("✅ [Sync] SKUManager recargado exitosamente")
 
-	// 7. Propagar a todos los sorters
+	// 7. Propagar a todos los sorters (solo SKUs activas = las de UNITEC)
+	// Las SKUs de UNITEC siempre están en true después del sync
 	activeSKUs := w.skuManager.GetActiveSKUs()
 	assignableSKUs := []models.SKUAssignable{models.GetRejectSKU()} // Agregar REJECT al inicio
 
@@ -199,14 +258,17 @@ func (w *SKUSyncWorker) syncSKUs() {
 		assignableSKUs = append(assignableSKUs, sku.ToAssignableWithHash())
 	}
 
+	log.Printf("📤 Sync SKU: Propagando %d SKUs (REJECT + %d activas de UNITEC) a sorters...", len(assignableSKUs), len(activeSKUs))
+
 	for _, s := range w.sorters {
 		// Actualizar lista de SKUs disponibles
 		s.UpdateSKUs(assignableSKUs)
+		log.Printf("   → Sorter #%d: %d SKUs actualizados", s.GetID(), len(assignableSKUs))
 
-		// Recargar asignaciones desde PostgreSQL para actualizar estado de salidas
-		if err := s.ReloadSalidasFromDB(ctx); err != nil {
-			log.Printf("⚠️  Sync SKU: error recargando salidas de Sorter #%d: %v", s.GetID(), err)
-		}
+		// NOTA: NO recargamos salidas aquí porque sobrescribiría las asignaciones manuales del usuario
+		// Las asignaciones se recargan solo:
+		// 1. Al iniciar el sistema
+		// 2. Cuando el usuario hace cambios via API (POST/DELETE /assignment)
 	}
 
 	elapsed := time.Since(startTime)
@@ -216,7 +278,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 	log.Printf("✅ Sync SKU completado en %v", elapsed)
 	log.Printf("   📊 SKUs sincronizados: %d", syncedCount)
 	log.Printf("   ⏭️  SKUs omitidos (nulos): %d", skippedCount)
-	log.Printf("   🎯 SKUs activos finales: %d", len(activeSKUs))
+	log.Printf("   🎯 SKUs activas propagadas: %d", len(activeSKUs))
 	log.Printf("   📡 Sorters notificados: %d", len(w.sorters))
 
 	if len(skuStats) > 0 {

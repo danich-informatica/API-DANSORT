@@ -38,8 +38,8 @@ func NewSKUManager(ctx context.Context, dbManager *db.PostgresManager) (*SKUMana
 	}
 
 	for _, sku := range skus {
-		// Usar una clave compuesta: calibre-variedad-embalaje
-		key := sku.Calibre + "-" + sku.Variedad + "-" + sku.Embalaje
+		// Usar una clave compuesta: calibre-variedad-embalaje-dark-linea (PK de la tabla)
+		key := fmt.Sprintf("%s-%s-%s-%d-%s", sku.Calibre, sku.Variedad, sku.Embalaje, sku.Dark, sku.Linea)
 		manager.skus[key] = sku
 	}
 
@@ -153,18 +153,24 @@ func (m *SKUManager) ReloadFromDB(ctx context.Context) error {
 
 	// Actualizar mapa de forma thread-safe
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Limpiar mapa actual
 	m.skus = make(map[string]models.SKU)
 
 	// Recargar con los nuevos datos
+	activeCount := 0
 	for _, sku := range skus {
-		key := sku.Calibre + "-" + sku.Variedad + "-" + sku.Embalaje
+		// Usar una clave compuesta: calibre-variedad-embalaje-dark-linea (PK de la tabla)
+		key := fmt.Sprintf("%s-%s-%s-%d-%s", sku.Calibre, sku.Variedad, sku.Embalaje, sku.Dark, sku.Linea)
 		m.skus[key] = sku
+		if sku.Estado {
+			activeCount++
+		}
 	}
 
+	m.mu.Unlock() // Liberar lock ANTES de log
+
 	log.Printf("♻️  SKUManager recargado: %d SKUs totales (%d activos)",
-		len(skus), len(m.GetActiveSKUs()))
+		len(skus), activeCount)
 	return nil
 }

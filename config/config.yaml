@@ -21,7 +21,7 @@ database:
     min_conns: 5
     max_conn_lifetime: "30m"
     max_conn_idle_time: "5m"
-    sku_sync_interval: "10s" # Intervalo de sincronización de SKUs desde vista
+    sku_sync_interval: "2s" # Intervalo de sincronización de SKUs desde vista (tiempo real)
 
 # Servidor HTTP
 http:
@@ -41,8 +41,8 @@ statistics:
 cognex_devices:
   - id: 1
     name: "Cognex Línea 1"
-    host: "127.0.0.1" # IP informativa de la cámara física
-    port: 8085 # Puerto ÚNICO donde escuchará (0.0.0.0:8085)
+    host: "192.168.121.50" # IP informativa de la cámara física
+    port: 9050 # Puerto ÚNICO donde escuchará (0.0.0.0:9050)
     scan_method: "QR" # Método por defecto: QR o DATAMATRIX
     ubicacion: "Línea Principal"
     interval_ms: 1000 # Para simulador: 5 segundos entre lecturas
@@ -69,19 +69,22 @@ cognex_devices:
 sorters:
   - id: 1
     name: "Sorter Principal"
-    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora 192.168.121.16 para produccion
+    plc_endpoint: "opc.tcp://192.168.120.100:4840" # 16 prod
     plc:
       object_id: "ns=4;i=1"
       method_id: "ns=4;i=21"
+      #trigger_node_id: "ns=4;i=69"
       input_node_id: "ns=4;i=22"
       output_node_id: "ns=4;i=23"
+    palet_automatico:
+      host: "127.0.0.1"
+      port: 9093
     salidas:
       - id: 1
         physical_id: 1
         nombre: "Salida manual"
         tipo: "manual"
-        batch_size: 3
-        cognex_id: 3
+        batch_size: 1
         plc:
           estado_node_id: "ns=4;i=27"
           bloqueo_node_id: "ns=4;i=28"
@@ -89,7 +92,7 @@ sorters:
         physical_id: 2
         nombre: "Salida manual"
         tipo: "manual"
-        batch_size: 3
+        batch_size: 1
         plc:
           estado_node_id: "ns=4;i=32"
           bloqueo_node_id: "ns=4;i=33"
@@ -115,12 +118,13 @@ sorters:
         tipo: "manual"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=47"
-          bloqueo_node_id: "ns=4;i=48"
+          estado_node_id: "ns=4;i=48"
+          bloqueo_node_id: "ns=4;i=49"
       - id: 6
         physical_id: 6
         nombre: "Salida automatica"
         tipo: "automatica"
+        mesa_id: 1
         batch_size: 1
         plc:
           estado_node_id: "ns=4;i=52"
@@ -130,7 +134,7 @@ sorters:
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
-        cognex_id: 3
+        mesa_id: 2
         plc:
           estado_node_id: "ns=4;i=57"
           bloqueo_node_id: "ns=4;i=58"
@@ -139,6 +143,7 @@ sorters:
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
+        mesa_id: 3
         plc:
           estado_node_id: "ns=4;i=62"
           bloqueo_node_id: "ns=4;i=63"
@@ -147,6 +152,7 @@ sorters:
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
+        mesa_id: 4
         plc:
           estado_node_id: "ns=4;i=67"
           bloqueo_node_id: "ns=4;i=68"
@@ -155,6 +161,7 @@ sorters:
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
+        mesa_id: 5
         plc:
           estado_node_id: "ns=4;i=72"
           bloqueo_node_id: "ns=4;i=73"
@@ -163,6 +170,7 @@ sorters:
         nombre: "Salida automatica"
         tipo: "automatica"
         batch_size: 1
+        mesa_id: 6
         plc:
           estado_node_id: "ns=4;i=77"
           bloqueo_node_id: "ns=4;i=78"
@@ -172,100 +180,5 @@ sorters:
         tipo: "descarte"
         batch_size: 1
         plc:
-          estado_node_id: "ns=4;i=83"
-          bloqueo_node_id: ""
-
-  - id: 2
-    name: "Sorter manual"
-    ubicacion: "Planta A - Línea 2"
-    cognex_id: 2
-    scan_method: "QR"
-    plc_endpoint: "opc.tcp://192.168.120.100:4840" # Mismo endpoint por ahora para produccion 192.168.121.20
-    plc:
-      object_id: "ns=4;i=1"
-      method_id: "ns=4;i=20"
-      input_node_id: "ns=4;i=21"
-      output_node_id: "ns=4;i=22"
-    salidas:
-      - id: 13
-        physical_id: 1
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 3
-        cognex_id: 3
-        plc:
-          estado_node_id: "ns=4;i=26"
-          bloqueo_node_id: "ns=4;i=27"
-      - id: 14
-        physical_id: 2
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 3
-        plc:
-          estado_node_id: "ns=4;i=31"
-          bloqueo_node_id: "ns=4;i=32"
-      - id: 15
-        physical_id: 3
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;i=36"
-          bloqueo_node_id: "ns=4;i=37"
-      - id: 16
-        physical_id: 4
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;i=41"
-          bloqueo_node_id: "ns=4;i=42"
-      - id: 17
-        physical_id: 5
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;i=46"
-          bloqueo_node_id: "ns=4;i=47"
-      - id: 18
-        physical_id: 6
-        nombre: "Salida manunal"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;i=51"
-          bloqueo_node_id: "ns=4;i=52"
-      - id: 19
-        physical_id: 7
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        cognex_id: 3
-        plc:
-          estado_node_id: "ns=4;i=56"
-          bloqueo_node_id: "ns=4;i=57"
-      - id: 20
-        physical_id: 8
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;i=61"
-          bloqueo_node_id: "ns=4;i=62"
-      - id: 21
-        physical_id: 9
-        nombre: "Salida manual"
-        tipo: "manual"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;i=66"
-          bloqueo_node_id: "ns=4;i=67"
-      - id: 22
-        physical_id: 10
-        nombre: "Salida descarte"
-        tipo: "descarte"
-        batch_size: 1
-        plc:
-          estado_node_id: "ns=4;i=71"
+          estado_node_id: "ns=4;i=82"
           bloqueo_node_id: ""

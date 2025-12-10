@@ -172,6 +172,7 @@ func (s *Sorter) ReloadSalidasFromDB(ctx context.Context) error {
 	updatedCount := 0
 	for i := range s.Salidas {
 		salidaID := s.Salidas[i].ID
+
 		if skus, existe := skusBySalida[salidaID]; existe {
 			s.Salidas[i].SKUs_Actuales = skus
 			updatedCount += len(skus)
@@ -182,5 +183,15 @@ func (s *Sorter) ReloadSalidasFromDB(ctx context.Context) error {
 	}
 
 	log.Printf("🔄 Sorter #%d: Salidas recargadas desde BD (%d SKUs totales)", s.ID, updatedCount)
+
+	// CRÍTICO: Notificar al WebSocket que las asignaciones cambiaron
+	// Esto asegura que el frontend vea los cambios en tiempo real
+	select {
+	case s.skuChannel <- s.assignedSKUs:
+		log.Printf("📡 Sorter #%d: Notificación de asignaciones enviada al WebSocket", s.ID)
+	default:
+		log.Printf("⚠️  Sorter #%d: Canal WebSocket lleno, notificación omitida", s.ID)
+	}
+
 	return nil
 }

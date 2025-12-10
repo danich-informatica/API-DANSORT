@@ -111,19 +111,27 @@ type CognexDevice struct {
 }
 
 type Sorter struct {
-	ID            int             `yaml:"id"`
-	Name          string          `yaml:"name"`
-	PLCEndpoint   string          `yaml:"plc_endpoint"` // Endpoint OPC UA (ej: "opc.tcp://192.168.120.100:4840")
-	PLC           SorterPLCConfig `yaml:"plc"`
-	Salidas       []Salida        `yaml:"salidas"`
-	DefaultSalida int             `yaml:"default_salida"`
+	ID              int                   `yaml:"id"`
+	Name            string                `yaml:"name"`
+	CognexID        int                   `yaml:"cognex_id"`    // ID de la cámara Cognex QR/SKU principal del sorter
+	PLCEndpoint     string                `yaml:"plc_endpoint"` // Endpoint OPC UA (ej: "opc.tcp://192.168.120.100:4840")
+	PLC             SorterPLCConfig       `yaml:"plc"`
+	PaletAutomatico PaletAutomaticoConfig `yaml:"palet_automatico"`
+	Salidas         []Salida              `yaml:"salidas"`
+	DefaultSalida   int                   `yaml:"default_salida"`
+}
+
+type PaletAutomaticoConfig struct {
+	Host string `yaml:"host"` // IP del servidor de paletizado (ej: "127.0.0.1")
+	Port int    `yaml:"port"` // Puerto del servidor de paletizado (ej: 9093)
 }
 
 type SorterPLCConfig struct {
-	InputNodeID  string `yaml:"input_node_id"`
-	OutputNodeID string `yaml:"output_node_id"`
-	ObjectID     string `yaml:"object_id"`
-	MethodID     string `yaml:"method_id"`
+	InputNodeID   string `yaml:"input_node_id"`
+	OutputNodeID  string `yaml:"output_node_id"`
+	ObjectID      string `yaml:"object_id"`
+	MethodID      string `yaml:"method_id"`
+	TriggerNodeID string `yaml:"trigger_node_id"` // Nodo para verificar si el sorter está ocupado
 }
 
 type Salida struct {
@@ -131,6 +139,9 @@ type Salida struct {
 	Nombre     string          `yaml:"nombre"`
 	Tipo       string          `yaml:"tipo"`        // "manual", "automatico", "automatica", "descarte"
 	PhysicalID int             `yaml:"physical_id"` // ID físico relativo del sorter (1, 2, 3, etc.)
+	MesaID     int             `yaml:"mesa_id"`     // ID de la mesa de paletizado (solo para salidas automáticas)
+	CognexID   int             `yaml:"cognex_id"`   // ID de la cámara Cognex DataMatrix asignada a esta salida
+	BatchSize  int             `yaml:"batch_size"`  // Tamaño del lote para balance round-robin
 	PLC        SalidaPLCConfig `yaml:"plc"`
 }
 

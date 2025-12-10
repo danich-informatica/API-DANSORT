@@ -7,118 +7,133 @@ import (
 
 // determinarSalida determina a qué salida debe ir la caja según el SKU/Calibre
 func (s *Sorter) determinarSalida(sku, calibre string) shared.Salida {
-	if sku == "REJECT" || sku == "0" {
-		return s.getSalidaForReject()
-	}
-
+	// Buscar salida con balance
 	if salida := s.getSalidaConBatchDistribution(sku); salida != nil {
 		return *salida
 	}
 
-	if salida := s.getSalidaConfiguradaParaSKU(sku); salida != nil {
+	// Si no encuentra el SKU específico, buscar REJECT
+	if salida := s.getSalidaConBatchDistribution("REJECT"); salida != nil {
 		return *salida
 	}
 
 	return s.getSalidaDescarte(sku)
 }
 
-// getSalidaForReject busca salida para SKUs REJECT
-func (s *Sorter) getSalidaForReject() shared.Salida {
-	for _, salida := range s.Salidas {
-		if salida.Tipo == "manual" && salida.IsAvailable() {
-			return salida
-		}
-	}
-
-	for _, salida := range s.Salidas {
-		if salida.IsAvailable() {
-			log.Printf("⚠️ Sorter #%d: No hay salida manual disponible, usando salida %d", s.ID, salida.ID)
-			return salida
-		}
-	}
-
-	if len(s.Salidas) > 0 {
-		log.Printf("🚨 Sorter #%d: ADVERTENCIA - Todas las salidas bloqueadas/en falla, usando última salida", s.ID)
-		return s.Salidas[len(s.Salidas)-1]
-	}
-
-	return shared.Salida{}
-}
-
-// getSalidaConBatchDistribution obtiene salida usando distribución por lotes
+// getSalidaConBatchDistribution obtiene salida usando round-robin con validación de disponibilidad
 func (s *Sorter) getSalidaConBatchDistribution(sku string) *shared.Salida {
-	s.batchMutex.Lock()
-	bd, hasBatchDistribution := s.batchCounters[sku]
-	if !hasBatchDistribution || len(bd.Salidas) <= 1 {
-		s.batchMutex.Unlock()
-		return nil
-	}
+	// Buscar TODAS las salidas que tienen este SKU en SKUs_Actuales
+	var todasLasSalidas []*shared.Salida
 
-	salidaID := bd.NextSalida()
-	s.batchMutex.Unlock()
-
-	for i := range s.Salidas {
-		if s.Salidas[i].ID == salidaID {
-			if s.Salidas[i].IsAvailable() {
-				log.Printf("🔄 Sorter #%d: SKU '%s' → Salida %d '%s' (lote %d/%d)",
-					s.ID, sku, s.Salidas[i].ID, s.Salidas[i].Salida_Sorter,
-					bd.CurrentCount, bd.BatchSizes[salidaID])
-				return &s.Salidas[i]
-			}
-
-			estado := s.Salidas[i].GetEstado()
-			bloqueo := s.Salidas[i].GetBloqueo()
-			log.Printf("⚠️ Sorter #%d: Salida %d no disponible (Estado=%d, Bloqueo=%t), buscando alternativa...",
-				s.ID, s.Salidas[i].ID, estado, bloqueo)
-			break
-		}
-	}
-
-	return nil
-}
-
-// getSalidaConfiguradaParaSKU busca salida configurada para un SKU específico
-func (s *Sorter) getSalidaConfiguradaParaSKU(sku string) *shared.Salida {
 	for i := range s.Salidas {
 		for _, skuConfig := range s.Salidas[i].SKUs_Actuales {
 			if skuConfig.SKU == sku {
+				todasLasSalidas = append(todasLasSalidas, &s.Salidas[i])
+				break
+			}
+		}
+	}
+
+	// DEBUG: Ver qué encontró
+	if len(todasLasSalidas) == 0 {
+		log.Printf("[Sorter %d] ⚠️ SKU '%s' NOT FOUND in any salida's SKUs_Actuales", s.ID, sku)
+		return nil
+	}
+
+	// DEBUG: Mostrar IDs de las salidas encontradas
+	salidaIDs := make([]int, len(todasLasSalidas))
+	for i, sal := range todasLasSalidas {
+		salidaIDs[i] = sal.ID
+	}
+	log.Printf("[Sorter %d] ✓ SKU '%s' found in %d salida(s): %v", s.ID, sku, len(todasLasSalidas), salidaIDs)
+
+	// Si solo hay una salida, retornarla si está disponible
+	if len(todasLasSalidas) == 1 {
+		if todasLasSalidas[0].IsAvailable() {
+			return todasLasSalidas[0]
+		}
+		// 🚨 LOG CRÍTICO: Por qué la salida NO está disponible
+		log.Printf("🚨 [Sorter %d] Salida ID=%d NO disponible para SKU '%s' (Estado=%d, Bloqueo=%t)",
+			s.ID, todasLasSalidas[0].ID, sku,
+			todasLasSalidas[0].GetEstado(), todasLasSalidas[0].GetBloqueo())
+		return nil
+	}
+
+	// Múltiples salidas: usar round-robin con batch_size
+	s.batchMutex.Lock()
+	defer s.batchMutex.Unlock()
+
+	// Obtener o crear distribuidor para este SKU
+	bd, exists := s.batchCounters[sku]
+	if !exists {
+		// Primera vez: crear distribuidor en índice 0
+		s.batchCounters[sku] = &BatchDistributor{
+			CurrentIndex: 0,
+			CurrentCount: 0,
+		}
+		bd = s.batchCounters[sku]
+		log.Printf("[Sorter %d] ⚖️ Balance activated for SKU '%s' with %d lanes", s.ID, sku, len(todasLasSalidas))
+	}
+
+	// Buscar salida disponible empezando desde índice actual
+	startIdx := bd.CurrentIndex
+	for attempts := 0; attempts < len(todasLasSalidas); attempts++ {
+		idx := (startIdx + attempts) % len(todasLasSalidas)
+		salida := todasLasSalidas[idx]
+
+		if salida.IsAvailable() {
+			// ✅ Incrementar contador de cajas enviadas a esta salida
+			bd.CurrentCount++
+
+			// ✅ Si alcanzamos el batch_size, rotar a la siguiente salida
+			if bd.CurrentCount >= salida.BatchSize {
+				bd.CurrentIndex = (idx + 1) % len(todasLasSalidas)
+				bd.CurrentCount = 0
+				log.Printf("[Sorter %d] 🔄 SKU '%s': Batch completado en salida %d (%d cajas), rotando a siguiente",
+					s.ID, sku, salida.ID, salida.BatchSize)
+			} else {
+				// Mantener en la misma salida (batch no completado)
+				bd.CurrentIndex = idx
+			}
+
+			return salida
+		}
+		// 🚨 LOG: Por qué esta salida no está disponible
+		log.Printf("⚠️  [Sorter %d] Salida ID=%d NO disponible (intento %d/%d) para SKU '%s' (Estado=%d, Bloqueo=%t)",
+			s.ID, salida.ID, attempts+1, len(todasLasSalidas), sku,
+			salida.GetEstado(), salida.GetBloqueo())
+	}
+
+	// Ninguna salida disponible
+	log.Printf("🚨 [Sorter %d] SKU '%s': Ninguna de las %d salidas está disponible (todas bloqueadas/llenas)", s.ID, sku, len(todasLasSalidas))
+	return nil
+} // getSalidaDescarte obtiene salida de descarte como último recurso
+// SOLO usa la salida con SKU "REJECT" asignado, no cualquier salida manual
+func (s *Sorter) getSalidaDescarte(sku string) shared.Salida {
+	// Buscar SOLO la salida que tiene "REJECT" asignado
+	for i := range s.Salidas {
+		for _, skuConfig := range s.Salidas[i].SKUs_Actuales {
+			if skuConfig.SKU == "REJECT" {
 				if s.Salidas[i].IsAvailable() {
-					return &s.Salidas[i]
+					log.Printf("⚠️ Sorter #%d: SKU '%s' sin salida configurada, enviando a REJECT (salida %d)",
+						s.ID, sku, s.Salidas[i].ID)
+					return s.Salidas[i]
 				}
 
 				estado := s.Salidas[i].GetEstado()
 				bloqueo := s.Salidas[i].GetBloqueo()
-				log.Printf("⚠️ Sorter #%d: Salida %d configurada para SKU '%s' pero NO disponible (Estado=%d, Bloqueo=%t)",
-					s.ID, s.Salidas[i].ID, sku, estado, bloqueo)
+				log.Printf("🚨 Sorter #%d: Salida REJECT (ID=%d) NO disponible (Estado=%d, Bloqueo=%t) para SKU '%s'",
+					s.ID, s.Salidas[i].ID, estado, bloqueo, sku)
+				break
 			}
 		}
 	}
-	return nil
-}
 
-// getSalidaDescarte obtiene salida de descarte como último recurso
-func (s *Sorter) getSalidaDescarte(sku string) shared.Salida {
-	for _, salida := range s.Salidas {
-		if salida.Tipo == "manual" && salida.IsAvailable() {
-			log.Printf("⚠️ Sorter #%d: SKU '%s' sin salida disponible configurada, enviando a descarte (salida %d)",
-				s.ID, sku, salida.ID)
-			return salida
-		}
-	}
+	// Si no hay salida REJECT disponible, NO enviar a ninguna salida
+	log.Printf("🚨 Sorter #%d: ERROR CRÍTICO - No hay salida REJECT disponible para SKU '%s', caja perdida",
+		s.ID, sku)
 
-	for _, salida := range s.Salidas {
-		if salida.IsAvailable() {
-			log.Printf("🚨 Sorter #%d: SKU '%s' sin salida manual disponible, usando salida %d",
-				s.ID, sku, salida.ID)
-			return salida
-		}
-	}
-
-	if len(s.Salidas) > 0 {
-		log.Printf("🚨 Sorter #%d: ADVERTENCIA CRÍTICA - Todas las salidas bloqueadas/en falla, usando última salida", s.ID)
-		return s.Salidas[len(s.Salidas)-1]
-	}
-
+	// Retornar salida vacía (no válida)
 	return shared.Salida{}
 }
 
@@ -160,40 +175,41 @@ func (s *Sorter) FindSalidaForSKU(skuText string) int {
 	return -1
 }
 
-// updateBatchDistributor actualiza o crea el distribuidor de lotes para una SKU
-func (s *Sorter) updateBatchDistributor(skuName string) {
-	var salidaIDs []int
-	batchSizes := make(map[int]int)
+// getAlternativeSalida busca una salida alternativa para un SKU, excluyendo salidas problemáticas
+func (s *Sorter) getAlternativeSalida(sku string, excludeSalidaIDs []int) *shared.Salida {
+	// Buscar TODAS las salidas que tienen este SKU, excluyendo las problemáticas
+	var salidasDisponibles []*shared.Salida
 
-	for _, salida := range s.Salidas {
-		for _, sku := range salida.SKUs_Actuales {
-			if sku.SKU == skuName {
-				salidaIDs = append(salidaIDs, salida.ID)
-				batchSizes[salida.ID] = salida.BatchSize
+	for i := range s.Salidas {
+		// Verificar si esta salida está en la lista de exclusión
+		excluded := false
+		for _, excludeID := range excludeSalidaIDs {
+			if s.Salidas[i].ID == excludeID {
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
+
+		// Verificar si tiene el SKU y está disponible
+		for _, skuConfig := range s.Salidas[i].SKUs_Actuales {
+			if skuConfig.SKU == sku && s.Salidas[i].IsAvailable() {
+				salidasDisponibles = append(salidasDisponibles, &s.Salidas[i])
 				break
 			}
 		}
 	}
 
-	if len(salidaIDs) <= 1 {
-		delete(s.batchCounters, skuName)
-		return
+	if len(salidasDisponibles) == 0 {
+		log.Printf("[Sorter %d] ⚠️ No hay salidas alternativas disponibles para SKU '%s' (excluidas: %v)",
+			s.ID, sku, excludeSalidaIDs)
+		return nil
 	}
 
-	if bd, exists := s.batchCounters[skuName]; exists {
-		bd.Salidas = salidaIDs
-		bd.BatchSizes = batchSizes
-		if bd.CurrentIndex >= len(salidaIDs) {
-			bd.CurrentIndex = 0
-			bd.CurrentCount = 0
-		}
-	} else {
-		s.batchCounters[skuName] = &BatchDistributor{
-			Salidas:      salidaIDs,
-			CurrentIndex: 0,
-			CurrentCount: 0,
-			BatchSizes:   batchSizes,
-		}
-		log.Printf("🔄 Sorter #%d: BatchDistributor creado para SKU '%s' con %d salidas", s.ID, skuName, len(salidaIDs))
-	}
+	// Retornar la primera salida disponible
+	log.Printf("[Sorter %d] ✅ Salida alternativa encontrada para SKU '%s': Salida ID=%d (excluidas: %v)",
+		s.ID, sku, salidasDisponibles[0].ID, excludeSalidaIDs)
+	return salidasDisponibles[0]
 }

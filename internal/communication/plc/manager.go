@@ -12,6 +12,12 @@ import (
 	"github.com/gopcua/opcua/ua"
 )
 
+// logTs imprime log con timestamp de microsegundos para debugging preciso
+func logTs(format string, args ...interface{}) {
+	ts := time.Now().Format("2006-01-02T15:04:05.000000")
+	log.Printf("[%s] "+format, append([]interface{}{ts}, args...)...)
+}
+
 // Manager gestiona múltiples clientes OPC UA para diferentes sorters
 type Manager struct {
 	config       *config.Config
@@ -340,8 +346,7 @@ func (m *Manager) MonitorMultipleNodes(ctx context.Context, sorterID int, nodeID
 }
 
 // AssignLaneToBox replica el comportamiento del código Rust:
-// 1. Intenta llamar al método del PLC para asignar una caja a una salida
-// 2. Si falla (método bloqueado), escribe directamente en el nodo ESTADO como Plan B
+// Intenta llamar al método del PLC para asignar una caja a una salida
 func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber int16) error {
 	// Buscar configuración del sorter
 	var sorterConfig *config.Sorter
@@ -369,47 +374,194 @@ func (m *Manager) AssignLaneToBox(ctx context.Context, sorterID int, laneNumber 
 		return fmt.Errorf("no se encontró nodo ESTADO para lane %d en sorter %d", laneNumber, sorterID)
 	}
 
-	// Plan A: Intentar llamar al método con el NÚMERO de salida como int16
+	// Intentar llamar al método con el NÚMERO de salida como int16
 	if sorterConfig.PLC.ObjectID != "" && sorterConfig.PLC.MethodID != "" {
-		log.Printf("🔄 [Sorter %d] Intentando método PLC con número de salida %d...", sorterID, laneNumber)
+		logTs("🔄 [Sorter %d] Intentando método PLC con número de salida %d...", sorterID, laneNumber)
+
+		// ESPERA INTELIGENTE: Verificar trigger antes de llamar al método
+		if sorterConfig.PLC.TriggerNodeID != "" {
+			logTs("⏳ [Sorter %d] Esperando trigger disponible...", sorterID)
+			// warm up al método llamando con un 0 antes de la llamada real
+
+			warmUpVariant := ua.MustVariant(int16(0))
+			warmUpInputArgs := []*ua.Variant{warmUpVariant}
+			_, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, warmUpInputArgs)
+			if err != nil {
+				logTs("⚠️  [Sorter %d] Error en warm up del método PLC: %v", sorterID, err)
+			} else {
+				logTs("✅ [Sorter %d] Warm up del método PLC exitoso", sorterID)
+			}
+
+			maxWaitTime := 2 * time.Second
+			ctxWithTimeout, cancel := context.WithTimeout(ctx, maxWaitTime)
+			defer cancel()
+
+			ticker := time.NewTicker(20 * time.Millisecond) // Polling cada 20ms
+			defer ticker.Stop()
+
+			startTime := time.Now()
+			triggerReady := false
+
+			for !triggerReady {
+				select {
+				case <-ctxWithTimeout.Done():
+					elapsed := time.Since(startTime)
+					log.Printf("⚠️  [Sorter %d] Timeout esperando trigger después de %v, continuando de todas formas...", sorterID, elapsed)
+					triggerReady = true
+
+				case <-ticker.C:
+					// Leer el estado actual del trigger
+					nodeInfo, err := m.ReadNode(ctx, sorterID, sorterConfig.PLC.TriggerNodeID)
+					if err != nil {
+						log.Printf("⚠️  [Sorter %d] Error leyendo trigger: %v", sorterID, err)
+						continue // Seguir intentando
+					}
+
+					// Verificar si el trigger está en false (disponible)
+					if boolValue, ok := nodeInfo.Value.(bool); ok {
+						if !boolValue {
+							elapsed := time.Since(startTime)
+							logTs("✅ [Sorter %d] Trigger disponible después de %v", sorterID, elapsed)
+							triggerReady = true
+						}
+					} else {
+						logTs("⚠️  [Sorter %d] Trigger no es booleano (tipo=%T, valor=%v), continuando", sorterID, nodeInfo.Value, nodeInfo.Value)
+						triggerReady = true
+					}
+				}
+			}
+		} else {
+			// Fallback: Si no hay trigger configurado, usar sleep fijo
+			log.Printf("⚠️  [Sorter %d] No hay trigger_node_id, usando sleep fijo de 0ms", sorterID)
+			//time.Sleep(100 * time.Millisecond)
+		}
 
 		// CRÍTICO: El método espera int16 con el número de salida, NO un NodeID
 		variant := ua.MustVariant(laneNumber) // laneNumber ya es int16
 		inputArgs := []*ua.Variant{variant}
 
-		outputValues, err := m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
+		// 🔁 REINTENTOS: Hasta 3 intentos con política del PLC (25ms entre intentos)
+		maxRetries := 3
+		var outputValues []interface{}
+		var lastErr error
 
-		if err == nil {
-			log.Printf("✅ [Sorter %d] Método ejecutado exitosamente - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
-			return nil
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if attempt > 1 {
+				logTs("🔄 [Sorter %d] Reintento %d/%d para Lane %d...", sorterID, attempt, maxRetries, laneNumber)
+				time.Sleep(25 * time.Millisecond) // Política del PLC: 25ms entre reintentos
+			}
+
+			outputValues, lastErr = m.CallMethod(ctx, sorterID, sorterConfig.PLC.ObjectID, sorterConfig.PLC.MethodID, inputArgs)
+
+			// ✅ ÉXITO: Sin error
+			if lastErr == nil {
+				// Validar que hay output (algunos PLCs retornan valores de confirmación)
+				if len(outputValues) > 0 {
+					logTs("✅ [Sorter %d] Método ejecutado - Lane %d asignado. Output: %v", sorterID, laneNumber, outputValues)
+				} else {
+					logTs("✅ [Sorter %d] Método ejecutado - Lane %d asignado (sin output)", sorterID, laneNumber)
+				}
+				return nil
+			}
+
+			// ⚠️ ERROR DE SESIÓN: Reintentar en cualquier intento
+			if isSessionError(lastErr) {
+				logTs("⚠️ [Sorter %d] Error de sesión OPC UA en intento %d/%d, reintentando...", sorterID, attempt, maxRetries)
+				continue // Continuar al siguiente intento
+			}
+
+			// ❌ ERROR NO RECUPERABLE: Salir inmediatamente
+			logTs("❌ [Sorter %d] Error no recuperable en intento %d: %v", sorterID, attempt, lastErr)
+			break
 		}
 
-		// Si falla, loguear warning pero continuar con Plan B (como Rust)
-		log.Printf("⚠️ [Sorter %d] Método falló: %v - usando Plan B (escritura directa)", sorterID, err)
+		// Si llegamos aquí, todos los intentos fallaron - ignorar envío según política del PLC
+		logTs("❌ [Sorter %d] Lane %d NO asignado después de %d intentos - IGNORADO", sorterID, laneNumber, maxRetries)
+		return fmt.Errorf("error llamando método PLC para lane %d en sorter %d (intentos: %d): %w", laneNumber, sorterID, maxRetries, lastErr)
 	}
 
-	// Plan B: Escribir directamente en el nodo BLOQUEO de la salida
-	// (ESTADO es read-only, pero BLOQUEO sí es escribible)
-	var bloqueoNodeID string
-	for _, salida := range sorterConfig.Salidas {
-		if salida.PhysicalID == int(laneNumber) {
-			bloqueoNodeID = salida.PLC.BloqueoNodeID
+	// Si no hay ObjectID o MethodID configurado, retornar error
+	return fmt.Errorf("no hay método PLC configurado para sorter %d", sorterID)
+}
+
+// WaitForSorterReady espera hasta que el trigger del sorter esté en false (disponible)
+// Retorna error si excede el timeout o si el nodo trigger no está configurado
+func (m *Manager) WaitForSorterReady(ctx context.Context, sorterID int, timeout time.Duration) error {
+	// Buscar configuración del sorter
+	var sorterConfig *config.Sorter
+	for _, sorter := range m.config.Sorters {
+		if sorter.ID == sorterID {
+			sorterConfig = &sorter
 			break
 		}
 	}
 
-	if bloqueoNodeID == "" {
-		return fmt.Errorf("no se encontró nodo BLOQUEO para lane %d en sorter %d", laneNumber, sorterID)
+	if sorterConfig == nil {
+		return fmt.Errorf("sorter ID %d no encontrado", sorterID)
 	}
 
-	log.Printf("📝 [Sorter %d] Escribiendo directamente en nodo BLOQUEO %s", sorterID, bloqueoNodeID)
-
-	// Escribir false en BLOQUEO para desbloquear/habilitar la salida
-	err := m.WriteNodeTyped(ctx, sorterID, bloqueoNodeID, false, "bool")
-	if err != nil {
-		return fmt.Errorf("plan B falló - no se pudo escribir en BLOQUEO: %w", err)
+	// Si no hay trigger configurado, retornar inmediatamente (sin espera)
+	if sorterConfig.PLC.TriggerNodeID == "" {
+		log.Printf("⚠️  [Sorter %d] No hay trigger_node_id configurado, sin espera inteligente", sorterID)
+		return nil
 	}
 
-	log.Printf("✅ [Sorter %d] Plan B exitoso - Lane %d desbloqueado", sorterID, laneNumber)
-	return nil
+	log.Printf("⏳ [Sorter %d] Esperando a que trigger esté disponible (false)...", sorterID)
+
+	// Crear contexto con timeout
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(50 * time.Millisecond) // Verificar cada 50ms
+	defer ticker.Stop()
+
+	startTime := time.Now()
+
+	for {
+		select {
+		case <-ctxWithTimeout.Done():
+			elapsed := time.Since(startTime)
+			return fmt.Errorf("timeout esperando trigger del sorter %d después de %v", sorterID, elapsed)
+
+		case <-ticker.C:
+			// Leer el valor del trigger
+			nodeInfo, err := m.ReadNode(ctx, sorterID, sorterConfig.PLC.TriggerNodeID)
+			if err != nil {
+				log.Printf("⚠️  [Sorter %d] Error leyendo trigger: %v", sorterID, err)
+				continue // Reintentar en el siguiente tick
+			}
+
+			// Verificar si el valor es booleano y está en false
+			if boolValue, ok := nodeInfo.Value.(bool); ok {
+				if !boolValue { // Trigger en false = disponible
+					elapsed := time.Since(startTime)
+					log.Printf("✅ [Sorter %d] Trigger disponible después de %v", sorterID, elapsed)
+					return nil
+				}
+				// Trigger en true = ocupado, seguir esperando
+				continue
+			}
+
+			// Si no es booleano, loguear advertencia y continuar
+			log.Printf("⚠️  [Sorter %d] Trigger no es booleano (tipo=%T, valor=%v)", sorterID, nodeInfo.Value, nodeInfo.Value)
+		}
+	}
+}
+
+func (m *Manager) LockSalida(sorterID int, bloqueoNode string) error {
+	if bloqueoNode == "" {
+		return fmt.Errorf("nodo de bloqueo vacío")
+	}
+
+	ctx := context.Background()
+	return m.WriteNode(ctx, sorterID, bloqueoNode, true)
+}
+
+func (m *Manager) UnlockSalida(sorterID int, bloqueoNode string) error {
+	if bloqueoNode == "" {
+		return fmt.Errorf("nodo de bloqueo vacío")
+	}
+
+	ctx := context.Background()
+	return m.WriteNode(ctx, sorterID, bloqueoNode, false)
 }

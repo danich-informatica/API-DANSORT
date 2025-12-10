@@ -17,11 +17,22 @@ import (
 
 // WebSocketMessage representa un mensaje enviado a través del WebSocket
 type WebSocketMessage struct {
-	Type      string      `json:"type"`      // "assignment_added", "assignment_removed", "assignments_cleared"
+	Type      string      `json:"type"`      // "assignment_added", "assignment_removed", "assignments_cleared", "box_status"
 	Timestamp string      `json:"timestamp"` // ISO 8601 timestamp
 	SorterID  int         `json:"sorter_id"`
 	SealerID  int         `json:"sealer_id"`
 	Data      interface{} `json:"data"` // Datos específicos del evento
+}
+
+// BoxStatusData representa las estadísticas de estados de cajas para enviar al frontend
+type BoxStatusData struct {
+	SalidaID         int                `json:"salida_id"`
+	SalidaPhysicalID int                `json:"salida_physical_id"`
+	EstadoActual     interface{}        `json:"estado_actual"` // EstadoCaja
+	Ultimos5         []interface{}      `json:"ultimos_5"`     // []EstadoCaja
+	Contadores       map[string]int     `json:"contadores"`    // map[TipoEstadoCaja]int
+	Porcentajes      map[string]float64 `json:"porcentajes"`   // map[TipoEstadoCaja]float64
+	TotalCajas       int                `json:"total_cajas"`   // Total de cajas procesadas
 }
 
 // Client representa un cliente WebSocket conectado
@@ -237,6 +248,25 @@ func (h *WebSocketHub) NotifyFlowStatistics(stats models.FlowStatistics) {
 	h.sendMessageToRoom(roomName, message)
 	log.Printf("📤 [WS] sku_flow_stats → room %s (%d lecturas totales, %d SKUs diferentes, ventana: %ds)",
 		roomName, stats.TotalLecturas, len(stats.Stats), stats.WindowSeconds)
+}
+
+// NotifyBoxStatus notifica las estadísticas de estados de cajas a los clientes
+// Ahora espera un array de salidas en lugar de una sola salida
+func (h *WebSocketHub) NotifyBoxStatus(sorterID int, salidas []map[string]interface{}) {
+	roomName := fmt.Sprintf("assignment_%d", sorterID)
+
+	message := WebSocketMessage{
+		Type:      "box_status",
+		Timestamp: time.Now().Format(time.RFC3339),
+		SorterID:  sorterID,
+		Data:      salidas, // Array de salidas con sus estadísticas
+	}
+
+	h.sendMessageToRoom(roomName, message)
+
+	// Log con información consolidada
+	log.Printf("📤 [WS] box_status → room %s (%d salidas automáticas)",
+		roomName, len(salidas))
 }
 
 // sendMessageToRoom envía un mensaje a todos los clientes de una room

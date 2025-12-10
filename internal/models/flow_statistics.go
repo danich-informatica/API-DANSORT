@@ -6,6 +6,7 @@ import "time"
 type SKUFlowStat struct {
 	ID         int     `json:"id"`
 	SKU        string  `json:"sku"`
+	Linea      string  `json:"linea,omitempty"`
 	Lecturas   int     `json:"lecturas"`
 	Porcentaje float64 `json:"porcentaje"`
 }

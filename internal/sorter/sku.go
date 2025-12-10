@@ -8,13 +8,39 @@ import (
 
 // UpdateSKUs actualiza la lista de SKUs asignados a este sorter y publica al canal
 func (s *Sorter) UpdateSKUs(skus []models.SKUAssignable) {
+	// Verificar si los SKUs realmente cambiaron comparando longitud y contenido
+	skusChanged := len(s.assignedSKUs) != len(skus)
+	if !skusChanged {
+		// Comparar SKUs individuales por su hash
+		existingMap := make(map[string]bool)
+		for _, sku := range s.assignedSKUs {
+			existingMap[sku.SKU] = true
+		}
+		for _, sku := range skus {
+			if !existingMap[sku.SKU] {
+				skusChanged = true
+				break
+			}
+		}
+	}
+
 	s.assignedSKUs = skus
 
+	// SOLO limpiar BatchDistributors si los SKUs realmente cambiaron
+	if skusChanged {
+		s.batchMutex.Lock()
+		s.batchCounters = make(map[string]*BatchDistributor)
+		s.batchMutex.Unlock()
+		log.Printf("📦 Sorter #%d: SKUs actualizados (%d SKUs) - Balance reiniciado", s.ID, len(skus))
+	}
+
+	// SIEMPRE publicar al canal para WebSocket (aunque no cambien)
 	select {
 	case s.skuChannel <- skus:
-		log.Printf("📦 Sorter #%d: SKUs actualizados (%d SKUs)", s.ID, len(skus))
 	default:
-		log.Printf("⚠️  Sorter #%d: Canal lleno, SKUs no publicados", s.ID)
+		if skusChanged {
+			log.Printf("⚠️  Sorter #%d: Canal lleno, SKUs no publicados", s.ID)
+		}
 	}
 }
 

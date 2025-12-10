@@ -420,6 +420,39 @@
             <p>Control y monitoreo en tiempo real de lectores Cognex</p>
         </header>
 
+        <div class="controls">
+            <h2>Configuración de Conexión</h2>
+            <div class="input-group">
+                <label for="server-ip">🌐 IP del Servidor:</label>
+                <input 
+                    type="text" 
+                    id="server-ip" 
+                    placeholder="192.168.x.x o localhost"
+                    value="localhost"
+                >
+            </div>
+            <div class="input-group">
+                <label for="server-port">🔌 Puerto:</label>
+                <input 
+                    type="number" 
+                    id="server-port" 
+                    placeholder="9091"
+                    value="9091"
+                    min="1"
+                    max="65535"
+                >
+            </div>
+            <div class="button-group" style="margin-top: 15px;">
+                <button class="btn btn-start" onclick="updateConnection()">
+                    🔄 Actualizar Conexión
+                </button>
+                <button class="btn btn-info" onclick="testConnection()">
+                    🔍 Probar Conexión
+                </button>
+            </div>
+            <div id="connection-status" style="margin-top: 10px; padding: 10px; border-radius: 6px; display: none;"></div>
+        </div>
+
         <div id="app">
             <div class="loading">Cargando simuladores...</div>
         </div>
@@ -430,9 +463,103 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:9091/api';
+        // Variables de configuración
+        let API_URL = 'http://localhost:9091/api';
         let refreshInterval;
         let devicesRendered = false; // Flag para saber si ya se renderizó
+
+        // Cargar configuración guardada en localStorage
+        function loadSavedConfig() {
+            const savedIP = localStorage.getItem('cognex_server_ip');
+            const savedPort = localStorage.getItem('cognex_server_port');
+            
+            if (savedIP) {
+                document.getElementById('server-ip').value = savedIP;
+            }
+            if (savedPort) {
+                document.getElementById('server-port').value = savedPort;
+            }
+            
+            // Actualizar API_URL con los valores guardados
+            if (savedIP || savedPort) {
+                updateConnection(false);
+            }
+        }
+
+        // Actualizar la URL de conexión
+        function updateConnection(showAlert = true) {
+            const serverIP = document.getElementById('server-ip').value.trim() || 'localhost';
+            const serverPort = document.getElementById('server-port').value.trim() || '9091';
+            
+            API_URL = `http://${serverIP}:${serverPort}/api`;
+            
+            // Guardar en localStorage
+            localStorage.setItem('cognex_server_ip', serverIP);
+            localStorage.setItem('cognex_server_port', serverPort);
+            
+            if (showAlert) {
+                showConnectionStatus(`✅ Conexión actualizada: ${API_URL}`, 'success');
+            }
+            
+            // Recargar datos
+            devicesRendered = false;
+            loadStatus();
+        }
+
+        // Probar la conexión
+        async function testConnection() {
+            const statusDiv = document.getElementById('connection-status');
+            statusDiv.style.display = 'block';
+            statusDiv.style.background = '#fff3cd';
+            statusDiv.style.color = '#856404';
+            statusDiv.textContent = '🔄 Probando conexión...';
+            
+            try {
+                updateConnection(false);
+                const response = await fetch(`${API_URL}/status`, { 
+                    method: 'GET',
+                    cache: 'no-cache'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showConnectionStatus(
+                        `✅ Conexión exitosa! Encontrados ${data.cognex_devices?.length || 0} dispositivos.`, 
+                        'success'
+                    );
+                } else {
+                    showConnectionStatus(
+                        `❌ Error HTTP ${response.status}: ${response.statusText}`, 
+                        'error'
+                    );
+                }
+            } catch (error) {
+                showConnectionStatus(
+                    `❌ Error de conexión: ${error.message}. Verifica la IP y puerto.`, 
+                    'error'
+                );
+            }
+        }
+
+        // Mostrar estado de conexión
+        function showConnectionStatus(message, type) {
+            const statusDiv = document.getElementById('connection-status');
+            statusDiv.style.display = 'block';
+            statusDiv.textContent = message;
+            
+            if (type === 'success') {
+                statusDiv.style.background = '#d4edda';
+                statusDiv.style.color = '#155724';
+            } else if (type === 'error') {
+                statusDiv.style.background = '#f8d7da';
+                statusDiv.style.color = '#721c24';
+            }
+            
+            // Ocultar después de 5 segundos
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
 
         async function loadStatus() {
             try {
@@ -795,7 +922,8 @@
             }, 3000);
         }
 
-        // Cargar estado inicial
+        // Cargar configuración guardada y estado inicial
+        loadSavedConfig();
         loadStatus();
 
         // Refrescar cada 2 segundos
@@ -804,6 +932,14 @@
         // Limpiar al cerrar
         window.addEventListener('beforeunload', () => {
             clearInterval(refreshInterval);
+        });
+        
+        // Permitir actualizar con Enter en los campos de IP/Puerto
+        document.getElementById('server-ip').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') updateConnection();
+        });
+        document.getElementById('server-port').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') updateConnection();
         });
     </script>
 </body>

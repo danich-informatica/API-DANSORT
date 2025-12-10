@@ -14,6 +14,8 @@ type ErrorResponse struct {
 	Timestamp string      `json:"timestamp"`
 	Path      string      `json:"path"`
 	Method    string      `json:"method"`
+	Message   string      `json:"message,omitempty"`
+	Data      string      `json:"data,omitempty"`
 }
 
 // ErrorDetail contiene los detalles del error
@@ -68,11 +70,13 @@ func RespondWithError(c *gin.Context, statusCode int, errorCode, message string,
 	c.JSON(statusCode, ErrorResponse{
 		Success: false,
 		Error: ErrorDetail{
-			Code:    errorCode,
 			Message: message,
+			Code:    errorCode,
 			Details: details,
 			Hint:    hint,
 		},
+		Data:      errorCode,
+		Message:   message,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Path:      c.Request.URL.Path,
 		Method:    c.Request.Method,
