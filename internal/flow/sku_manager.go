@@ -38,8 +38,8 @@ func NewSKUManager(ctx context.Context, dbManager *db.PostgresManager) (*SKUMana
 	}
 
 	for _, sku := range skus {
-		// Usar una clave compuesta: calibre-variedad-embalaje
-		key := sku.Calibre + "-" + sku.Variedad + "-" + sku.Embalaje
+		// Usar una clave compuesta: calibre-variedad-embalaje-dark-linea (PK de la tabla)
+		key := fmt.Sprintf("%s-%s-%s-%d-%s", sku.Calibre, sku.Variedad, sku.Embalaje, sku.Dark, sku.Linea)
 		manager.skus[key] = sku
 	}
 
@@ -160,7 +160,8 @@ func (m *SKUManager) ReloadFromDB(ctx context.Context) error {
 	// Recargar con los nuevos datos
 	activeCount := 0
 	for _, sku := range skus {
-		key := sku.Calibre + "-" + sku.Variedad + "-" + sku.Embalaje
+		// Usar una clave compuesta: calibre-variedad-embalaje-dark-linea (PK de la tabla)
+		key := fmt.Sprintf("%s-%s-%s-%d-%s", sku.Calibre, sku.Variedad, sku.Embalaje, sku.Dark, sku.Linea)
 		m.skus[key] = sku
 		if sku.Estado {
 			activeCount++

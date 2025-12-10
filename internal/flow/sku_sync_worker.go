@@ -230,6 +230,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 			  AND s.variedad = ss.variedad 
 			  AND s.embalaje = ss.embalaje 
 			  AND s.dark = ss.dark 
+			  AND s.linea = ss.linea
 			  AND s.estado = true
 		)
 	`
@@ -241,14 +242,15 @@ func (w *SKUSyncWorker) syncSKUs() {
 	}
 
 	log.Println("🔄 [Sync] Recargando SKUManager desde PostgreSQL...")
-	// 6. Recargar SKUManager desde PostgreSQL (solo SKUs con estado = true)
+	// 6. Recargar SKUManager desde PostgreSQL (todas las SKUs, sin filtro de estado)
 	if err := w.skuManager.ReloadFromDB(ctx); err != nil {
 		log.Printf("❌ Sync SKU: error recargando SKUManager: %v", err)
 		return
 	}
 	log.Println("✅ [Sync] SKUManager recargado exitosamente")
 
-	// 7. Propagar a todos los sorters
+	// 7. Propagar a todos los sorters (solo SKUs activas = las de UNITEC)
+	// Las SKUs de UNITEC siempre están en true después del sync
 	activeSKUs := w.skuManager.GetActiveSKUs()
 	assignableSKUs := []models.SKUAssignable{models.GetRejectSKU()} // Agregar REJECT al inicio
 
@@ -256,7 +258,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 		assignableSKUs = append(assignableSKUs, sku.ToAssignableWithHash())
 	}
 
-	log.Printf("📤 Sync SKU: Propagando %d SKUs (REJECT + %d activos) a sorters...", len(assignableSKUs), len(activeSKUs))
+	log.Printf("📤 Sync SKU: Propagando %d SKUs (REJECT + %d activas de UNITEC) a sorters...", len(assignableSKUs), len(activeSKUs))
 
 	for _, s := range w.sorters {
 		// Actualizar lista de SKUs disponibles
@@ -276,7 +278,7 @@ func (w *SKUSyncWorker) syncSKUs() {
 	log.Printf("✅ Sync SKU completado en %v", elapsed)
 	log.Printf("   📊 SKUs sincronizados: %d", syncedCount)
 	log.Printf("   ⏭️  SKUs omitidos (nulos): %d", skippedCount)
-	log.Printf("   🎯 SKUs activos finales: %d", len(activeSKUs))
+	log.Printf("   🎯 SKUs activas propagadas: %d", len(activeSKUs))
 	log.Printf("   📡 Sorters notificados: %d", len(w.sorters))
 
 	if len(skuStats) > 0 {

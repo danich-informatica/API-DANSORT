@@ -14,16 +14,16 @@ import (
 )
 
 // AssignSKUToSalida asigna una SKU a una salida específica
-func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, err error) {
+func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, linea string, err error) {
 	log.Printf("🔵 Sorter #%d: Iniciando asignación de SKU ID=%d a salida ID=%d", s.ID, skuID, salidaID)
 
 	targetSalida := s.findSalidaByID(salidaID)
 	if targetSalida == nil {
-		return "", "", "", 0, fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
+		return "", "", "", 0, "", fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
 	}
 
 	if skuID == 0 && targetSalida.Tipo == "automatico" {
-		return "", "", "", 0, fmt.Errorf("no se puede asignar SKU REJECT (ID=0) a salida automática '%s' (ID=%d)",
+		return "", "", "", 0, "", fmt.Errorf("no se puede asignar SKU REJECT (ID=0) a salida automática '%s' (ID=%d)",
 			targetSalida.Salida_Sorter, salidaID)
 	}
 
@@ -31,7 +31,7 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 	if targetSKU == nil {
 		// Solo mostrar detalle cuando falla
 		log.Printf("❌ Sorter #%d: SKU ID=%d no disponible. Total SKUs en memoria: %d", s.ID, skuID, len(s.assignedSKUs))
-		return "", "", "", 0, fmt.Errorf("SKU con ID %d no encontrada en las SKUs disponibles del sorter #%d", skuID, s.ID)
+		return "", "", "", 0, "", fmt.Errorf("SKU con ID %d no encontrada en las SKUs disponibles del sorter #%d", skuID, s.ID)
 	}
 
 	sku := models.SKU{
@@ -40,6 +40,7 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 		Calibre:  targetSKU.Calibre,
 		Embalaje: targetSKU.Embalaje,
 		Dark:     targetSKU.Dark,
+		Linea:    targetSKU.Linea,
 		Estado:   true,
 	}
 
@@ -60,13 +61,13 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 		mesaDisponible, err := s.IsTableAvailable(ctx, targetSalida.MesaID, client)
 		if err != nil {
 			log.Printf("❌ Sorter #%d: error al consultar estado de mesa %d: %v", s.ID, targetSalida.MesaID, err)
-			return "", "", "", 0, fmt.Errorf("error al validar disponibilidad de mesa %d: %w", targetSalida.MesaID, err)
+			return "", "", "", 0, "", fmt.Errorf("error al validar disponibilidad de mesa %d: %w", targetSalida.MesaID, err)
 		}
 
 		if !mesaDisponible {
 			log.Printf("⚠️ Sorter #%d: mesa %d no está disponible para orden de paletizaje (salida %d)",
 				s.ID, targetSalida.MesaID, targetSalida.ID)
-			return "", "", "", 0, fmt.Errorf("mesa %d no está disponible para orden de paletizaje", targetSalida.MesaID)
+			return "", "", "", 0, "", fmt.Errorf("mesa %d no está disponible para orden de paletizaje", targetSalida.MesaID)
 		}
 
 		log.Printf("✅ Sorter #%d: mesa %d disponible, orden de paletizaje factible para salida %d", s.ID, targetSalida.MesaID, targetSalida.ID)
@@ -84,7 +85,7 @@ func (s *Sorter) AssignSKUToSalida(skuID uint32, salidaID int) (calibre, varieda
 
 	s.UpdateSKUs(s.assignedSKUs)
 
-	return targetSKU.Calibre, targetSKU.Variedad, targetSKU.Embalaje, targetSKU.Dark, nil
+	return targetSKU.Calibre, targetSKU.Variedad, targetSKU.Embalaje, targetSKU.Dark, targetSKU.Linea, nil
 }
 
 // IsTableAvailable consulta si una mesa de paletizado está disponible
@@ -312,10 +313,10 @@ func (s *Sorter) SendFrabricationOrder(salida *shared.Salida, sku models.SKU, cl
 }
 
 // RemoveSKUFromSalida elimina una SKU específica de una salida
-func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, err error) {
+func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, variedad, embalaje string, dark int, linea string, err error) {
 	// PROTECCIÓN: NO permitir eliminar SKU REJECT (ID=0)
 	if skuID == 0 {
-		return "", "", "", 0, fmt.Errorf("no se puede eliminar SKU REJECT (ID=0), está protegida")
+		return "", "", "", 0, "", fmt.Errorf("no se puede eliminar SKU REJECT (ID=0), está protegida")
 	}
 
 	var targetSalida *shared.Salida
@@ -330,7 +331,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 	}
 
 	if targetSalida == nil {
-		return "", "", "", 0, fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
+		return "", "", "", 0, "", fmt.Errorf("salida con ID %d no encontrada en sorter #%d", salidaID, s.ID)
 	}
 
 	skuFound := false
@@ -348,7 +349,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 	}
 
 	if !skuFound {
-		return "", "", "", 0, fmt.Errorf("SKU con ID %d no encontrada en salida %d del sorter #%d", skuID, salidaID, s.ID)
+		return "", "", "", 0, "", fmt.Errorf("SKU con ID %d no encontrada en salida %d del sorter #%d", skuID, salidaID, s.ID)
 	}
 
 	s.Salidas[salidaIndex].SKUs_Actuales = newSKUs
@@ -383,7 +384,7 @@ func (s *Sorter) RemoveSKUFromSalida(skuID uint32, salidaID int) (calibre, varie
 		go s.SecuenciaVaciado(targetSalida)
 	}
 
-	return removedSKU.Calibre, removedSKU.Variedad, removedSKU.Embalaje, removedSKU.Dark, nil
+	return removedSKU.Calibre, removedSKU.Variedad, removedSKU.Embalaje, removedSKU.Dark, removedSKU.Linea, nil
 }
 
 func (s *Sorter) SecuenciaVaciado(salida *shared.Salida) {

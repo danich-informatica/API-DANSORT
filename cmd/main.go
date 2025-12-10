@@ -504,7 +504,7 @@ func main() {
 				targetSalida := manualSalidas[randomIndex]
 
 				// Asignar REJECT (ID=0) a esta salida
-				_, _, _, _, err := s.AssignSKUToSalida(0, targetSalida.ID)
+				_, _, _, _, _, err := s.AssignSKUToSalida(0, targetSalida.ID)
 				if err != nil {
 					log.Printf("   ⚠️  Error al asignar REJECT en Sorter #%d: %v", s.ID, err)
 				} else {

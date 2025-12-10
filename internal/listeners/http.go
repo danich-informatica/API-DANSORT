@@ -365,16 +365,17 @@ func (h *HTTPFrontend) setupRoutes() {
 		// Buscar en qué sorter está la salida (sealer_id es único globalmente)
 		var targetSorter shared.SorterInterface
 		var assignError error
-		var calibre, variedad, embalaje string
+		var calibre, variedad, embalaje, linea string
 		var dark int
 		for _, sorter := range h.sorters {
-			cal, var_, emb, drk, err := sorter.AssignSKUToSalida(skuID, request.SealerID)
+			cal, var_, emb, drk, lin, err := sorter.AssignSKUToSalida(skuID, request.SealerID)
 			if err == nil {
 				targetSorter = sorter
 				calibre = cal
 				variedad = var_
 				embalaje = emb
 				dark = drk
+				linea = lin
 				break
 			}
 			// Guardar el error más relevante
@@ -404,10 +405,10 @@ func (h *HTTPFrontend) setupRoutes() {
 		// REJECT (ID=0) solo existe en memoria, no en BD
 		if skuID != 0 && h.postgresMgr != nil {
 			if dbMgr, ok := h.postgresMgr.(interface {
-				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int) error
+				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int, linea string) error
 			}); ok {
 				ctx := c.Request.Context()
-				if err := dbMgr.InsertSalidaSKU(ctx, request.SealerID, calibre, variedad, embalaje, dark); err != nil {
+				if err := dbMgr.InsertSalidaSKU(ctx, request.SealerID, calibre, variedad, embalaje, dark, linea); err != nil {
 					// Log el error pero no fallar el request (asignación en memoria ya está hecha)
 					fmt.Printf("⚠️  Error al insertar asignación en DB: %v\n", err)
 				}
@@ -425,6 +426,7 @@ func (h *HTTPFrontend) setupRoutes() {
 				"calibre":  calibre,
 				"variedad": variedad,
 				"embalaje": embalaje,
+				"linea":    linea,
 			},
 		}, fmt.Sprintf("SKU asignada exitosamente a salida #%d", request.SealerID))
 	})
@@ -456,18 +458,19 @@ func (h *HTTPFrontend) setupRoutes() {
 
 		// Buscar en qué sorter está la salida
 		var targetSorter shared.SorterInterface
-		var calibre, variedad, embalaje string
+		var calibre, variedad, embalaje, linea string
 		var dark int
 		var removeError error
 
 		for _, sorter := range h.sorters {
-			cal, var_, emb, drk, err := sorter.RemoveSKUFromSalida(skuID, sealerID)
+			cal, var_, emb, drk, lin, err := sorter.RemoveSKUFromSalida(skuID, sealerID)
 			if err == nil {
 				targetSorter = sorter
 				calibre = cal
 				variedad = var_
 				embalaje = emb
 				dark = drk
+				linea = lin
 				break
 			}
 			// Guardar el error más relevante
@@ -497,10 +500,10 @@ func (h *HTTPFrontend) setupRoutes() {
 		// REJECT (ID=0) solo existe en memoria, no en BD
 		if skuID != 0 && h.postgresMgr != nil {
 			if dbMgr, ok := h.postgresMgr.(interface {
-				DeleteSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int) error
+				DeleteSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int, linea string) error
 			}); ok {
 				ctx := c.Request.Context()
-				if err := dbMgr.DeleteSalidaSKU(ctx, sealerID, calibre, variedad, embalaje, dark); err != nil {
+				if err := dbMgr.DeleteSalidaSKU(ctx, sealerID, calibre, variedad, embalaje, dark, linea); err != nil {
 					// Si la SKU no existe en BD, no es un error crítico
 					// (puede haber sido asignada solo en memoria)
 					fmt.Printf("⚠️  Error al eliminar asignación de DB: %v\n", err)
@@ -521,6 +524,7 @@ func (h *HTTPFrontend) setupRoutes() {
 				"calibre":  calibre,
 				"variedad": variedad,
 				"embalaje": embalaje,
+				"linea":    linea,
 			},
 		})
 	})
@@ -578,7 +582,7 @@ func (h *HTTPFrontend) setupRoutes() {
 		if h.postgresMgr != nil {
 			if dbMgr, ok := h.postgresMgr.(interface {
 				DeleteAllSalidaSKUs(ctx context.Context, salidaID int) (int64, error)
-				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string) error
+				InsertSalidaSKU(ctx context.Context, salidaID int, calibre, variedad, embalaje string, dark int, linea string) error
 			}); ok {
 				ctx := c.Request.Context()
 
@@ -593,8 +597,8 @@ func (h *HTTPFrontend) setupRoutes() {
 					return
 				}
 
-				// 2. ♻️ Re-insertar REJECT automáticamente
-				err = dbMgr.InsertSalidaSKU(ctx, sealerID, "REJECT", "REJECT", "REJECT")
+				// 2. ♻️ Re-insertar REJECT automáticamente (dark=0, linea="1")
+				err = dbMgr.InsertSalidaSKU(ctx, sealerID, "REJECT", "REJECT", "REJECT", 0, "1")
 				if err != nil {
 					fmt.Printf("⚠️  Error al re-insertar REJECT en DB: %v\n", err)
 				} else {

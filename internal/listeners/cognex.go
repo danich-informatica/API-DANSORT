@@ -24,6 +24,7 @@ type insertRequest struct {
 	calibre  string
 	embalaje string
 	dark     int
+	linea    string
 	sku      string
 	message  string
 	resultCh chan insertResult
@@ -111,6 +112,7 @@ func (c *CognexListener) processInsert(req insertRequest) {
 		req.calibre,
 		req.embalaje,
 		req.dark,
+		req.linea,
 	)
 
 	// Obtener nombre de variedad para construir SKU correctamente
@@ -308,6 +310,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 			calibre:  calibre,
 			embalaje: embalaje,
 			dark:     dark, // Usar el dark extraído del QR
+			linea:    "",   // Valor por defecto, se convertirá en "1" en InsertNewBox
 			sku:      sku.SKU,
 			message:  message,
 			resultCh: resultCh,
@@ -369,6 +372,7 @@ func (c *CognexListener) processMessage(message string, conn net.Conn) {
 				calibre,
 				embalaje,
 				dark, // Usar el dark extraído del QR
+				"",   // linea vacío, usará valor por defecto "1"
 			)
 
 			if err != nil {
