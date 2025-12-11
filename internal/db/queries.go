@@ -118,7 +118,7 @@ const SELECT_ALL_SKUS_INTERNAL_DB = `
 	ORDER BY s.variedad, s.calibre, s.embalaje, s.dark
 `
 const SELECT_IF_EXISTS_SKU_INTERNAL_DB = `
-	SELECT EXISTS(SELECT 1 FROM sku WHERE calibre = $1 AND variedad = $2 AND embalaje = $3)
+	SELECT EXISTS(SELECT 1 FROM sku WHERE calibre = $1 AND variedad = $2 AND embalaje = $3 AND dark = $4 AND linea = $5)
 `
 
 const UPDATE_SKU_STATE_INTERNAL_DB = `
