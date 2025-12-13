@@ -1,14 +1,14 @@
 # Base de datos PostgreSQL
 database:
   postgres:
-    url: "postgres://danich:danich155@127.0.0.1:5432/greenex?sslmode=disable"
+    url: "postgres://danich:danich155@100.111.174.63:5432/greenex?sslmode=disable"
     min_conns: 1
     max_conns: 10
     connect_timeout: "10s"
     healthcheck_interval: "30s"
 
   sqlserver:
-    host: "190.110.163.22" # Producción: 192.168.0.9 -- Desarrollo: 190.110.163.22
+    host: "100.111.174.63" # Producción: 192.168.0.9 -- Desarrollo: 100.111.174.63
     port: 1433
     user: "Danich"
     password: "yb*;NC&5r9U2"

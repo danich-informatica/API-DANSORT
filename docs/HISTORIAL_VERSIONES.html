@@ -354,7 +354,7 @@
                 <div class="logo-subtitle">Sistema de Clasificación Automatizada</div>
             </div>
             <h1 class="document-title">Historial de Versiones</h1>
-            <span class="document-version">Versión Actual: 1.5.0</span>
+            <span class="document-version">Versión Actual: 1.6.0</span>
         </div>
 
         <!-- Executive Summary -->
@@ -403,9 +403,19 @@
                 </thead>
                 <tbody>
                     <tr>
+                        <td><span class="version-badge major">1.6.0</span></td>
+                        <td>12 Dic 2025</td>
+                        <td>Herramienta CLI de sincronización SKU independiente</td>
+                    </tr>
+                    <tr>
+                        <td><span class="version-badge">1.5.1</span></td>
+                        <td>11 Dic 2025</td>
+                        <td>Corrección de restricción UNIQUE en salida_sku</td>
+                    </tr>
+                    <tr>
                         <td><span class="version-badge major">1.5.0</span></td>
                         <td>11 Dic 2025</td>
-                        <td>Validación mejorada de SKU en sincronización</td>
+                        <td>Validación mejorada de SKU y documentación completa</td>
                     </tr>
                     <tr>
                         <td><span class="version-badge major">1.4.0</span></td>
@@ -525,10 +535,26 @@
 
             <div class="version-detail">
                 <div class="version-detail-header">
-                    <span class="version-detail-title">Versión 1.5.0 - Validación mejorada de SKU</span>
+                    <span class="version-detail-title">Versión 1.6.0 - Herramienta CLI de sincronización</span>
+                    <span class="version-detail-date">12 de diciembre de 2025</span>
+                </div>
+                <p class="version-detail-description">Se implementó una herramienta de línea de comandos independiente para sincronización entre SQL Server y PostgreSQL. Incluye nuevas herramientas de diagnóstico, mejoras significativas en el sistema de logging para mejor trazabilidad, sistema de verificación de estado y documentación técnica completa. Esto mejora considerablemente la capacidad de diagnóstico y mantenimiento del sistema de sincronización.</p>
+            </div>
+
+            <div class="version-detail">
+                <div class="version-detail-header">
+                    <span class="version-detail-title">Versión 1.5.1 - Corrección de restricción UNIQUE</span>
                     <span class="version-detail-date">11 de diciembre de 2025</span>
                 </div>
-                <p class="version-detail-description">Se implementó un mecanismo de validación más robusto durante el proceso de sincronización de SKU. El sistema ahora verifica la integridad de los datos antes de propagarlos a los sorters, reduciendo errores de asignación.</p>
+                <p class="version-detail-description">Se corrigió la restricción UNIQUE en la tabla salida_sku para incluir el campo línea. Esta corrección previene conflictos en asignaciones de SKU con misma variedad, calibre y embalaje pero diferentes líneas de producción, resolviendo errores críticos de integridad de datos en las asignaciones.</p>
+            </div>
+
+            <div class="version-detail">
+                <div class="version-detail-header">
+                    <span class="version-detail-title">Versión 1.5.0 - Validación mejorada de SKU y documentación</span>
+                    <span class="version-detail-date">11 de diciembre de 2025</span>
+                </div>
+                <p class="version-detail-description">Se implementó un mecanismo de validación más robusto durante el proceso de sincronización de SKU, incorporando los parámetros dark y línea en la verificación. El sistema ahora verifica la integridad de los datos antes de propagarlos a los sorters, reduciendo errores de asignación. Adicionalmente, se creó documentación completa del historial de versiones en múltiples formatos para diferentes audiencias.</p>
             </div>
 
             <div class="version-detail">
@@ -656,11 +682,11 @@
                 </div>
                 <div class="footer-item">
                     <div class="footer-label">Versión Actual</div>
-                    <div class="footer-value">1.5.0</div>
+                    <div class="footer-value">1.6.0</div>
                 </div>
                 <div class="footer-item">
                     <div class="footer-label">Última Actualización</div>
-                    <div class="footer-value">11 Diciembre 2025</div>
+                    <div class="footer-value">12 Diciembre 2025</div>
                 </div>
             </div>
             <p class="footer-note">Documento generado para uso interno de Greenex. Desarrollado por Equipo DANICH.</p>

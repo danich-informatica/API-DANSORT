@@ -1,106 +1,249 @@
-# CHANGELOG - API-GREENEX
+# HISTORIAL DE VERSIONES - SISTEMA DANSORT
 
-Registro de cambios del proyecto **API-GREENEX**.
+**Sistema de clasificación automatizada de cajas para optimización de paletizado**
 
-Este documento sigue el formato [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) 
-y adhiere al estándar de [Versionado Semántico](https://semver.org/lang/es/).
+Este documento detalla el historial completo de versiones del sistema DANSORT, implementado en GREENEX S.A., siguiendo el formato [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y el estándar de [Versionado Semántico](https://semver.org/lang/es/).
 
-**Formato de versión:** `MAYOR.MENOR.PARCHE`
+## Convención de Versionado
+
+El sistema utiliza un esquema de versionado semántico (X.Y.Z):
+
+- **X (Mayor):** Cambios estructurales mayores o rediseños significativos
+- **Y (Menor):** Nuevas funcionalidades o mejoras sustanciales  
+- **Z (Parche):** Correcciones menores y ajustes de estabilidad
+
+---
+
+## [1.6.0] - 2025-12-12
+
+### 🔧 Herramienta CLI de sincronización SKU independiente
+
+**Backend:**
+- Se implementa herramienta CLI standalone `sku-sync` para sincronización entre SQL Server y PostgreSQL
+- Nuevas herramientas de diagnóstico para troubleshooting de sincronización
+- Mejoras significativas en el sistema de logging para mejor trazabilidad
+- Sistema de verificación de estado de sincronización (`verify-sku-sync.sh`)
+- Documentación técnica completa en `DIAGNOSTICO_SKU_SYNC.md`
+
+**Impacto:** Mayor capacidad de diagnóstico y mantenimiento del sistema de sincronización
+
+---
+
+## [1.5.1] - 2025-12-11
+
+### 🐛 Corrección de restricción UNIQUE en salida_sku
+
+**Backend:**
+- Se corrige la restricción UNIQUE en tabla `salida_sku` para incluir campo `linea`
+- Prevención de conflictos en asignaciones de SKU con misma variedad/calibre/embalaje pero diferentes líneas
+- Script de migración: `migration_fix_salida_sku_constraint.sql`
+
+**Impacto:** Resolución de errores críticos de integridad de datos en asignaciones
 
 ---
 
 ## [1.5.0] - 2025-12-11
 
-### Características
-- **Validación de SKU mejorada:** Se extiende la función `CheckSKUExists` para incorporar los parámetros `dark` y `linea`, permitiendo validaciones más precisas en el sistema de identificación de productos. (`9e70132`)
+### 🎯 Validación mejorada de SKU en sincronización
+
+**Backend:**
+- Se implementó un mecanismo de validación más robusto durante el proceso de sincronización de SKU
+- Se extiende la función `CheckSKUExists` para incorporar los parámetros `dark` y `linea`
+- El sistema verifica la integridad de los datos antes de propagarlos a los sorters
+- Reducción significativa de errores de asignación en producción
+- Mejora en los logs de sincronización mostrando la clave completa de SKU (incluyendo línea)
+
+**Impacto:** Mayor precisión en la identificación de productos y mejor trazabilidad del sistema
+
+### 📚 Documentación completa del historial de versiones
+
+**Documentación:**
+- Se crean múltiples versiones del CHANGELOG para diferentes audiencias:
+  - `CHANGELOG.md`: Versión técnica completa
+  - `CHANGELOG_SISTEMA.md`: Versión para gerencia
+  - `HISTORIAL_VERSIONES_SIMPLE.md`: Versión simplificada
+  - `HISTORIAL_VERSIONES_DANSORT.pdf`: Versión ejecutiva en PDF
+- Generador automático de PDF con estilos personalizados
+
+**Impacto:** Mejor comunicación del progreso del sistema a todos los stakeholders
 
 ---
 
 ## [1.4.0] - 2025-12-10
 
-### Características
-- **Extensión del modelo SKU:** Se incorpora el campo `linea` al modelo de SKU junto con la lógica de asignación correspondiente para soportar la segmentación por líneas de producción. (`18b082f`)
+### 📊 Incorporación del campo línea de producción
 
-### Rendimiento
-- **Optimización del listener Cognex:** Se refactoriza el módulo de escucha de cámaras Cognex para mejorar el rendimiento en escenarios de alta carga de lecturas. (`a3f9a06`)
+**Backend:**
+- Se agrega el campo `linea` como parte de la clave primaria de SKU
+- Incorporación del campo `linea` al modelo de SKU con lógica de asignación correspondiente
+- Permite diferenciar productos idénticos provenientes de diferentes líneas de producción
+- Actualización de queries SQL y estructura de base de datos
+
+**Frontend:**
+- Visualización de línea de producción en interfaces de asignación
+- Filtros mejorados por línea
+
+**Impacto:** Mejora en la trazabilidad del proceso y gestión multi-línea
+
+### ⚡ Optimización del listener Cognex
+
+**Backend:**
+- Refactorización del módulo de escucha de cámaras Cognex
+- Mejora del rendimiento en escenarios de alta carga de lecturas
+- Reducción de latencia en procesamiento de DataMatrix
 
 ---
 
 ## [1.3.0] - 2025-12-09
 
-### Modificado
-- **Refactorización del motor de sorting:** Se reestructura la lógica del sorter y se optimiza el protocolo de comunicación con el PLC para reducir latencias. (`29e638d`)
-- **Actualización de interfaz de usuario:** Se implementan mejoras en el frontend para una mejor experiencia de monitoreo. (`3a208f1`)
+### 🔧 Optimización del protocolo de comunicación con PLC
+
+**Backend:**
+- Reestructuración de la lógica del sorter
+- Optimización del protocolo de comunicación con controladores lógicos programables (PLC)
+- Reducción de latencia en transmisión de señales de clasificación
+- Mayor estabilidad en la comunicación
+
+**Frontend:**
+- Actualización de interfaz de usuario para mejor experiencia de monitoreo
+- Mejoras en visualización de estado de conexiones PLC
+
+**Impacto:** Sistema más responsivo y confiable en ambiente productivo
 
 ---
 
-## [1.2.0] - 2025-11-17
+## [1.2.0] - 2025-11-27
 
-### Características
-- **Sistema de reintentos con failover:** Se implementa un mecanismo robusto de reintentos para señales PLC con soporte para salidas alternativas en caso de fallo. (`a988372`)
+### 🔄 Sistema de reintentos y salidas alternativas
 
-### Mejoras
-- **Visualización de listas optimizada:** Se mejora la presentación de elementos en las vistas de listado. (`d7c9f4e`)
+**Backend:**
+- Implementación de mecanismo robusto de reintentos para señales PLC
+- Sistema de tolerancia a fallos con soporte para salidas alternativas en caso de fallo
+- El sistema puede redirigir cajas a salidas alternativas cuando la salida principal presenta problemas
+- Mejora en la resiliencia operativa
 
----
+**Frontend:**
+- Visualización de listas optimizada
+- Mejora en la presentación de elementos en las vistas de listado
 
-## [1.1.0] - 2025-11-15
-
-### Características
-- **Sistema de monitoreo de estados en tiempo real:** Se implementa un agregador de estados de cajas con notificaciones push a través de WebSocket para seguimiento en tiempo real. (`7abad55`)
-
----
-
-## [1.0.0] - 2025-11-14
-
-### Características
-- **Gestión avanzada de salidas:** Se optimiza el manejo de salidas con validación integral de SKU en el módulo de pallet automático. (`f2f1057`)
-- **Soporte para salidas de descarte:** Se implementa el tipo de salida "descarte" con validación de embalaje en el procesamiento de datos. (`87c987a`)
-
-### Notas de la versión
-> **Primera versión estable de producción.** Esta versión marca el hito de estabilidad del sistema con soporte completo para operaciones de pallet automático y gestión de descartes.
+**Impacto:** Mayor continuidad operativa y reducción de paradas por fallos
 
 ---
 
-## [0.15.0] - 2025-11-10
+## [1.1.0] - 2025-11-25
 
-### Correcciones
-- **Estabilidad de conexión a base de datos:** Se resuelven problemas de conectividad intermitente con la base de datos. (`4db003a`)
+### 📺 Mejoras en la interfaz de monitoreo
 
----
+**Backend:**
+- Sistema de monitoreo de estados en tiempo real
+- Implementación de agregador de estados de cajas
+- Notificaciones push a través de WebSocket para seguimiento en tiempo real
 
-## [0.14.0] - 2025-11-07
+**Frontend:**
+- Ajustes en la presentación de información en la interfaz de operador
+- Facilitación del seguimiento del estado del sistema en tiempo real
+- Mejoras en dashboard de operación
 
-### Características
-- **Consulta de datos de cajas:** Se implementa nueva consulta para obtención de datos de cajas con mejoras en la asignación de SKU dentro del sorter. (`9971b5a`)
-
-### Correcciones
-- **Corrección de lógica de asignación:** Se resuelven inconsistencias en la lógica de procesamiento. (`3ae60da`, `bb98069`)
-
----
-
-## [0.13.0] - 2025-11-06
-
-### Características
-- **Campo Flejado:** Se incorpora el campo 'Flejado' en las consultas y en el proceso de creación de órdenes de fabricación. (`006e606`)
-
-### Correcciones
-- **Sanitización de consultas SQL:** Se corrigen espacios en consultas SQL y se mejora el manejo de errores en el envío de órdenes de fabricación. (`9faad24`)
+**Impacto:** Mejor visibilidad operativa y respuesta más rápida ante incidencias
 
 ---
 
-## [0.12.0] - 2025-11-05
+## [1.0.0] - 2025-11-21 🎉
 
-### Modificado
-- **Refactorización de arquitectura:** Se reestructura el código base para mejorar la legibilidad, mantenibilidad y adherencia a patrones de diseño. (`b5957ea`)
+### ✨ VERSIÓN ESTABLE PARA PRODUCCIÓN
+
+**Primera versión certificada para uso en ambiente productivo.** El sistema alcanza madurez operativa con las siguientes capacidades completas:
+
+#### Características Principales
+
+**Backend:**
+- Gestión avanzada de salidas con validación integral de SKU en módulo de pallet automático
+- Soporte completo para salidas de descarte con validación de embalaje
+- Sistema de clasificación automática de cajas mediante lectura de DataMatrix
+- Gestión de rechazos con categorización de motivos
+- Asignación dinámica de SKU a salidas de paletizado
+
+**Frontend:**
+- Monitoreo en tiempo real del flujo de producción
+- Interfaz operativa completa para gestión de salidas
+- Sistema de visualización de estado de equipos
+
+**Impacto:** Hito histórico - Sistema completamente operativo en producción
 
 ---
 
-## [0.11.0] - 2025-11-04
+## [0.15.0] - 2025-11-17
 
-### Correcciones
-- **Ajuste de tiempos de sincronización:** Se incrementa el timeout en `AssignLaneToBox` para prevenir condiciones de carrera. (`a830e7c`)
-- **Corrección de espera de sorter:** Se resuelve problema donde el sistema no esperaba la respuesta del sorter. (`a14caac`)
+### 🔧 Estabilización de conexiones a base de datos
+
+**Backend:**
+- Corrección de problemas de desconexión intermitente con SQL Server
+- Implementación de sistema de reconexión automática
+- Garantía de continuidad operativa ante pérdidas de conexión
+- Mejora en manejo de pool de conexiones
+
+**Impacto:** Mayor estabilidad y disponibilidad del sistema
+
+---
+
+## [0.14.0] - 2025-11-10
+
+### 📦 Implementación de caché de cajas y generación de SKU
+
+**Backend:**
+- Nueva consulta para obtención de datos de cajas
+- Sistema de caché para mejorar rendimiento
+- Mejoras en la asignación de SKU dentro del sorter
+- Generación automática de identificadores SKU
+
+### 🐛 Correcciones
+- Resolución de inconsistencias en la lógica de procesamiento
+- Corrección de lógica de asignación de cajas a salidas
+
+**Impacto:** Mejor rendimiento y consistencia en asignaciones
+
+---
+
+## [0.13.0] - 2025-11-03
+
+### 📋 Integración de información de flejado
+
+**Backend:**
+- Incorporación del campo 'Flejado' en consultas de base de datos
+- Integración en proceso de creación de órdenes de fabricación
+- Sanitización y corrección de consultas SQL
+- Mejora en manejo de errores en envío de órdenes de fabricación
+
+**Impacto:** Mayor trazabilidad en proceso de empaque
+
+---
+
+## [0.12.0] - 2025-10-29
+
+### 🏗️ Refactorización de arquitectura del sistema
+
+**Backend:**
+- Reestructuración completa del código base
+- Mejora en legibilidad y mantenibilidad del código
+- Adherencia a patrones de diseño establecidos
+- Separación de responsabilidades en módulos
+- Documentación técnica actualizada
+
+**Impacto:** Base de código más mantenible y escalable para futuras mejoras
+
+---
+
+## [0.11.0] - 2025-10-13
+
+### ⚡ Optimización de actualización en tiempo real
+
+**Backend:**
+- Ajuste de tiempos de sincronización para prevenir condiciones de carrera
+- Incremento de timeout en `AssignLaneToBox`
+- Corrección de problema donde el sistema no esperaba respuesta del sorter
+- Mejora en manejo de concurrencia
+
+**Impacto:** Mayor confiabilidad en asignaciones en tiempo real
 
 ---
 
